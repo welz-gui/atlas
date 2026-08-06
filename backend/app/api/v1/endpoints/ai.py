@@ -1,13 +1,12 @@
 """Assistente de consulta ao catálogo regulatório.
 
-Importante sobre o que este módulo **não** é: não há modelo de linguagem aqui.
-É uma busca por palavra-chave sobre o catálogo — e a resposta diz isso ao
-usuário, em vez de se apresentar como IA.
+Não há modelo de linguagem aqui: é uma busca por palavra-chave sobre o
+catálogo — e a resposta diz isso ao usuário, em vez de se apresentar como IA.
 
 O módulo também não guarda nenhuma referência legal própria. Toda citação vem
-do catálogo (`app/regulatory/data/*.yaml`), que é a fonte única. Foi a
-duplicação dessas referências que produziu, no protótipo, artigos conflitantes
-entre o motor e o assistente para o mesmo parâmetro.
+do catálogo, que é a fonte única. Foi a duplicação dessas referências que
+produziu, no protótipo, artigos conflitantes entre o motor e o assistente para
+o mesmo parâmetro.
 """
 
 from typing import Dict, List, Optional, Tuple
@@ -16,9 +15,10 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_current_user
 from app.core.database import get_db
-from app.models.domain import Project
-from app.regulatory.catalog import RuleState, catalog
+from app.models.domain import Project, User
+from app.regulatory.catalog import RegulatoryCatalog, RuleState
 from app.services.regulatory_engine import RegulatoryEngine
 
 router = APIRouter()
@@ -33,8 +33,11 @@ DISCLAIMER = (
 TOPIC_KEYWORDS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     (("recuo frontal", "frontal", "alinhamento"), "lajeado_recuo_frontal_z2"),
     (("fundos", "posterior"), "lajeado_recuo_fundos_z2"),
-    (("ocupacao", "ocupação", "taxa de ocupacao", "taxa de ocupação"), "lajeado_taxa_ocupacao_max_z2"),
-    (("permeabilidade", "permeavel", "permeável", "drenante", "solo"), "lajeado_taxa_permeabilidade_min_z2"),
+    (("ocupacao", "ocupação"), "lajeado_taxa_ocupacao_max_z2"),
+    (
+        ("permeabilidade", "permeavel", "permeável", "drenante", "solo"),
+        "lajeado_taxa_permeabilidade_min_z2",
+    ),
     (("pavimento", "gabarito", "altura", "andar"), "lajeado_gabarito_maximo_z2"),
     (("vaga", "estacionamento", "garagem"), "lajeado_vagas_estacionamento"),
     (("acessibilidade", "nbr", "rampa", "9050"), "lajeado_acessibilidade_nbr9050"),
@@ -80,14 +83,26 @@ def _match_rule_ids(prompt: str) -> List[str]:
 
 
 @router.post("/ai/chat", response_model=AIChatResponse)
-def atlas_ai_chat(req: AIChatRequest, db: Session = Depends(get_db)):
+def atlas_ai_chat(
+    req: AIChatRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     project: Optional[Project] = None
     if req.project_id:
-        project = db.query(Project).filter(Project.id == req.project_id).first()
+        project = (
+            db.query(Project)
+            .filter(
+                Project.id == req.project_id,
+                Project.organization_id == user.organization_id,
+            )
+            .first()
+        )
 
     jurisdiction = project.city_ibge if project else "BR-RS-4311403"
     municipality = project.city_name if project else "Lajeado"
 
+    catalog = RegulatoryCatalog.from_db(db, jurisdiction)
     rule_ids = _match_rule_ids(req.prompt)
     rules = [r for r in (catalog.get(rule_id) for rule_id in rule_ids) if r]
 
@@ -113,10 +128,13 @@ def atlas_ai_chat(req: AIChatRequest, db: Session = Depends(get_db)):
                 if rule.check
                 else "verificação documental (não derivável de parâmetros numéricos)"
             )
-            pending = " — regra ainda não validada tecnicamente" if not rule.is_publishable else ""
+            pending = "" if rule.is_publishable else " — regra ainda não validada tecnicamente"
             line = f"• {rule.title}: {limit}{pending}."
             if rule.rule_id in statuses:
-                line += f" No empreendimento analisado, esta verificação está '{statuses[rule.rule_id]}'."
+                line += (
+                    f" No empreendimento analisado, esta verificação está "
+                    f"'{statuses[rule.rule_id]}'."
+                )
             lines.append(line)
 
             citations.append(f"{rule.title} — {rule.source.citation()}")
@@ -163,11 +181,13 @@ def atlas_ai_chat(req: AIChatRequest, db: Session = Depends(get_db)):
         )
 
     if project:
+        version = project.current_version
         lines.append("")
         lines.append(
             f"Empreendimento em contexto: '{project.name}' — {municipality}, "
-            f"zona {project.zone}, lote {project.lot_area or 'não informado'} m², "
-            f"área construída {project.built_area or 'não informado'} m²."
+            f"zona {version.zone if version else '—'}, "
+            f"lote {(version.lot_area if version else None) or 'não informado'} m², "
+            f"área construída {(version.built_area if version else None) or 'não informado'} m²."
         )
 
     return AIChatResponse(

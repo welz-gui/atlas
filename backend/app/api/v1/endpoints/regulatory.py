@@ -4,8 +4,9 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_current_user, get_project_or_404, require_permission, tenant_query
 from app.core.database import get_db
-from app.models.domain import AnalysisRun, Project, ValidationRecord
+from app.models.domain import AnalysisRun, User, ValidationRecord
 from app.schemas.domain import (
     AnalysisRunDetail,
     AnalysisRunResponse,
@@ -18,17 +19,11 @@ from app.services.regulatory_engine import RegulatoryEngine
 router = APIRouter()
 
 
-def _get_project(db: Session, project_id: str) -> Project:
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    return project
-
-
 def _to_report(run: AnalysisRun) -> RegulatoryAnalysisReport:
     return RegulatoryAnalysisReport(
         project_id=run.project_id,
         analysis_run_id=run.id,
+        project_version_number=run.project_version_number,
         catalog_version=run.catalog_version,
         engine_version=run.engine_version,
         total_checks=run.total_checks,
@@ -43,33 +38,52 @@ def _to_report(run: AnalysisRun) -> RegulatoryAnalysisReport:
 
 
 @router.post("/projects/{project_id}/evaluate", response_model=RegulatoryAnalysisReport)
-def evaluate_project_rules(project_id: str, db: Session = Depends(get_db)):
-    """Executa o catálogo e registra uma nova análise (append-only)."""
-    project = _get_project(db, project_id)
-    run = RegulatoryEngine.evaluate_project(db, project, trigger="manual")
+def evaluate_project_rules(
+    project_id: str,
+    user: User = Depends(require_permission("project:write")),
+    db: Session = Depends(get_db),
+):
+    """Executa o catálogo sobre a versão vigente e registra uma nova análise."""
+    project = get_project_or_404(db, project_id, user)
+    try:
+        run = RegulatoryEngine.evaluate_project(db, project, trigger="manual", user=user)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     return _to_report(run)
 
 
-@router.get("/projects/{project_id}/validations", response_model=List[ValidationRecordResponse])
-def get_project_validations(project_id: str, db: Session = Depends(get_db)):
+@router.get(
+    "/projects/{project_id}/validations", response_model=List[ValidationRecordResponse]
+)
+def get_project_validations(
+    project_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """Verificações da análise mais recente."""
-    _get_project(db, project_id)
+    get_project_or_404(db, project_id, user)
     run = RegulatoryEngine.latest_run(db, project_id)
     if not run:
         return []
     return (
-        db.query(ValidationRecord)
+        tenant_query(db, ValidationRecord, user)
         .filter(ValidationRecord.analysis_run_id == run.id)
         .all()
     )
 
 
-@router.get("/projects/{project_id}/analysis-runs", response_model=List[AnalysisRunResponse])
-def list_analysis_runs(project_id: str, db: Session = Depends(get_db)):
+@router.get(
+    "/projects/{project_id}/analysis-runs", response_model=List[AnalysisRunResponse]
+)
+def list_analysis_runs(
+    project_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """Histórico completo de análises — nada é sobrescrito (§3.5)."""
-    _get_project(db, project_id)
+    get_project_or_404(db, project_id, user)
     return (
-        db.query(AnalysisRun)
+        tenant_query(db, AnalysisRun, user)
         .filter(AnalysisRun.project_id == project_id)
         .order_by(AnalysisRun.created_at.desc())
         .all()
@@ -77,10 +91,12 @@ def list_analysis_runs(project_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/analysis-runs/{run_id}", response_model=AnalysisRunDetail)
-def get_analysis_run(run_id: str, db: Session = Depends(get_db)):
-    run = db.query(AnalysisRun).filter(AnalysisRun.id == run_id).first()
+def get_analysis_run(
+    run_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    run = tenant_query(db, AnalysisRun, user).filter(AnalysisRun.id == run_id).first()
     if not run:
-        raise HTTPException(status_code=404, detail="Analysis run not found")
+        raise HTTPException(status_code=404, detail="Análise não encontrada.")
     return run
 
 
@@ -88,24 +104,25 @@ def get_analysis_run(run_id: str, db: Session = Depends(get_db)):
 def generate_regulatory_pdf_report(
     project_id: str,
     run_id: Optional[str] = None,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Renderiza o laudo de uma análise **já existente**.
 
-    Este endpoint é somente leitura: ele nunca dispara uma nova avaliação. Para
-    analisar o projeto, use `POST /projects/{id}/evaluate`. Informe `run_id`
-    para reemitir o laudo de uma análise histórica.
+    Somente leitura: nunca dispara uma nova avaliação. Para analisar, use
+    `POST /projects/{id}/evaluate`. Informe `run_id` para reemitir o laudo de
+    uma análise histórica.
     """
-    project = _get_project(db, project_id)
+    project = get_project_or_404(db, project_id, user)
 
     if run_id:
         run = (
-            db.query(AnalysisRun)
+            tenant_query(db, AnalysisRun, user)
             .filter(AnalysisRun.id == run_id, AnalysisRun.project_id == project_id)
             .first()
         )
         if not run:
-            raise HTTPException(status_code=404, detail="Analysis run not found")
+            raise HTTPException(status_code=404, detail="Análise não encontrada.")
     else:
         run = RegulatoryEngine.latest_run(db, project_id)
 
@@ -118,20 +135,23 @@ def generate_regulatory_pdf_report(
             ),
         )
 
+    version = run.project_version or project.current_version
     project_dict = {
         "id": project.id,
         "name": project.name,
         "city_name": project.city_name,
         "state": project.state,
-        "zone": project.zone,
-        "lot_area": project.lot_area,
-        "built_area": project.built_area,
-        "floors": project.floors,
-        "front_setback": project.front_setback,
-        "rear_setback": project.rear_setback,
-        "occupancy_rate": project.occupancy_rate,
-        "permeability_rate": project.permeability_rate,
-        "is_official_baseline": project.is_official_baseline,
+        "zone": version.zone if version else "—",
+        "lot_area": version.lot_area if version else None,
+        "built_area": version.built_area if version else None,
+        "floors": version.floors if version else None,
+        "front_setback": version.front_setback if version else None,
+        "rear_setback": version.rear_setback if version else None,
+        "occupancy_rate": version.occupancy_rate if version else None,
+        "permeability_rate": version.permeability_rate if version else None,
+        "is_official_baseline": bool(version and version.is_official_baseline),
+        "version_number": version.version_number if version else None,
+        "version_state": version.state if version else None,
     }
 
     validations = [
@@ -161,7 +181,7 @@ def generate_regulatory_pdf_report(
     safe_name = "".join(
         c if c.isalnum() or c in "-_" else "_" for c in project.name
     )[:60] or "empreendimento"
-    prefix = "USO_INTERNO_" if not run.is_publishable else ""
+    prefix = "" if run.is_publishable else "USO_INTERNO_"
     filename = f"{prefix}Pre_Analise_{safe_name}.pdf"
 
     return Response(

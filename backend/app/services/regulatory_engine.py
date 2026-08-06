@@ -1,8 +1,8 @@
 """Motor de regras determinístico (§3.4).
 
-O motor não conhece nenhuma regra: ele carrega o catálogo regulatório e
-executa apenas as regras em estado executável. Toda execução gera um
-`AnalysisRun` novo — nada é sobrescrito nem apagado (§3.5).
+O motor não conhece nenhuma regra: carrega o catálogo do banco e executa
+apenas as regras em estado executável, sobre uma **versão** de projeto. Toda
+execução gera um `AnalysisRun` novo — nada é sobrescrito nem apagado (§3.5).
 """
 
 from __future__ import annotations
@@ -13,12 +13,12 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.domain import AnalysisRun, Project, ValidationRecord
-from app.regulatory.catalog import CheckOutcome, Rule, catalog
+from app.models.domain import AnalysisRun, Project, ProjectVersion, User, ValidationRecord
+from app.regulatory.catalog import CheckOutcome, RegulatoryCatalog, Rule
 
-ENGINE_VERSION = "1.1.0"
+ENGINE_VERSION = "2.0.0"
 
-#: Parâmetros do empreendimento expostos às regras.
+#: Parâmetros da versão expostos às regras.
 PARAM_FIELDS = (
     "zone",
     "building_type",
@@ -35,27 +35,32 @@ PARAM_FIELDS = (
 
 class RegulatoryEngine:
     @staticmethod
-    def project_params(project: Project) -> Dict[str, Any]:
-        params = {name: getattr(project, name) for name in PARAM_FIELDS}
-        # Derivado — ver Project.occupancy_rate.
-        params["occupancy_rate"] = project.occupancy_rate
+    def version_params(version: ProjectVersion) -> Dict[str, Any]:
+        params = {name: getattr(version, name) for name in PARAM_FIELDS}
+        # Derivado — ver ProjectVersion.occupancy_rate.
+        params["occupancy_rate"] = version.occupancy_rate
         return params
 
     @staticmethod
     def _content_hash(
-        project: Project, params: Dict[str, Any], results: List[Dict[str, Any]]
+        project: Project,
+        version: ProjectVersion,
+        params: Dict[str, Any],
+        results: List[Dict[str, Any]],
+        catalog_version: str,
     ) -> str:
         """SHA-256 sobre o conteúdo canônico da análise.
 
-        Cobre os parâmetros avaliados, as regras aplicadas e os resultados —
-        de modo que o selo do laudo comprove *o que foi analisado*, e não
-        apenas o instante da emissão.
+        Cobre os parâmetros avaliados, as regras aplicadas e os resultados, de
+        modo que o selo do laudo comprove *o que foi analisado*, e não apenas o
+        instante da emissão.
         """
         payload = {
             "project_id": project.id,
+            "project_version": version.version_number,
             "jurisdiction": project.city_ibge,
             "engine_version": ENGINE_VERSION,
-            "catalog_version": catalog.version_for(project.city_ibge),
+            "catalog_version": catalog_version,
             "params": {k: params[k] for k in sorted(params)},
             "results": sorted(
                 (
@@ -103,14 +108,25 @@ class RegulatoryEngine:
         db: Session,
         project: Project,
         trigger: str = "manual",
+        user: Optional[User] = None,
+        version: Optional[ProjectVersion] = None,
     ) -> AnalysisRun:
-        """Executa o catálogo sobre o projeto e persiste uma nova análise.
+        """Executa o catálogo sobre uma versão do projeto e persiste a análise.
 
-        Devolve o `AnalysisRun` criado. Análises anteriores permanecem
-        intactas.
+        Sem versão explícita, avalia a versão vigente. Análises anteriores
+        permanecem intactas.
         """
-        params = cls.project_params(project)
+        target = version or project.current_version
+        if target is None:
+            raise ValueError(
+                "O empreendimento não possui nenhuma versão de projeto para analisar."
+            )
+
+        params = cls.version_params(target)
         jurisdiction = project.city_ibge
+
+        catalog = RegulatoryCatalog.from_db(db, jurisdiction)
+        catalog_version = catalog.version_for(jurisdiction)
 
         rules = [
             rule
@@ -120,15 +136,19 @@ class RegulatoryEngine:
         results = [cls._build_result(rule, params) for rule in rules]
 
         run = AnalysisRun(
-            project_id=project.id,
             organization_id=project.organization_id,
+            project_id=project.id,
+            project_version_id=target.id,
+            project_version_number=target.version_number,
             jurisdiction=jurisdiction,
-            catalog_version=catalog.version_for(jurisdiction),
+            catalog_version=catalog_version,
             engine_version=ENGINE_VERSION,
             trigger=trigger,
             total_checks=len(results),
             conforme_count=sum(1 for r in results if r["status"] == CheckOutcome.CONFORME),
-            nao_conforme_count=sum(1 for r in results if r["status"] == CheckOutcome.NAO_CONFORME),
+            nao_conforme_count=sum(
+                1 for r in results if r["status"] == CheckOutcome.NAO_CONFORME
+            ),
             atencao_count=sum(1 for r in results if r["status"] == CheckOutcome.ATENCAO),
             nao_verificavel_count=sum(
                 1 for r in results if r["status"] == CheckOutcome.NAO_VERIFICAVEL
@@ -136,7 +156,10 @@ class RegulatoryEngine:
             # §7.5 — o laudo só é publicável se toda regra aplicada estiver
             # validada. Uma análise sem regra alguma também não é publicável.
             is_publishable=bool(results) and all(r["is_publishable"] for r in results),
-            content_hash=cls._content_hash(project, params, results),
+            content_hash=cls._content_hash(
+                project, target, params, results, catalog_version
+            ),
+            requested_by_id=user.id if user else None,
         )
         db.add(run)
         db.flush()
@@ -144,6 +167,7 @@ class RegulatoryEngine:
         for result in results:
             db.add(
                 ValidationRecord(
+                    organization_id=project.organization_id,
                     analysis_run_id=run.id,
                     project_id=project.id,
                     **result,

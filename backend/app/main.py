@@ -2,17 +2,20 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.core.database import engine, Base
 from app.api.v1.router import api_router
 
-# Auto-create tables in development SQLite/Postgres
-Base.metadata.create_all(bind=engine)
+# O esquema é criado por migrations versionadas (alembic upgrade head),
+# não em tempo de import. Ver backend/alembic/ e o README.
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
-    description="Atlas — Plataforma Inteligente para Aprovação, Planejamento, Execução e Gestão de Empreendimentos"
+    description=(
+        "Atlas — plataforma para aprovação, planejamento, execução e gestão de "
+        "empreendimentos. Todos os endpoints de negócio exigem autenticação "
+        "Bearer e operam restritos à organização do usuário."
+    )
 )
 
 # CORS Middleware

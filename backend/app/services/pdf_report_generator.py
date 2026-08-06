@@ -170,6 +170,10 @@ class RegulatoryReportGenerator:
              "Permeabilidade", cls._fmt(project_data.get("permeability_rate"), "%", 1)),
             ("Pavimentos", cls._fmt(project_data.get("floors")),
              "Linha de Base Oficial", "SIM" if project_data.get("is_official_baseline") else "NÃO"),
+            ("Versão do projeto",
+             f"v{project_data['version_number']}" if project_data.get("version_number") else "—",
+             "Situação da versão",
+             str(project_data.get("version_state") or "—").replace("_", " ")),
         ]
         proj_table = Table(
             [[Paragraph(f"<b>{a}:</b>", styles["bold"]), Paragraph(b, styles["normal"]),

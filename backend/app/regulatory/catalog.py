@@ -1,22 +1,23 @@
-"""Carregamento e interpretação do catálogo regulatório (§7.2 a §7.6).
+"""Catálogo regulatório: execução de regras e ponte com a persistência (§7).
 
-Regras são dado, não código. Este módulo lê os arquivos YAML de
-`app/regulatory/data/`, valida a estrutura e expõe a execução determinística
-de cada regra sobre um conjunto de parâmetros.
+A lógica de execução vive em `Rule`, uma estrutura pura, sem dependência de
+banco. A tabela `regulatory_rules` é a fonte de verdade em produção; os
+arquivos YAML de `data/` são **semente de importação**, úteis para versionar o
+cadastro inicial de um município em revisão de código.
 
-É também a **fonte única** das citações legais: nem o motor nem o assistente
-podem manter suas próprias referências (era a origem das citações conflitantes
-do protótipo).
+Este módulo é também a fonte única das citações legais — nem o motor nem o
+assistente mantêm referências próprias.
 """
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 import yaml
+from sqlalchemy.orm import Session
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
@@ -32,21 +33,29 @@ class RuleState:
     SUBSTITUIDA = "substituida"
 
     ALL = {
-        RASCUNHO_EXTRAIDO_POR_IA,
-        EM_VALIDACAO,
-        VIGENTE,
-        SUSPENSA,
-        REVOGADA,
-        SUBSTITUIDA,
+        RASCUNHO_EXTRAIDO_POR_IA, EM_VALIDACAO, VIGENTE,
+        SUSPENSA, REVOGADA, SUBSTITUIDA,
     }
 
 
-#: Estados cujas regras o motor pode executar.
-#: `em_validacao` executa, mas o resultado é marcado como não publicável.
+#: Estados cujas regras o motor pode executar. `em_validacao` executa, mas o
+#: resultado é marcado como não publicável.
 EXECUTABLE_STATES = {RuleState.EM_VALIDACAO, RuleState.VIGENTE}
 
 #: Estados cujas regras podem constar de laudo entregue ao cliente (§7.5).
 PUBLISHABLE_STATES = {RuleState.VIGENTE}
+
+#: Transições permitidas no fluxo de validação humana.
+ALLOWED_TRANSITIONS: Dict[str, set] = {
+    RuleState.RASCUNHO_EXTRAIDO_POR_IA: {RuleState.EM_VALIDACAO, RuleState.REVOGADA},
+    RuleState.EM_VALIDACAO: {
+        RuleState.VIGENTE, RuleState.RASCUNHO_EXTRAIDO_POR_IA, RuleState.REVOGADA,
+    },
+    RuleState.VIGENTE: {RuleState.SUSPENSA, RuleState.REVOGADA, RuleState.SUBSTITUIDA},
+    RuleState.SUSPENSA: {RuleState.VIGENTE, RuleState.EM_VALIDACAO, RuleState.REVOGADA},
+    RuleState.REVOGADA: set(),
+    RuleState.SUBSTITUIDA: set(),
+}
 
 
 class Severity:
@@ -112,6 +121,39 @@ class Rule:
     validated_by: Optional[str] = None
     validated_at: Optional[str] = None
     notes: Optional[str] = None
+    catalog_version: str = "0.1.0"
+
+    # -- construção --------------------------------------------------------
+    @classmethod
+    def from_orm(cls, row: Any) -> "Rule":
+        """Constrói a regra executável a partir da linha de `regulatory_rules`."""
+        document_label = row.source_document_label
+        if row.source_document is not None:
+            document_label = row.source_document.title
+
+        return cls(
+            rule_id=row.rule_key,
+            title=row.title,
+            jurisdiction=row.jurisdiction,
+            state=row.state,
+            severity=row.severity,
+            applies_to=row.applies_to or {},
+            check=row.check,
+            requires_manual_review=bool(row.requires_manual_review),
+            manual_review_reason=row.manual_review_reason,
+            evidence_required=list(row.evidence_required or []),
+            source=RuleSource(
+                document=document_label,
+                article=row.source_article,
+                url=row.source_document.url if row.source_document else None,
+            ),
+            effective_from=_parse_date(row.effective_from),
+            effective_until=_parse_date(row.effective_until),
+            validated_by=row.validated_by_name,
+            validated_at=row.validated_at.isoformat() if row.validated_at else None,
+            notes=row.notes,
+            catalog_version=row.catalog_version,
+        )
 
     # -- estado ------------------------------------------------------------
     @property
@@ -135,9 +177,7 @@ class Rule:
         if jurisdiction != self.jurisdiction:
             return False
         for key, allowed in (self.applies_to or {}).items():
-            if key == "conditions":
-                continue
-            if not allowed:
+            if key == "conditions" or not allowed:
                 continue
             if params.get(key) not in allowed:
                 return False
@@ -230,21 +270,49 @@ class Rule:
         }
 
 
+def _parse_date(value: Any) -> Optional[date]:
+    if value is None or value == "":
+        return None
+    if isinstance(value, date):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
 class RegulatoryCatalog:
-    """Coleção de regras carregadas dos arquivos YAML versionados."""
+    """Coleção de regras executáveis."""
 
     def __init__(self, rules: List[Rule], versions: Dict[str, str]):
         self._rules = rules
         self.versions = versions
 
-    # -- carregamento ------------------------------------------------------
+    # -- carregamento do banco --------------------------------------------
     @classmethod
-    def load(cls, data_dir: str = DATA_DIR) -> "RegulatoryCatalog":
-        rules: List[Rule] = []
-        versions: Dict[str, str] = {}
+    def from_db(cls, db: Session, jurisdiction: Optional[str] = None) -> "RegulatoryCatalog":
+        from app.models.domain import RegulatoryRule
 
+        query = db.query(RegulatoryRule).filter(RegulatoryRule.superseded_by_id.is_(None))
+        if jurisdiction:
+            query = query.filter(RegulatoryRule.jurisdiction == jurisdiction)
+
+        rows = query.all()
+        rules = [Rule.from_orm(row) for row in rows]
+        versions: Dict[str, str] = {}
+        for row in rows:
+            versions.setdefault(row.jurisdiction, row.catalog_version)
+        return cls(rules, versions)
+
+    # -- carregamento dos arquivos de semente ------------------------------
+    @classmethod
+    def load_seed_files(cls, data_dir: str = DATA_DIR) -> List[Dict[str, Any]]:
+        """Lê os YAML de semente. Não toca no banco."""
+        catalogs: List[Dict[str, Any]] = []
         if not os.path.isdir(data_dir):
-            return cls(rules, versions)
+            return catalogs
 
         for filename in sorted(os.listdir(data_dir)):
             if not filename.endswith((".yaml", ".yml")):
@@ -255,53 +323,19 @@ class RegulatoryCatalog:
             jurisdiction = (payload.get("jurisdiction") or {}).get("code")
             if not jurisdiction:
                 raise ValueError(f"{filename}: catálogo sem `jurisdiction.code`")
-            versions[jurisdiction] = payload.get("catalog_version", "desconhecida")
 
             for raw in payload.get("rules") or []:
-                rules.append(cls._parse_rule(raw, jurisdiction, filename))
+                _validate_seed_rule(raw, filename)
 
-        return cls(rules, versions)
-
-    @staticmethod
-    def _parse_rule(raw: Dict[str, Any], jurisdiction: str, filename: str) -> Rule:
-        rule_id = raw.get("rule_id")
-        if not rule_id:
-            raise ValueError(f"{filename}: regra sem `rule_id`")
-
-        state = raw.get("state")
-        if state not in RuleState.ALL:
-            raise ValueError(f"{filename}/{rule_id}: estado inválido '{state}' (§7.4)")
-
-        severity = raw.get("severity", Severity.BLOQUEIO)
-        if severity not in (Severity.BLOQUEIO, Severity.ALERTA):
-            raise ValueError(f"{filename}/{rule_id}: severidade inválida '{severity}'")
-
-        check = raw.get("check")
-        if check is not None:
-            for required in ("field", "operator", "value"):
-                if required not in check:
-                    raise ValueError(
-                        f"{filename}/{rule_id}: `check` sem campo obrigatório '{required}'"
-                    )
-
-        return Rule(
-            rule_id=rule_id,
-            title=raw.get("title", rule_id),
-            jurisdiction=jurisdiction,
-            state=state,
-            severity=severity,
-            applies_to=raw.get("applies_to") or {},
-            check=check,
-            requires_manual_review=bool(raw.get("requires_manual_review", False)),
-            manual_review_reason=raw.get("manual_review_reason"),
-            evidence_required=raw.get("evidence_required") or [],
-            source=RuleSource(**(raw.get("source") or {})),
-            effective_from=raw.get("effective_from"),
-            effective_until=raw.get("effective_until"),
-            validated_by=raw.get("validated_by"),
-            validated_at=raw.get("validated_at"),
-            notes=raw.get("notes"),
-        )
+            catalogs.append(
+                {
+                    "filename": filename,
+                    "jurisdiction": jurisdiction,
+                    "catalog_version": payload.get("catalog_version", "0.1.0"),
+                    "rules": payload.get("rules") or [],
+                }
+            )
+        return catalogs
 
     # -- consulta ----------------------------------------------------------
     @property
@@ -328,5 +362,27 @@ class RegulatoryCatalog:
         return self.versions.get(jurisdiction, "desconhecida")
 
 
-#: Catálogo carregado uma vez por processo.
-catalog = RegulatoryCatalog.load()
+def _validate_seed_rule(raw: Dict[str, Any], filename: str) -> None:
+    rule_id = raw.get("rule_id")
+    if not rule_id:
+        raise ValueError(f"{filename}: regra sem `rule_id`")
+
+    state = raw.get("state")
+    if state not in RuleState.ALL:
+        raise ValueError(f"{filename}/{rule_id}: estado inválido '{state}' (§7.4)")
+
+    severity = raw.get("severity", Severity.BLOQUEIO)
+    if severity not in (Severity.BLOQUEIO, Severity.ALERTA):
+        raise ValueError(f"{filename}/{rule_id}: severidade inválida '{severity}'")
+
+    check = raw.get("check")
+    if check is not None:
+        for required in ("field", "operator", "value"):
+            if required not in check:
+                raise ValueError(
+                    f"{filename}/{rule_id}: `check` sem campo obrigatório '{required}'"
+                )
+        if check["operator"] not in _OPERATORS:
+            raise ValueError(
+                f"{filename}/{rule_id}: operador '{check['operator']}' não suportado"
+            )

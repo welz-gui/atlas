@@ -1,11 +1,26 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import health, projects, regulatory, documents, plan, ai, daily_log
+
+from app.api.v1.endpoints import (
+    ai,
+    auth,
+    catalog,
+    daily_log,
+    documents,
+    health,
+    plan,
+    projects,
+    protocol,
+    regulatory,
+)
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["Health"])
-api_router.include_router(projects.router, tags=["Organizations & Projects"])
-api_router.include_router(regulatory.router, tags=["Regulatory Copilot"])
-api_router.include_router(documents.router, tags=["Document Management & SHA-256"])
-api_router.include_router(plan.router, tags=["Atlas Plan - EAP & Kanban Tasks"])
-api_router.include_router(ai.router, tags=["Atlas AI - Urbanistic Legislation Assistant"])
-api_router.include_router(daily_log.router, tags=["Daily Log - Diário de Obra Digital"])
+api_router.include_router(auth.router, tags=["Autenticação e usuários"])
+api_router.include_router(projects.router, tags=["Empreendimentos e versões"])
+api_router.include_router(regulatory.router, tags=["Copiloto de aprovação"])
+api_router.include_router(catalog.router, tags=["Catálogo regulatório e validação"])
+api_router.include_router(protocol.router, tags=["Tramitação municipal"])
+api_router.include_router(documents.router, tags=["Gestão documental"])
+api_router.include_router(plan.router, tags=["Planejamento — EAP e tarefas"])
+api_router.include_router(daily_log.router, tags=["Diário de obra"])
+api_router.include_router(ai.router, tags=["Assistente normativo"])

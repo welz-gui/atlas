@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = os.path.join(BACKEND_DIR, "uploads")
     MAX_UPLOAD_MB: int = 50
 
+    # URL pública usada nos QR Codes de verificação de documento (§8.3)
+    PUBLIC_BASE_URL: str = "http://localhost:3000"
+
     # Segurança
     # Sem SECRET_KEY no ambiente, gera-se uma chave efêmera por processo em vez
     # de carregar um valor previsível versionado no repositório.
