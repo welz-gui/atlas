@@ -926,6 +926,11 @@ class TaskItem(Base):
     assignee: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     due_date: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
+    #: Chave de idempotência do cliente de campo (§3.7) — ver `DailyLog`.
+    client_token: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+
     created_by_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -951,6 +956,13 @@ class DailyLog(Base):
     activities_done: Mapped[str] = mapped_column(Text, nullable=False)
     occurrences: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="assinado")
+
+    #: Chave de idempotência gerada pelo cliente de campo (§3.7). Um envio
+    #: repetido depois de resposta perdida devolve o registro original em vez
+    #: de criar um segundo diário para o mesmo dia.
+    client_token: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True
+    )
 
     created_by_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

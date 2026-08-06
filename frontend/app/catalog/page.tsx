@@ -23,7 +23,12 @@ import {
   validateRule,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { EmptyState, ErrorBanner, LoadingState } from "@/components/StateViews";
+import {
+  EmptyState,
+  ErrorBanner,
+  LoadingState,
+  OnlineOnlyNotice,
+} from "@/components/StateViews";
 
 const STATE_STYLE: Record<string, string> = {
   vigente: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
@@ -126,6 +131,7 @@ export default function CatalogPage() {
         )}
       </div>
 
+      <OnlineOnlyNotice feature="A validação do catálogo" />
       {error && <ErrorBanner error={error} onRetry={load} />}
       {isLoading && <LoadingState label="Carregando catálogo..." />}
 

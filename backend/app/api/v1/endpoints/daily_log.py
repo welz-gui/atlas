@@ -1,4 +1,9 @@
-"""Diário de obra, com escopo de organização."""
+"""Diário de obra, com escopo de organização.
+
+A criação é idempotente por `client_token` (§3.7): o aplicativo de campo grava
+offline e reenvia quando a rede volta, e uma resposta perdida no caminho não
+pode produzir dois diários para o mesmo dia.
+"""
 
 from typing import List
 
@@ -38,6 +43,21 @@ def create_daily_log(
     db: Session = Depends(get_db),
 ):
     get_project_or_404(db, project_id, user)
+
+    if payload.client_token:
+        existente = (
+            tenant_query(db, DailyLog, user)
+            .filter(
+                DailyLog.project_id == project_id,
+                DailyLog.client_token == payload.client_token,
+            )
+            .first()
+        )
+        if existente:
+            # Reenvio do mesmo item da fila: devolve o registro original, com
+            # 201, em vez de duplicar. O cliente não tem como distinguir
+            # "não chegou" de "chegou e a resposta se perdeu".
+            return existente
 
     log = DailyLog(
         organization_id=user.organization_id,

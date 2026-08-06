@@ -405,3 +405,98 @@ def test_situacao_desconhecida_na_listagem_e_recusada(client, engineer_headers):
 def test_expurgo_como_trabalho_exige_gestao(client, engineer_headers):
     response = client.post("/api/v1/jobs/retention-purge", headers=engineer_headers)
     assert response.status_code == 403
+
+
+# =============================================================================
+# Idempotência da fila de campo (§3.7)
+# =============================================================================
+
+def test_reenvio_do_diario_nao_duplica(client, engineer_headers, project):
+    """A fila offline reenvia; uma resposta perdida não pode virar dois diários."""
+    payload = {
+        "date": "2026-08-06",
+        "weather_condition": "ensolarado",
+        "manpower_own": 4,
+        "manpower_subcontracted": 2,
+        "activities_done": "Concretagem da laje do 2º pavimento.",
+        "client_token": "token-de-campo-1",
+    }
+    rota = f"/api/v1/projects/{project['id']}/daily-logs"
+
+    primeiro = client.post(rota, headers=engineer_headers, json=payload).json()
+    segundo = client.post(rota, headers=engineer_headers, json=payload).json()
+
+    assert primeiro["id"] == segundo["id"]
+    assert len(client.get(rota, headers=engineer_headers).json()) == 1
+
+
+def test_diarios_diferentes_no_mesmo_dia_sao_permitidos(
+    client, engineer_headers, project
+):
+    """A idempotência é por token, não por data: dois turnos, dois registros."""
+    rota = f"/api/v1/projects/{project['id']}/daily-logs"
+    base = {
+        "date": "2026-08-06",
+        "weather_condition": "ensolarado",
+        "activities_done": "Turno da manhã.",
+    }
+
+    client.post(rota, headers=engineer_headers, json={**base, "client_token": "t1"})
+    client.post(
+        rota,
+        headers=engineer_headers,
+        json={**base, "activities_done": "Turno da tarde.", "client_token": "t2"},
+    )
+
+    assert len(client.get(rota, headers=engineer_headers).json()) == 2
+
+
+def test_reenvio_de_tarefa_nao_duplica(client, engineer_headers, project):
+    payload = {
+        "title": "Conferir prumo da alvenaria",
+        "status": "a_fazer",
+        "priority": "media",
+        "client_token": "token-de-campo-2",
+    }
+    rota = f"/api/v1/projects/{project['id']}/tasks"
+
+    primeiro = client.post(rota, headers=engineer_headers, json=payload).json()
+    segundo = client.post(rota, headers=engineer_headers, json=payload).json()
+
+    assert primeiro["id"] == segundo["id"]
+    assert len(client.get(rota, headers=engineer_headers).json()) == 1
+
+
+def test_token_de_outra_organizacao_nao_colide(
+    client, db_session, engineer_headers, project
+):
+    """Token é escopo de tenant: dois clientes podem gerar o mesmo por azar."""
+    from app.models.domain import UserRole
+    from tests.conftest import auth_headers, make_org, make_user
+
+    payload = {
+        "date": "2026-08-06",
+        "activities_done": "Registro da organização A.",
+        "client_token": "colisao",
+    }
+    client.post(
+        f"/api/v1/projects/{project['id']}/daily-logs",
+        headers=engineer_headers,
+        json=payload,
+    )
+
+    outra = make_org(db_session, "Concorrente S.A.")
+    intruso = make_user(db_session, outra, UserRole.OWNER, "intruso-token@atlas-qa.com")
+    outro_projeto = client.post(
+        "/api/v1/projects",
+        headers=auth_headers(client, intruso.email),
+        json={"name": "Obra da outra org", "lot_area": 300.0},
+    ).json()
+
+    resposta = client.post(
+        f"/api/v1/projects/{outro_projeto['id']}/daily-logs",
+        headers=auth_headers(client, intruso.email),
+        json={**payload, "activities_done": "Registro da organização B."},
+    )
+    assert resposta.status_code == 201
+    assert resposta.json()["activities_done"] == "Registro da organização B."

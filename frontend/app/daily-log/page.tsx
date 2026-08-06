@@ -19,6 +19,7 @@ import {
   fetchProjectDailyLogs,
 } from "@/lib/api";
 import { projectShortLabel, useProjects } from "@/lib/useProjects";
+import { enqueue } from "@/lib/offline";
 import { EmptyState, ErrorBanner, LoadingState } from "@/components/StateViews";
 
 const WEATHER = {
@@ -175,11 +176,15 @@ export default function DailyLogPage() {
       {isModalOpen && selectedProjectId && (
         <NewLogModal
           projectId={selectedProjectId}
+          projectName={
+            projects.find((p) => p.id === selectedProjectId)?.name ?? undefined
+          }
           onClose={() => setIsModalOpen(false)}
           onCreated={(log) => {
             setLogs((prev) => [log, ...prev]);
             setIsModalOpen(false);
           }}
+          onQueued={() => setIsModalOpen(false)}
         />
       )}
     </div>
@@ -188,12 +193,16 @@ export default function DailyLogPage() {
 
 function NewLogModal({
   projectId,
+  projectName,
   onClose,
   onCreated,
+  onQueued,
 }: {
   projectId: string;
+  projectName?: string;
   onClose: () => void;
   onCreated: (log: DailyLogItem) => void;
+  onQueued: () => void;
 }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [weather, setWeather] = useState<DailyLogItem["weather_condition"]>("ensolarado");
@@ -203,30 +212,60 @@ function NewLogModal({
   const [occurrences, setOccurrences] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<ApiError | Error | null>(null);
+  const [queued, setQueued] = useState(false);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!activities.trim()) return;
 
+    const payload = {
+      date,
+      weather_condition: weather,
+      manpower_own: Number(manpowerOwn) || 0,
+      manpower_subcontracted: Number(manpowerSub) || 0,
+      activities_done: activities,
+      occurrences: occurrences || undefined,
+      status: "assinado",
+    };
+
     setIsSaving(true);
     setError(null);
     try {
-      const created = await createDailyLog(projectId, {
-        date,
-        weather_condition: weather,
-        manpower_own: Number(manpowerOwn) || 0,
-        manpower_subcontracted: Number(manpowerSub) || 0,
-        activities_done: activities,
-        occurrences: occurrences || undefined,
-        status: "assinado",
-      });
-      onCreated(created);
+      onCreated(await createDailyLog(projectId, payload));
     } catch (err) {
+      // Falha de rede é o caso previsto em obra: o registro vai para a fila
+      // local e permanece visível como pendente. Qualquer outro erro é do
+      // servidor e precisa ser corrigido pelo usuário — enfileirar um payload
+      // que já foi recusado só empurraria o problema para depois.
+      if (err instanceof ApiError && err.isOffline) {
+        await enqueue("daily_log", projectId, payload, projectName);
+        setQueued(true);
+        setIsSaving(false);
+        window.setTimeout(onQueued, 2200);
+        return;
+      }
       setError(err instanceof Error ? err : new Error(String(err)));
     } finally {
       setIsSaving(false);
     }
   };
+
+  if (queued) {
+    return (
+      <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className="glass-panel rounded-2xl p-6 w-full max-w-md space-y-3 text-center">
+          <p className="text-sm font-bold text-amber-300">
+            Registro guardado no aparelho
+          </p>
+          <p className="text-xs text-slate-300">
+            Não há conexão. O registro de {date} <strong>ainda não foi enviado</strong> e
+            não consta do diário oficial. Ele será enviado assim que a rede voltar —
+            acompanhe pela barra no topo da tela.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 overflow-y-auto">

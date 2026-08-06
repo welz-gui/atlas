@@ -4,7 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, BookOpen, ListChecks, Search, Send } from "lucide-react";
 import { AIChatResponse, ApiError, sendAIChatPrompt } from "@/lib/api";
 import { projectShortLabel, useProjects } from "@/lib/useProjects";
-import { ErrorBanner } from "@/components/StateViews";
+import {
+  ErrorBanner,
+  OnlineOnlyNotice,
+} from "@/components/StateViews";
 
 const PROMPT_SUGGESTIONS = [
   "Quais as regras de recuo frontal na zona Z2?",
@@ -111,6 +114,7 @@ export default function AssistantPage() {
         )}
       </div>
 
+      <OnlineOnlyNotice feature="O assistente normativo" />
       {error && <ErrorBanner error={error} />}
 
       <div className="glass-panel rounded-2xl flex flex-col h-[calc(100vh-19rem)] min-h-[26rem]">

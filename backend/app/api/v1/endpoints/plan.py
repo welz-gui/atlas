@@ -104,6 +104,19 @@ def create_task_item(
 ):
     get_project_or_404(db, project_id, user)
 
+    if payload.client_token:
+        # Idempotência para a fila offline de campo (§3.7) — ver `daily_log`.
+        existente = (
+            tenant_query(db, TaskItem, user)
+            .filter(
+                TaskItem.project_id == project_id,
+                TaskItem.client_token == payload.client_token,
+            )
+            .first()
+        )
+        if existente:
+            return existente
+
     if payload.eap_item_id:
         eap_item = (
             tenant_query(db, EAPItem, user)

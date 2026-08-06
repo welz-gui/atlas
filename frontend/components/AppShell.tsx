@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import Navbar from "@/components/Navbar";
+import OfflineBar from "@/components/OfflineBar";
 import Sidebar from "@/components/Sidebar";
 import { useAuth } from "@/lib/auth";
 
@@ -35,6 +36,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0">
         <Navbar />
+        {/* A barra fica acima do conteúdo e não some ao rolar: um registro
+            ainda no aparelho precisa continuar à vista. */}
+        <div className="ml-64">
+          <OfflineBar />
+        </div>
         <main className="flex-1 ml-64 p-8 overflow-y-auto">{children}</main>
       </div>
     </>

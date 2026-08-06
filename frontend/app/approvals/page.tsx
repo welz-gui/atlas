@@ -33,6 +33,7 @@ import {
   EmptyState,
   ErrorBanner,
   LoadingState,
+  OnlineOnlyNotice,
   STATUS_PRESENTATION,
   StatusChip,
   UnvalidatedRulesBanner,
@@ -233,6 +234,7 @@ export default function ApprovalsPage() {
         )}
       </div>
 
+      <OnlineOnlyNotice feature="A pré-análise regulatória" />
       {error && <ErrorBanner error={error} onRetry={reload} />}
       {actionError && <ErrorBanner error={actionError} />}
       {isLoading && <LoadingState label="Carregando empreendimentos..." />}

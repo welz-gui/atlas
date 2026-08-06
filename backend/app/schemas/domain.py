@@ -579,7 +579,10 @@ class TaskItemBase(BaseModel):
 
 
 class TaskItemCreate(TaskItemBase):
-    pass
+    #: Chave de idempotência do cliente de campo (§3.7). O aplicativo offline
+    #: gera uma por item da fila; reenviar depois de uma resposta perdida
+    #: devolve o registro original em vez de criar um segundo.
+    client_token: Optional[str] = Field(default=None, max_length=64)
 
 
 class TaskItemUpdate(BaseModel):
@@ -611,7 +614,8 @@ class DailyLogBase(BaseModel):
 
 
 class DailyLogCreate(DailyLogBase):
-    pass
+    #: Ver `TaskItemCreate.client_token`.
+    client_token: Optional[str] = Field(default=None, max_length=64)
 
 
 class DailyLogResponse(DailyLogBase):

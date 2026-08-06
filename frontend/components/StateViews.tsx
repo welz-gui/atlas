@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { AlertTriangle, HelpCircle, Inbox, Loader2, PlugZap, RefreshCw } from "lucide-react";
 import { ApiError, CheckStatus, RuleState } from "@/lib/api";
 
@@ -180,5 +181,47 @@ export function RuleStateTag({ state }: { state: RuleState }) {
     <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide bg-amber-500/10 text-amber-400 border border-amber-500/30">
       {state.replace(/_/g, " ")}
     </span>
+  );
+}
+
+/**
+ * Aviso de recurso que exige conexão (§3.7).
+ *
+ * Análise regulatória, laudo, catálogo e assistente não têm modo offline — e
+ * isso é decisão de projeto, não limitação técnica. Um veredicto de
+ * conformidade calculado sobre catálogo desatualizado é pior que a ausência de
+ * veredicto: o técnico protocolaria com base em um limite que já mudou.
+ */
+export function OnlineOnlyNotice({ feature }: { feature: string }) {
+  const [offline, setOffline] = useState(false);
+
+  useEffect(() => {
+    const update = () => setOffline(!navigator.onLine);
+    update();
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
+
+  if (!offline) return null;
+
+  return (
+    <div className="p-4 rounded-2xl border border-slate-700 bg-slate-900/70 flex items-start gap-3">
+      <PlugZap className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+      <div className="space-y-1">
+        <p className="text-sm font-bold text-slate-200">
+          {feature} exige conexão
+        </p>
+        <p className="text-xs text-slate-400">
+          Este recurso não opera offline por decisão de projeto: um resultado
+          calculado sobre um catálogo regulatório desatualizado seria pior que a
+          ausência de resultado. O registro de campo — diário e tarefas — continua
+          funcionando sem rede.
+        </p>
+      </div>
+    </div>
   );
 }

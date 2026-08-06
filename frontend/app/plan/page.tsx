@@ -20,6 +20,7 @@ import {
   updateTaskStatus,
 } from "@/lib/api";
 import { projectShortLabel, useProjects } from "@/lib/useProjects";
+import { enqueue } from "@/lib/offline";
 import { EmptyState, ErrorBanner, LoadingState } from "@/components/StateViews";
 
 const COLUMNS: { key: TaskItem["status"]; title: string; accent: string }[] = [
@@ -335,29 +336,54 @@ function NewTaskModal({
   const [eapItemId, setEapItemId] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<ApiError | Error | null>(null);
+  const [queued, setQueued] = useState(false);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!title.trim()) return;
 
+    const payload = {
+      title,
+      description: description || undefined,
+      status: "a_fazer",
+      priority,
+      assignee: assignee || undefined,
+      eap_item_id: eapItemId || undefined,
+    };
+
     setIsSaving(true);
     setError(null);
     try {
-      const created = await createProjectTask(projectId, {
-        title,
-        description: description || undefined,
-        status: "a_fazer",
-        priority,
-        assignee: assignee || undefined,
-        eap_item_id: eapItemId || undefined,
-      });
-      onCreated(created);
+      onCreated(await createProjectTask(projectId, payload));
     } catch (err) {
+      // Ver o comentário equivalente no diário: só falha de rede vai para a
+      // fila; recusa do servidor precisa ser corrigida pelo usuário.
+      if (err instanceof ApiError && err.isOffline) {
+        await enqueue("task", projectId, payload);
+        setQueued(true);
+        setIsSaving(false);
+        window.setTimeout(onClose, 2200);
+        return;
+      }
       setError(err instanceof Error ? err : new Error(String(err)));
     } finally {
       setIsSaving(false);
     }
   };
+
+  if (queued) {
+    return (
+      <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+        <div className="glass-panel rounded-2xl p-6 w-full max-w-md space-y-3 text-center">
+          <p className="text-sm font-bold text-amber-300">Tarefa guardada no aparelho</p>
+          <p className="text-xs text-slate-300">
+            Sem conexão. A tarefa <strong>ainda não foi enviada</strong> e será
+            sincronizada quando a rede voltar.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
