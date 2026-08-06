@@ -367,12 +367,32 @@ class Document(Base):
     category: Mapped[str] = mapped_column(String(100), default="projeto_arquitetonico")
     version: Mapped[str] = mapped_column(String(20), default="v1.0")
 
-    #: Nome opaco gerado pelo servidor. O nome enviado pelo cliente nunca toca o disco.
+    #: Chave opaca gerada pelo servidor. O nome enviado pelo cliente nunca toca
+    #: o armazenamento. Onde a chave é resolvida depende de `storage_backend`.
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    #: Backend que guarda o binário (§6.6): `local`, `s3`.
+    storage_backend: Mapped[str] = mapped_column(String(20), default="local")
     original_filename: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     content_type: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     hash_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+
+    # -- Antivírus (§6.6) --------------------------------------------------
+    #: `nao_verificado` é o padrão deliberado: sem motor que tenha respondido,
+    #: o arquivo não é dado por limpo.
+    antivirus_status: Mapped[str] = mapped_column(String(30), default="nao_verificado")
+    antivirus_engine: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    antivirus_engine_version: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    antivirus_signature: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    antivirus_scanned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # -- Retenção (§6.6) ---------------------------------------------------
+    #: A partir desta data o binário pode ser expurgado. NULL = guardar sempre.
+    retention_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    #: Quando preenchido, o binário já não existe — o registro permanece, para
+    #: que a trilha de auditoria continue completa (§3.5).
+    purged_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    purge_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     status: Mapped[str] = mapped_column(String(50), default=DocumentState.VIGENTE)
     #: Cadeia de versões: aponta para o documento que esta versão substitui.
@@ -390,6 +410,11 @@ class Document(Base):
     @property
     def is_current(self) -> bool:
         return self.status == DocumentState.VIGENTE
+
+    @property
+    def is_purged(self) -> bool:
+        """Metadados preservados, binário descartado pela política de retenção."""
+        return self.purged_at is not None
 
 
 # =============================================================================

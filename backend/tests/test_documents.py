@@ -6,15 +6,8 @@ import os
 
 import pytest
 
-from app.api.v1.endpoints import documents as documents_module
-
-
-@pytest.fixture
-def upload_dir(tmp_path, monkeypatch):
-    directory = tmp_path / "uploads"
-    directory.mkdir()
-    monkeypatch.setattr(documents_module, "UPLOAD_DIR", str(directory))
-    return directory
+# A fixture `upload_dir` vive no conftest: storage é assunto de mais de um
+# arquivo de teste desde a abstração de §6.6.
 
 
 def _upload(client, headers, project_id, filename, content=b"%PDF-1.4 conteudo", **extra):

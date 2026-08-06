@@ -462,6 +462,7 @@ class DocumentResponse(BaseModel):
     category: str
     version: str
     file_path: str
+    storage_backend: str = "local"
     original_filename: Optional[str] = None
     content_type: Optional[str] = None
     size_bytes: Optional[int] = None
@@ -470,9 +471,35 @@ class DocumentResponse(BaseModel):
     supersedes_id: Optional[str] = None
     superseded_at: Optional[datetime] = None
     is_current: bool = True
+
+    # Antivírus e retenção (§6.6). `nao_verificado` é resposta legítima, e a
+    # interface precisa poder mostrá-la como tal.
+    antivirus_status: str = "nao_verificado"
+    antivirus_engine: Optional[str] = None
+    antivirus_scanned_at: Optional[datetime] = None
+    antivirus_signature: Optional[str] = None
+    retention_until: Optional[datetime] = None
+    purged_at: Optional[datetime] = None
+    purge_reason: Optional[str] = None
+    is_purged: bool = False
+
     uploaded_by_id: Optional[str] = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+
+class PurgeReportResponse(BaseModel):
+    """Resultado do expurgo por retenção (§6.6)."""
+
+    dry_run: bool
+    retention_enabled: bool
+    retention_days: int
+    examined: int
+    purged: int
+    already_missing: int
+    failed: int
+    document_ids: List[str] = Field(default_factory=list)
+    errors: List[str] = Field(default_factory=list)
 
 
 class ExtractionResponse(BaseModel):

@@ -102,6 +102,25 @@ def validator_headers(client, validator):
 
 
 @pytest.fixture
+def upload_dir(tmp_path, monkeypatch):
+    """Aponta o storage local para um diretório descartável (§6.6).
+
+    O backend é memorizado por `lru_cache`, então trocar a configuração exige
+    limpar o cache — antes, para o teste enxergar o diretório novo, e depois,
+    para não vazar o diretório temporário para o teste seguinte.
+    """
+    from app.core.config import settings
+    from app.services import storage as storage_module
+
+    directory = tmp_path / "uploads"
+    directory.mkdir()
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(directory))
+    storage_module.reset_storage_cache()
+    yield directory
+    storage_module.reset_storage_cache()
+
+
+@pytest.fixture
 def seeded_catalog(db_session):
     from app.regulatory.importer import import_seed_catalog
 

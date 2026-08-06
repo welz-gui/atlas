@@ -25,9 +25,37 @@ class Settings(BaseSettings):
     # Postgres (ver docker-compose.yml e .env.example).
     DATABASE_URL: str = f"sqlite:///{os.path.join(BACKEND_DIR, 'atlas_dev.db')}"
 
-    # Armazenamento de documentos
+    # Armazenamento de documentos (§6.6)
+    # `local` grava no disco do servidor; `s3` grava em bucket compatível com
+    # S3 (AWS, MinIO). A aplicação nunca monta caminho de arquivo diretamente:
+    # tudo passa por `app.services.storage`.
+    STORAGE_BACKEND: str = "local"
     UPLOAD_DIR: str = os.path.join(BACKEND_DIR, "uploads")
     MAX_UPLOAD_MB: int = 50
+
+    S3_BUCKET: str = ""
+    S3_PREFIX: str = "documents/"
+    S3_REGION: str = ""
+    S3_ENDPOINT_URL: str = ""  # preencher para MinIO ou outro compatível
+
+    # Retenção (§6.6)
+    # Dias após a obsolescência do documento em que o arquivo binário pode ser
+    # descartado. Zero desliga o expurgo. O registro de metadados **nunca** é
+    # apagado: o que sai é o blob, e a linha passa a constar como expurgada.
+    OBSOLETE_RETENTION_DAYS: int = 0
+
+    # Antivírus (§6.6)
+    # `none` significa "nenhuma verificação" — e é assim que fica registrado no
+    # documento, em vez de dar o arquivo por limpo.
+    ANTIVIRUS_BACKEND: str = "none"  # none | clamav
+    ANTIVIRUS_HOST: str = "127.0.0.1"
+    ANTIVIRUS_PORT: int = 3310
+    ANTIVIRUS_SOCKET: str = ""  # socket unix do clamd, quando houver
+    ANTIVIRUS_TIMEOUT_SECONDS: int = 30
+    #: Quando verdadeiro, upload que não pôde ser verificado é recusado.
+    #: Falhar fechado é a postura correta em produção; em desenvolvimento
+    #: costuma não haver clamd, e recusar tudo inviabilizaria o uso.
+    ANTIVIRUS_REQUIRED: bool = False
 
     # URL pública usada nos QR Codes de verificação de documento (§8.3)
     PUBLIC_BASE_URL: str = "http://localhost:3000"

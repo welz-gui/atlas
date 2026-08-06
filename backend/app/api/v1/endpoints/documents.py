@@ -1,13 +1,19 @@
-"""Gestão documental (§8.3): versionamento, documento vigente e QR Code."""
+"""Gestão documental (§8.3): versionamento, documento vigente, QR Code.
 
-import hashlib
+Nenhum caminho de disco aparece neste arquivo. Onde os bytes moram é assunto de
+`app.services.storage`; quando eles podem ser descartados, de
+`app.services.retention`; se passaram por antivírus, de
+`app.services.antivirus`. O endpoint cuida de autorização, do ciclo de vida do
+documento e de contar a verdade sobre o que aconteceu com o arquivo.
+"""
+
 import io
 import os
-import uuid
 from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
@@ -20,16 +26,16 @@ from app.api.deps import (
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.domain import Document, DocumentState, User
-from app.schemas.domain import DocumentResponse, ExtractionResponse
+from app.schemas.domain import DocumentResponse, ExtractionResponse, PurgeReportResponse
+from app.services.antivirus import ScanStatus, get_scanner
 from app.services.pdf_parser import PDFPlanParser
+from app.services.retention import mark_obsolete, purge_expired_documents, retention_deadline
+from app.services.storage import ObjectNotFound, build_key, get_storage
 
 router = APIRouter()
 
-UPLOAD_DIR = os.path.abspath(settings.UPLOAD_DIR)
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-#: Extensões aceitas. O nome enviado pelo cliente nunca é usado no disco; a
-#: extensão serve apenas para triagem e para nomear o arquivo interno.
+#: Extensões aceitas. O nome enviado pelo cliente nunca é usado no
+#: armazenamento; a extensão serve para triagem e para nomear a chave interna.
 ALLOWED_EXTENSIONS = {
     ".pdf", ".dxf", ".ifc", ".txt", ".csv",
     ".png", ".jpg", ".jpeg", ".webp",
@@ -69,9 +75,9 @@ async def upload_document(
             )
 
     # O nome enviado pelo cliente é tratado como dado hostil: dele só se
-    # aproveita a extensão, e ainda assim contra uma allowlist. O arquivo em
-    # disco recebe um nome opaco gerado pelo servidor, de modo que sequências
-    # como "../" não têm efeito algum sobre o caminho final.
+    # aproveita a extensão, e ainda assim contra uma allowlist. A chave no
+    # armazenamento é opaca e gerada pelo servidor, de modo que sequências como
+    # "../" não têm efeito algum.
     original_filename = os.path.basename(file.filename or "")
     extension = os.path.splitext(original_filename)[1].lower()
     if extension not in ALLOWED_EXTENSIONS:
@@ -83,31 +89,57 @@ async def upload_document(
             ),
         )
 
-    stored_name = f"{uuid.uuid4().hex}{extension}"
-    file_path = os.path.join(UPLOAD_DIR, stored_name)
-
-    digest = hashlib.sha256()
-    size = 0
+    storage = get_storage()
+    key = build_key(extension)
     max_bytes = settings.MAX_UPLOAD_MB * 1024 * 1024
+
+    # `defer_commit` mantém os bytes em arquivo temporário até a varredura
+    # terminar: arquivo infectado nunca chega a existir no armazenamento.
+    writer = storage.writer(key, defer_commit=True)
     try:
-        with open(file_path, "wb") as handle:
+        with writer:
             while chunk := await file.read(CHUNK_SIZE):
-                size += len(chunk)
-                if size > max_bytes:
+                if writer.write(chunk) > max_bytes:
                     raise HTTPException(
                         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                         detail=f"Arquivo excede o limite de {settings.MAX_UPLOAD_MB} MB.",
                     )
-                digest.update(chunk)
-                handle.write(chunk)
-    except Exception:
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        raise
 
-    if size == 0:
-        os.remove(file_path)
-        raise HTTPException(status_code=400, detail="Arquivo vazio.")
+        if writer.size_bytes == 0:
+            writer.abort()
+            raise HTTPException(status_code=400, detail="Arquivo vazio.")
+
+        scan = get_scanner().scan_file(writer.temp_path)
+
+        if scan.is_infected:
+            writer.abort()
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Arquivo recusado pelo antivírus: {scan.signature or 'ameaça detectada'}."
+                ),
+            )
+
+        if not scan.is_clean and settings.ANTIVIRUS_REQUIRED:
+            # Falhar fechado: com varredura obrigatória, 'não sabemos' vale
+            # como recusa. O detalhe do motor vai na resposta para que o
+            # operador consiga distinguir clamd fora do ar de arquivo suspeito.
+            writer.abort()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    "Upload recusado: a varredura antivírus é obrigatória nesta "
+                    f"instalação e não pôde ser concluída ({scan.detail or scan.status})."
+                ),
+            )
+
+        stored = writer.commit()
+    except HTTPException:
+        writer.abort()
+        raise
+    except Exception:
+        writer.abort()
+        raise
 
     document = Document(
         organization_id=user.organization_id,
@@ -116,11 +148,17 @@ async def upload_document(
         title=title,
         category=category,
         version=version,
-        file_path=stored_name,
+        file_path=stored.key,
+        storage_backend=stored.backend,
         original_filename=original_filename or None,
         content_type=file.content_type,
-        size_bytes=size,
-        hash_sha256=digest.hexdigest(),
+        size_bytes=stored.size_bytes,
+        hash_sha256=stored.sha256,
+        antivirus_status=scan.status,
+        antivirus_engine=scan.engine,
+        antivirus_engine_version=scan.engine_version,
+        antivirus_signature=scan.signature,
+        antivirus_scanned_at=scan.scanned_at,
         status=DocumentState.VIGENTE,
         supersedes_id=superseded.id if superseded else None,
         uploaded_by_id=user.id,
@@ -129,10 +167,10 @@ async def upload_document(
 
     # A versão anterior sai de circulação no mesmo ato (§8.3 — bloqueio de
     # versão obsoleta). Duas versões vigentes do mesmo documento seriam uma
-    # ambiguidade perigosa em obra.
+    # ambiguidade perigosa em obra. É aqui também que a retenção começa a
+    # contar para o arquivo substituído.
     if superseded:
-        superseded.status = DocumentState.OBSOLETO
-        superseded.superseded_at = datetime.utcnow()
+        mark_obsolete(superseded)
 
     db.commit()
     db.refresh(document)
@@ -153,6 +191,57 @@ def list_project_documents(
     return query.order_by(Document.created_at.desc()).all()
 
 
+@router.get("/documents/{document_id}/download")
+def download_document(
+    document_id: str,
+    user: User = Depends(require_permission("document:read")),
+    db: Session = Depends(get_db),
+):
+    """Devolve o binário do documento.
+
+    Duas respostas negativas são distintas de propósito: `410 Gone` quando o
+    arquivo foi expurgado pela política de retenção — situação prevista, com
+    data e motivo registrados — e `404` quando ele sumiu do armazenamento sem
+    explicação, que é incidente e não rotina.
+    """
+    document = get_scoped_or_404(db, Document, document_id, user, "Documento")
+
+    if document.is_purged:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail=(
+                f"Arquivo expurgado em {document.purged_at:%d/%m/%Y} pela política "
+                f"de retenção. O registro do documento permanece disponível. "
+                f"{document.purge_reason or ''}".strip()
+            ),
+        )
+
+    storage = get_storage()
+    try:
+        chunks = storage.stream(document.file_path)
+        first = next(chunks, b"")
+    except ObjectNotFound:
+        raise HTTPException(
+            status_code=404,
+            detail="Arquivo não encontrado no armazenamento.",
+        )
+
+    def body():
+        yield first
+        yield from chunks
+
+    filename = document.original_filename or f"{document.title}{os.path.splitext(document.file_path)[1]}"
+    return StreamingResponse(
+        body(),
+        media_type=document.content_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Atlas-Document-Status": document.status,
+            "X-Atlas-Antivirus-Status": document.antivirus_status,
+        },
+    )
+
+
 @router.post("/documents/{document_id}/obsolete", response_model=DocumentResponse)
 def mark_document_obsolete(
     document_id: str,
@@ -160,11 +249,37 @@ def mark_document_obsolete(
     db: Session = Depends(get_db),
 ):
     document = get_scoped_or_404(db, Document, document_id, user, "Documento")
-    document.status = DocumentState.OBSOLETO
-    document.superseded_at = datetime.utcnow()
+    mark_obsolete(document)
     db.commit()
     db.refresh(document)
     return document
+
+
+@router.post("/storage/purge-expired", response_model=PurgeReportResponse)
+def purge_expired(
+    dry_run: bool = True,
+    user: User = Depends(require_permission("org:manage")),
+    db: Session = Depends(get_db),
+):
+    """Executa a política de retenção sobre a própria organização (§6.6).
+
+    Só descarta o binário; o registro do documento permanece. O padrão é
+    simulação: para apagar de fato é preciso pedir `dry_run=false`.
+    """
+    report = purge_expired_documents(
+        db, organization_id=user.organization_id, dry_run=dry_run
+    )
+    return PurgeReportResponse(
+        dry_run=report.dry_run,
+        retention_enabled=report.retention_enabled,
+        retention_days=settings.OBSOLETE_RETENTION_DAYS,
+        examined=report.examined,
+        purged=report.purged,
+        already_missing=report.already_missing,
+        failed=report.failed,
+        document_ids=report.document_ids,
+        errors=report.errors,
+    )
 
 
 @router.get("/documents/{document_id}/qrcode")
@@ -231,16 +346,19 @@ def extract_document_parameters(
             ),
         )
 
-    # `file_path` guarda apenas o nome interno; o diretório vem da configuração.
-    stored_path = os.path.join(UPLOAD_DIR, os.path.basename(document.file_path))
-    if not os.path.exists(stored_path):
+    if document.is_purged:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Arquivo expurgado pela política de retenção; não há o que extrair.",
+        )
+
+    try:
+        content_bytes = get_storage().read(document.file_path)
+    except ObjectNotFound:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
             detail="Arquivo do documento não está mais disponível no armazenamento.",
         )
-
-    with open(stored_path, "rb") as handle:
-        content_bytes = handle.read()
 
     result = PDFPlanParser.parse_file(
         content_bytes, document.original_filename or document.title
