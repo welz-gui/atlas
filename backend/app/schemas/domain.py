@@ -488,6 +488,38 @@ class DocumentResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class JobRecordResponse(BaseModel):
+    """Registro de um trabalho assíncrono (§6.7)."""
+
+    id: str
+    project_id: Optional[str] = None
+    job_type: str
+    status: str
+    payload: dict = Field(default_factory=dict)
+    result: Optional[dict] = None
+    error: Optional[str] = None
+    attempts: int = 0
+    max_attempts: int = 3
+    #: Verdadeiro quando não havia broker e o trabalho rodou dentro do request.
+    executed_inline: bool = False
+    queue: str = "default"
+    worker_id: Optional[str] = None
+    queued_at: datetime
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    duration_seconds: Optional[float] = None
+    is_terminal: bool = False
+    requested_by_id: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+class JobSubmitResponse(BaseModel):
+    job: JobRecordResponse
+    #: Descrição do backend de fila em uso — a interface precisa poder dizer ao
+    #: usuário se existe worker ou se o trabalho rodou ali mesmo.
+    queue_backend: str
+
+
 class PurgeReportResponse(BaseModel):
     """Resultado do expurgo por retenção (§6.6)."""
 

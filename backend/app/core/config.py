@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     # apagado: o que sai é o blob, e a linha passa a constar como expurgada.
     OBSOLETE_RETENTION_DAYS: int = 0
 
+    # Filas e workers (§6.7)
+    # `inline` executa no próprio processo da API — e o registro do trabalho
+    # diz isso. `redis` entrega a um worker separado.
+    QUEUE_BACKEND: str = "inline"
+    REDIS_URL: str = "redis://localhost:6379/0"
+
     # Antivírus (§6.6)
     # `none` significa "nenhuma verificação" — e é assim que fica registrado no
     # documento, em vez de dar o arquivo por limpo.

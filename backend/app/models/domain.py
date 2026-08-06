@@ -121,6 +121,30 @@ class ProtocolStatus:
     TERMINAL = {APROVADO, INDEFERIDO, ARQUIVADO}
 
 
+class JobStatus:
+    """Situação de um trabalho assíncrono (§6.7)."""
+
+    ENFILEIRADO = "enfileirado"
+    EXECUTANDO = "executando"
+    CONCLUIDO = "concluido"
+    FALHOU = "falhou"
+    CANCELADO = "cancelado"
+
+    ALL = {ENFILEIRADO, EXECUTANDO, CONCLUIDO, FALHOU, CANCELADO}
+    TERMINAL = {CONCLUIDO, FALHOU, CANCELADO}
+
+
+class JobType:
+    """Trabalhos que saem do ciclo da requisição (§6.7)."""
+
+    EXTRACAO_DOCUMENTO = "extracao_documento"
+    ANALISE_REGULATORIA = "analise_regulatoria"
+    GERACAO_LAUDO = "geracao_laudo"
+    EXPURGO_RETENCAO = "expurgo_retencao"
+
+    ALL = {EXTRACAO_DOCUMENTO, ANALISE_REGULATORIA, GERACAO_LAUDO, EXPURGO_RETENCAO}
+
+
 class RequirementStatus:
     """Situação de uma exigência ou notificação."""
 
@@ -731,6 +755,67 @@ class ProtocolEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     process: Mapped["ProtocolProcess"] = relationship(back_populates="events")
+
+
+# =============================================================================
+# Trabalhos assíncronos (§6.7)
+# =============================================================================
+
+class JobRecord(Base):
+    """Registro de um trabalho que sai do ciclo da requisição.
+
+    O registro existe **sempre**, tenha o trabalho ido para um worker ou
+    rodado no próprio processo por falta de broker. Quem consulta consegue
+    distinguir os dois casos por `executed_inline`: uma instalação sem fila
+    continua funcionando, mas não finge ter uma.
+
+    Um trabalho que nunca foi retirado da fila permanece `enfileirado` — visível
+    e cobrável. Nada some em silêncio.
+    """
+
+    __tablename__ = "job_records"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    organization_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    project_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("projects.id"), nullable=True, index=True
+    )
+
+    job_type: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(30), default=JobStatus.ENFILEIRADO, index=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    result: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    #: Mensagem de erro da última tentativa. Preservada mesmo após novo sucesso,
+    #: para que a falha não desapareça do histórico.
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=3)
+
+    #: Verdadeiro quando não havia broker e o trabalho rodou no request.
+    executed_inline: Mapped[bool] = mapped_column(Boolean, default=False)
+    queue: Mapped[str] = mapped_column(String(60), default="default")
+    worker_id: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+
+    queued_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    requested_by_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+
+    project: Mapped[Optional["Project"]] = relationship()
+
+    @property
+    def duration_seconds(self) -> Optional[float]:
+        if not self.started_at or not self.finished_at:
+            return None
+        return round((self.finished_at - self.started_at).total_seconds(), 3)
+
+    @property
+    def is_terminal(self) -> bool:
+        return self.status in JobStatus.TERMINAL
 
 
 # =============================================================================

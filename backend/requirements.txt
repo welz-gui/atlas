@@ -18,3 +18,8 @@ PyJWT>=2.8.0
 alembic>=1.13.0
 email-validator>=2.1.0
 qrcode>=7.4.2
+
+# Backends alternativos. Ficam instalados, mas só entram em uso quando
+# QUEUE_BACKEND=redis ou STORAGE_BACKEND=s3. O import é sob demanda.
+redis>=5.0.0
+boto3>=1.34.0

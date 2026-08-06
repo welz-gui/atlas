@@ -1,4 +1,3 @@
-import hashlib
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -13,8 +12,8 @@ from app.schemas.domain import (
     RegulatoryAnalysisReport,
     ValidationRecordResponse,
 )
-from app.services.pdf_report_generator import RegulatoryReportGenerator
 from app.services.regulatory_engine import RegulatoryEngine
+from app.services.report_builder import build_report
 
 router = APIRouter()
 
@@ -135,54 +134,9 @@ def generate_regulatory_pdf_report(
             ),
         )
 
-    version = run.project_version or project.current_version
-    project_dict = {
-        "id": project.id,
-        "name": project.name,
-        "city_name": project.city_name,
-        "state": project.state,
-        "zone": version.zone if version else "—",
-        "lot_area": version.lot_area if version else None,
-        "built_area": version.built_area if version else None,
-        "floors": version.floors if version else None,
-        "front_setback": version.front_setback if version else None,
-        "rear_setback": version.rear_setback if version else None,
-        "occupancy_rate": version.occupancy_rate if version else None,
-        "permeability_rate": version.permeability_rate if version else None,
-        "is_official_baseline": bool(version and version.is_official_baseline),
-        "version_number": version.version_number if version else None,
-        "version_state": version.state if version else None,
-    }
-
-    validations = [
-        {
-            "rule_title": record.rule_title,
-            "expected_value": record.expected_value,
-            "actual_value": record.actual_value,
-            "status": record.status,
-            "details": record.details,
-            "source_citation": record.source_citation,
-            "source_is_verified": record.source_is_verified,
-            "evidence_required": record.evidence_required,
-        }
-        for record in run.validations
-    ]
-
-    run_dict = {
-        "id": run.id,
-        "content_hash": run.content_hash,
-        "catalog_version": run.catalog_version,
-        "engine_version": run.engine_version,
-        "is_publishable": run.is_publishable,
-        "created_at": run.created_at,
-    }
-
-    pdf_bytes = RegulatoryReportGenerator.generate_pdf(project_dict, validations, run_dict)
-    safe_name = "".join(
-        c if c.isalnum() or c in "-_" else "_" for c in project.name
-    )[:60] or "empreendimento"
-    prefix = "" if run.is_publishable else "USO_INTERNO_"
-    filename = f"{prefix}Pre_Analise_{safe_name}.pdf"
+    # A montagem vive em `report_builder` para que o worker (§6.7) emita
+    # exatamente o mesmo documento que este endpoint.
+    pdf_bytes, filename, pdf_sha256 = build_report(project, run)
 
     return Response(
         content=pdf_bytes,
@@ -191,7 +145,7 @@ def generate_regulatory_pdf_report(
             "Content-Disposition": f'inline; filename="{filename}"',
             "X-Atlas-Analysis-Run": run.id,
             "X-Atlas-Content-Hash": run.content_hash or "",
-            "X-Atlas-Pdf-Sha256": hashlib.sha256(pdf_bytes).hexdigest(),
+            "X-Atlas-Pdf-Sha256": pdf_sha256,
             "X-Atlas-Publishable": "true" if run.is_publishable else "false",
         },
     )
