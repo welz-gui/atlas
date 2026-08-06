@@ -60,6 +60,17 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 /** Rotas que não exigem sessão. */
 const PUBLIC_ROUTES = ["/login"];
 
+/**
+ * Onde cada papel começa.
+ *
+ * O cliente entra no portal, não no painel operacional (§8.22). Não é
+ * controle de acesso — o servidor é quem recusa —, é não colocar diante do
+ * contratante uma tela cheia de informação em conferência técnica.
+ */
+function homeFor(role: UserRole): string {
+  return role === "client" ? "/portal" : "/";
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -106,7 +117,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (isLoading) return;
     const isPublic = PUBLIC_ROUTES.includes(pathname);
     if (!user && !isPublic) router.replace("/login");
-    if (user && isPublic) router.replace("/");
+    if (user && isPublic) router.replace(homeFor(user.role));
+    // O painel operacional não é a casa do cliente; o portal é.
+    if (user && user.role === "client" && pathname === "/") router.replace("/portal");
   }, [user, isLoading, pathname, router]);
 
   const signIn = useCallback(
@@ -114,7 +127,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const signed = await apiLogin(email, password);
       setUser(signed);
       setError(null);
-      router.replace("/");
+      router.replace(homeFor(signed.role));
     },
     [router]
   );

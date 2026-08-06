@@ -4,18 +4,26 @@ Data da revisão: 2026-08-06
 Commit revisado: `35f19e0`
 Escopo: `backend/`, `frontend/`, `docker-compose.yml`, testes.
 
-> **Situação em 2026-08-06 — Fases A e B concluídas.**
-> Os oito itens da Fase A e os oito da Fase B (§6) foram implementados. Os seis
-> bloqueadores de risco legal do §4.1 e os desvios estruturais do §4.2 estão
-> resolvidos e cobertos por teste de regressão (suíte: 8 → 110 testes). O
-> diagnóstico abaixo é preservado como registro do estado original; as tabelas
-> de status na §6 indicam o que já foi feito.
+> **Situação em 2026-08-06 — Fases A, B e C concluídas.**
+> Os 21 itens do backlog (§6) foram implementados. Os seis bloqueadores de
+> risco legal do §4.1 e os desvios estruturais do §4.2 estão resolvidos e
+> cobertos por teste de regressão (suíte: 8 → 199 testes). O diagnóstico abaixo
+> é preservado como registro do estado original; as tabelas de status na §6
+> indicam o que foi feito em cada fase.
 >
-> **A Fase C permanece pendente** — workers, camada de IA de verdade, storage
-> abstraído, PWA e portal do cliente. Restam também dois pontos das fases
-> anteriores que dependem de operação, não de código: a **validação humana do
-> catálogo** (nenhuma regra publicada) e a **ativação da RLS** (as políticas
-> existem; falta o `SET LOCAL` por transação).
+> **O que ainda falta não é código, é operação.** Dois pontos travam a
+> declaração do Estágio 1 e nenhum deles se resolve programando:
+>
+> 1. **A validação humana do catálogo.** Nenhuma regra foi conferida contra a
+>    legislação publicada de Lajeado. O sistema já recusa publicar sem
+>    documento e artigo, marca laudo como uso interno e omite o resumo no
+>    portal do cliente — mas a conferência em si depende de um responsável
+>    técnico sentar com a lei.
+> 2. **A ativação da RLS.** As políticas existem; falta conectar com usuário
+>    sem `BYPASSRLS` e definir `SET LOCAL atlas.organization_id` por transação.
+>
+> Some-se a isso o **Portão 0** (§14.1, §15.15): as regras hoje no catálogo não
+> vieram de casos reais. A mecânica está pronta; o conteúdo continua incerto.
 
 ---
 
@@ -328,15 +336,40 @@ Decisões que valem registro:
 
 Suíte de testes: **51 → 110**.
 
-### Fase C — Consolidação
+### Fase C — Consolidação ✅
 
-17. Workers Redis + Dramatiq/Celery para OCR, extração e geração de laudo (§6.7).
-18. Camada de IA de verdade (§6.8): provider abstrato, structured outputs validados por
-    Pydantic, RAG sobre o catálogo regulatório com pgvector, cache por hash, proveniência.
-    A IA **sugere** regra e rascunho; nunca publica (§3.4).
-19. Abstração de storage (§6.6) com versionamento, retenção e antivírus.
-20. PWA (§6.2) e operação offline de campo (§3.7) — só após o Estágio 1 fechado.
-21. Portal do cliente básico (§8.22), fechando o escopo do Estágio 1.
+| # | Item | Situação | Onde |
+|---|---|---|---|
+| 17 | Storage abstraído, retenção e antivírus (§6.6) | ✅ | `app/services/storage.py`, `antivirus.py`, `retention.py` |
+| 18 | Filas e workers assíncronos (§6.7) | ✅ | `app/workers/` |
+| 19 | Camada de IA com RAG e proveniência (§3.3, §6.8) | ✅ | `app/ai/` |
+| 20 | PWA e operação offline de campo (§6.2, §3.7) | ✅ | `frontend/public/sw.js`, `lib/offline.ts` |
+| 21 | Portal do cliente (§8.22) | ✅ | `app/api/v1/endpoints/portal.py`, `app/portal/` |
+
+Quatro decisões desta fase merecem registro, porque divergem do que o backlog
+original supunha:
+
+- **Sem Dramatiq nem Celery.** O registro do trabalho precisa existir no banco
+  de qualquer forma, por auditabilidade (§3.5). Com o estado no Postgres, o que
+  o broker carrega é um UUID — e para isso um framework de filas é peso morto.
+  A consequência prática é boa: um Redis reiniciado não perde trabalho, porque
+  não era ele que guardava o trabalho.
+
+- **Sem pgvector.** A recuperação sobre o catálogo é lexical, com sinônimos do
+  jargão de aprovação ("afastamento" → "recuo"). Para dezenas a poucas centenas
+  de regras por jurisdição, recupera bem e não adiciona índice a manter. A
+  interface `retrieve()` não muda quando isso deixar de bastar.
+
+- **A IA não pode citar a lei.** O contrato de saída pede `rule_key`, não
+  "art. 45", e toda chave é conferida contra o contexto entregue. Não bastava
+  instruir o modelo a não inventar: era preciso que não houvesse por onde.
+
+- **Offline é seletivo, e a exclusão é o ponto.** Diário e tarefas funcionam sem
+  rede; análise, laudo, catálogo e assistente recusam. Um veredicto de
+  conformidade calculado sobre catálogo desatualizado é pior que a ausência de
+  veredicto — e o service worker tem lista explícita disso.
+
+Suíte de testes: **110 → 199**.
 
 ### Observação sobre o Estágio 0
 
@@ -352,12 +385,17 @@ mecânica e incerto no conteúdo.
 
 ## 7. Checklist mínimo para declarar o Estágio 1 iniciado
 
-- [ ] Autenticação e isolamento por organização em todos os endpoints
-- [ ] Postgres + migrations versionadas em uso real
-- [ ] Regras vivendo no catálogo, com estado e vigência
-- [ ] Motor executando somente regras `vigente`
-- [ ] Versão de projeto imutável + linha de base oficial
-- [ ] Histórico de análises preservado (append-only)
-- [ ] Laudo com ressalvas legais e sem afirmação de validade oficial
-- [ ] Tela de validação humana operante
-- [ ] Zero dados fabricados em qualquer caminho de código
+- [x] Autenticação e isolamento por organização em todos os endpoints
+- [x] Postgres + migrations versionadas em uso real
+- [x] Regras vivendo no catálogo, com estado e vigência
+- [x] Motor executando somente regras executáveis; publicação exige `vigente`
+- [x] Versão de projeto imutável + linha de base oficial
+- [x] Histórico de análises preservado (append-only)
+- [x] Laudo com ressalvas legais e sem afirmação de validade oficial
+- [x] Tela de validação humana operante
+- [x] Zero dados fabricados em qualquer caminho de código
+- [ ] **Catálogo conferido contra a legislação publicada** — depende de
+      responsável técnico, não de código
+- [ ] **RLS ativa** — `SET LOCAL atlas.organization_id` por transação, com
+      usuário sem `BYPASSRLS`
+- [ ] **Portão 0** — regras vindas de casos reais de Lajeado

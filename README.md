@@ -4,7 +4,7 @@ Plataforma para aprovação, planejamento, execução e gestão de empreendiment
 A porta de entrada é o **Copiloto de Aprovação**: pré-análise urbanística
 determinística, com trilha de auditoria.
 
-> **Estágio atual: Fases A e B concluídas.**
+> **Estágio atual: Fases A, B e C concluídas.**
 > O catálogo regulatório ainda **não foi conferido** contra o texto legal
 > publicado por nenhum município. Enquanto uma regra não for validada por um
 > responsável identificado, os laudos que a aplicam saem marcados como uso
@@ -21,12 +21,17 @@ Estes não são aspirações — são invariantes cobertos por teste:
 | Ausência de dado nunca vira veredicto | Parâmetro não informado é `nao_verificavel`, nunca `nao_conforme` |
 | O sistema não inventa medidas | Extração sem evidência devolve `null` e um aviso |
 | Regras são dado, não código | Tabela `regulatory_rules`, com estado, vigência e validador |
-| Fonte legal única | Motor e assistente leem o mesmo catálogo |
+| Fonte legal única | Motor, assistente e IA leem o mesmo catálogo |
 | Nenhuma alteração silenciosa | Parâmetro alterado cria versão nova; a anterior fica intacta |
 | Análises são append-only | Cada avaliação cria um `AnalysisRun`; nada é sobrescrito |
 | Regra não validada não vai para o cliente | Publicar exige documento **e** artigo conferidos (§7.5) |
+| A IA propõe; quem publica é gente | Rascunho de IA nasce em `rascunho_extraido_por_ia`, fora do motor |
+| A IA não cita a lei; aponta para o catálogo | Chave citada fora do contexto é descartada e registrada |
+| Ausência de verificação não é aprovação | Upload sem antivírus fica `nao_verificado`, nunca "limpo" |
+| Expurgo apaga o arquivo, nunca o registro | Documento expurgado mantém título, versão, hash e autor |
 | Isolamento entre organizações | Recurso de outro tenant responde 404, nunca 403 |
 | Falha de rede não vira dado | O cliente HTTP lança erro; a interface o exibe |
+| Registro offline não é registro salvo | Item na fila aparece como *pendente*, com a hora em que foi escrito |
 
 ---
 
@@ -64,8 +69,15 @@ docker compose up -d
 # aponte DATABASE_URL no .env e rode: alembic upgrade head
 ```
 
-O Redis está declarado no compose mas **ainda não é usado** — não há workers
-(Fase C).
+### Worker (opcional)
+
+```bash
+# .env: QUEUE_BACKEND=redis
+python -m app.workers.worker --recover
+```
+
+Sem worker, os trabalhos executam no próprio processo da API — e o registro do
+trabalho diz isso (`executed_inline`).
 
 ### Testes
 
@@ -79,11 +91,11 @@ cd backend && python -m pytest tests/ -q
 
 | Papel | Pode |
 |---|---|
-| `owner` / `admin` | Tudo, incluindo gestão de usuários |
-| `validator` | Publicar regras no catálogo regulatório |
+| `owner` / `admin` | Tudo, incluindo gestão de usuários e retenção |
+| `validator` | Publicar regras no catálogo; extrair rascunhos por IA |
 | `engineer` | Projetos, versões, documentos, tramitação, obra |
 | `inspector` | Campo: diário, tarefas, documentos |
-| `client` | Somente leitura, restrito à própria organização |
+| `client` | Somente o portal de acompanhamento (§8.22) |
 
 A matriz vive em `backend/app/core/security.py`. O frontend espelha uma cópia
 apenas para esconder botões — quem decide é sempre o servidor.
@@ -144,6 +156,49 @@ permanece não verificada. Cada transição fica registrada em
 
 ---
 
+## Camada de IA
+
+Desligada por padrão (`AI_PROVIDER=none`): sem provedor, o assistente responde
+por busca determinística sobre o catálogo — e `GET /ai/status` declara isso, em
+vez de a interface ter de supor.
+
+Com `AI_PROVIDER=anthropic`, três invariantes governam o comportamento:
+
+1. **A IA propõe; não publica.** Rascunho extraído de texto legal nasce em
+   `rascunho_extraido_por_ia`, com o trecho literal de origem gravado para o
+   validador conferir. Não há parâmetro que faça uma regra proposta por modelo
+   chegar ao motor ou a um laudo.
+2. **A IA não cita a lei; aponta para o catálogo.** O contrato de saída pede
+   `rule_key`. Chave que não estava no contexto entregue é descartada, a
+   resposta cai para a busca determinística, e a interação fica
+   `grounded=false`.
+3. **A IA não emite veredicto.** Conformidade vem do motor determinístico.
+
+Toda chamada fica em `ai_interactions`: quem perguntou, qual modelo respondeu,
+quais regras entraram como contexto, quais foram citadas, tokens e latência.
+Consultável em `GET /ai/interactions` pelo papel `validator`.
+
+---
+
+## Operação de campo e PWA
+
+O Atlas é instalável (`manifest.webmanifest` + service worker) e opera em obra
+sem rede — para o que pode operar sem rede:
+
+- **funciona offline:** diário de obra e tarefas. Vão para uma fila em
+  IndexedDB e são reenviados quando a conexão volta. O item aparece como
+  *pendente*, com a hora em que foi escrito, **nunca** como salvo;
+- **não funciona offline:** análise, laudo, catálogo e assistente. O service
+  worker tem lista explícita de rotas que jamais respondem do cache. Um
+  veredicto calculado sobre catálogo desatualizado é pior que a ausência de
+  veredicto.
+
+A criação de diário e tarefa é idempotente por `client_token`, com escopo de
+organização: reenviar depois de uma resposta perdida devolve o registro
+original em vez de criar um segundo.
+
+---
+
 ## API
 
 Todos os endpoints de negócio exigem `Authorization: Bearer <token>` e operam
@@ -162,9 +217,15 @@ restritos à organização do usuário.
 | `GET` | `/api/v1/catalog/validation-queue` | Regras aguardando conferência |
 | `POST` | `/api/v1/catalog/rules/{id}/validate` | Ato de validação técnica |
 | `POST` | `/api/v1/projects/{id}/protocols` | Registra protocolo |
-| `POST` | `/api/v1/protocols/{id}/requirements` | Registra exigência do órgão |
 | `GET` | `/api/v1/projects/{id}/prediction-accuracy` | Recall de bloqueios (§11) |
-| `GET` | `/api/v1/documents/{id}/qrcode` | QR de verificação do documento |
+| `GET` | `/api/v1/documents/{id}/download` | 410 se expurgado; 404 se sumiu |
+| `POST` | `/api/v1/storage/purge-expired` | Retenção; simulação por padrão |
+| `POST` | `/api/v1/projects/{id}/jobs/analysis` | Análise assíncrona (§6.7) |
+| `GET` | `/api/v1/jobs/{id}` | Situação do trabalho |
+| `GET` | `/api/v1/ai/status` | Declara se há modelo configurado |
+| `POST` | `/api/v1/ai/rule-drafts` | Rascunhos de regra por IA (validator) |
+| `GET` | `/api/v1/ai/interactions` | Proveniência das chamadas ao modelo |
+| `GET` | `/api/v1/portal/projects` | Visão de acompanhamento do cliente (§8.22) |
 
 Documentação interativa em `/docs`.
 
@@ -176,7 +237,8 @@ Documentação interativa em `/docs`.
 - `SECRET_KEY` é **obrigatória** quando `ENVIRONMENT=production`; em
   desenvolvimento, gera-se uma chave efêmera por processo.
 - Isolamento por organização em toda consulta de negócio
-  (`backend/app/api/deps.py`).
+  (`backend/app/api/deps.py`). Nos workers, que rodam sem `get_current_user`,
+  o filtro é refeito à mão em cada executor.
 - **RLS no Postgres** como segunda linha de defesa. A migration de RLS cria as
   políticas; para terem efeito é preciso conectar com um usuário sem
   `BYPASSRLS` e definir, por transação:
@@ -186,7 +248,9 @@ Documentação interativa em `/docs`.
   ```
 
   Sem isso a política nega tudo — falhar fechado é deliberado.
-- Upload grava sob UUID, com allowlist de extensão e limite de tamanho.
+- Upload grava sob chave opaca, com allowlist de extensão e limite de tamanho.
+  Com `ANTIVIRUS_BACKEND=clamav` e `ANTIVIRUS_REQUIRED=true`, o que não pôde
+  ser varrido é recusado.
 
 ---
 
@@ -196,19 +260,19 @@ Estado real do sistema, para que ninguém descubra isso tarde demais:
 
 - **O catálogo não foi validado.** Nenhum parâmetro foi conferido contra a
   legislação de Lajeado. Laudos com regras pendentes saem marcados como uso
-  interno.
+  interno, e o portal do cliente não exibe o resumo de conformidade.
 - **RLS não está ativa por padrão** — falta o `SET LOCAL` por transação
   descrito acima. Hoje o isolamento depende do filtro de aplicação.
 - **Sem MFA** e sem refresh token; a sessão expira em 7 dias.
-- **Sem antivírus** no upload e sem política de retenção.
 - **Sem OCR.** PDF digitalizado (imagem) não é extraível e retorna aviso.
 - **Sem IFC, DXF ou BIM.**
-- **O assistente não é um modelo de linguagem** — é busca por palavra-chave
-  sobre o catálogo, e se apresenta como tal.
-- **Sem filas.** Extração e laudo rodam de forma síncrona no request.
-- **Sem PWA nem operação offline.**
 - **Sem coletor nem monitor regulatório** (§7.2) — o catálogo é alimentado à
-  mão.
+  mão ou por rascunho de IA sobre texto colado.
+- **RAG lexical, não vetorial.** Suficiente para catálogo municipal; trocar por
+  pgvector não muda a interface `retrieve()`.
+- **A fila offline não sincroniza fotos** — apenas diário e tarefas.
+- **Antivírus e S3 não foram exercitados contra serviço real** nesta base;
+  há teste de contrato, não de integração.
 
 O caminho para resolver cada um está em
 [`docs/REVISAO_ADERENCIA_PLANO_v2.md`](docs/REVISAO_ADERENCIA_PLANO_v2.md).

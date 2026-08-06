@@ -10,16 +10,21 @@ import {
   FileText,
   FolderKanban,
   Gavel,
+  HardHat,
   LayoutDashboard,
   ScrollText,
   Search,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 
-const NAV_SECTIONS: {
-  title: string;
-  items: { name: string; href: string; icon: typeof LayoutDashboard; permission?: string }[];
-}[] = [
+type NavItem = {
+  name: string;
+  href: string;
+  icon: typeof LayoutDashboard;
+  permission?: string;
+};
+
+const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
   {
     title: "Empreendimento",
     items: [
@@ -28,6 +33,9 @@ const NAV_SECTIONS: {
       { name: "Copiloto de Aprovação", href: "/approvals", icon: FileCheck2 },
       { name: "Tramitação", href: "/protocol", icon: Gavel },
       { name: "Projetos e Documentos", href: "/documents", icon: FileText },
+      // A equipe também abre o portal: serve para conferir o que o cliente
+      // está vendo antes de uma reunião.
+      { name: "Portal do Cliente", href: "/portal", icon: HardHat },
     ],
   },
   {
@@ -46,9 +54,25 @@ const NAV_SECTIONS: {
   },
 ];
 
+/**
+ * Navegação do papel `client` (§8.22).
+ *
+ * O portal é o que existe para o contratante — e é o único item que ele vê.
+ * A restrição real está no servidor: o portal filtra o que pode ser entregue,
+ * e as rotas de escrita continuam recusando este papel. Aqui é só para não
+ * oferecer a ele telas que trariam informação em conferência técnica.
+ */
+const CLIENT_NAV: { title: string; items: NavItem[] }[] = [
+  {
+    title: "Acompanhamento",
+    items: [{ name: "Meu empreendimento", href: "/portal", icon: HardHat }],
+  },
+];
+
 export default function Sidebar() {
   const pathname = usePathname();
   const { user } = useAuth();
+  const sections = user?.role === "client" ? CLIENT_NAV : NAV_SECTIONS;
 
   return (
     <aside className="w-64 h-screen fixed left-0 top-0 z-40 flex flex-col glass-panel border-r border-slate-800">
@@ -65,7 +89,7 @@ export default function Sidebar() {
       </div>
 
       <nav className="flex-1 p-4 space-y-4 overflow-y-auto">
-        {NAV_SECTIONS.map((section) => (
+        {sections.map((section) => (
           <div key={section.title} className="space-y-1">
             <div className="px-3 py-1 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
               {section.title}

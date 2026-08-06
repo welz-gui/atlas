@@ -913,3 +913,83 @@ export function humanize(value: string | null | undefined): string {
   if (!value) return "—";
   return value.replace(/_/g, " ");
 }
+
+// --- Portal do cliente (§8.22) ----------------------------------------------
+
+export interface PortalDocument {
+  id: string;
+  title: string;
+  category: string;
+  version: string;
+  created_at: string;
+}
+
+export interface PortalRequirement {
+  description: string;
+  status: string;
+  raised_at?: string | null;
+  due_date?: string | null;
+}
+
+export interface PortalProtocol {
+  protocol_number: string;
+  agency: string;
+  status: string;
+  submitted_at?: string | null;
+  decided_at?: string | null;
+  open_requirements: PortalRequirement[];
+}
+
+export interface PortalMilestone {
+  name: string;
+  progress_percent: number;
+}
+
+/**
+ * Resumo de conformidade.
+ *
+ * `available: false` **não** significa "sem análise": significa que a análise
+ * depende de regras ainda em conferência técnica e por isso não pode ser
+ * entregue ao cliente (§7.5). O `reason` diz qual dos dois casos é.
+ */
+export interface PortalCompliance {
+  available: boolean;
+  reason?: string | null;
+  analysed_at?: string | null;
+  project_version_number?: number | null;
+  total_checks?: number | null;
+  conforme_count?: number | null;
+  pending_count?: number | null;
+  blocking_count?: number | null;
+}
+
+export interface PortalProject {
+  id: string;
+  name: string;
+  address?: string | null;
+  district?: string | null;
+  city_name: string;
+  state: string;
+  licensing_status: string;
+  use_type?: string | null;
+  units_count?: number | null;
+  technical_responsible_name?: string | null;
+  version_number?: number | null;
+  version_state?: string | null;
+  has_official_baseline: boolean;
+  physical_progress_percent: number;
+  milestones: PortalMilestone[];
+  open_tasks: number;
+  current_documents: PortalDocument[];
+  protocols: PortalProtocol[];
+  compliance: PortalCompliance;
+  notice: string;
+}
+
+export function fetchPortalProjects(): Promise<PortalProject[]> {
+  return request<PortalProject[]>("/portal/projects");
+}
+
+export function fetchPortalProject(projectId: string): Promise<PortalProject> {
+  return request<PortalProject>(`/portal/projects/${projectId}`);
+}
