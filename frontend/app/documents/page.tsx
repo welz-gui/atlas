@@ -1,115 +1,153 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { 
-  FileText, 
-  UploadCloud, 
-  ShieldCheck, 
-  CheckCircle2, 
-  FileCode, 
-  Lock, 
-  Copy, 
-  Check, 
-  FolderPlus,
-  Tag,
+import { useCallback, useEffect, useState } from "react";
+import {
+  AlertTriangle,
+  Check,
+  Copy,
+  FileText,
   Hash,
   Sparkles,
-  ArrowRight,
-  Sliders,
-  X
+  UploadCloud,
 } from "lucide-react";
-import { 
-  fetchProjects, 
-  fetchProjectDocuments, 
-  uploadProjectDocument, 
-  extractDocumentParameters,
-  updateProjectParameters,
-  Project, 
+import {
+  ApiError,
   DocumentItem,
-  ExtractionResponse
+  ExtractionResponse,
+  Project,
+  extractDocumentParameters,
+  fetchProjectDocuments,
+  updateProjectParameters,
+  uploadProjectDocument,
 } from "@/lib/api";
+import { projectShortLabel, useProjects } from "@/lib/useProjects";
+import { EmptyState, ErrorBanner, LoadingState } from "@/components/StateViews";
+
+const EXTRACTION_FIELDS: { key: keyof ExtractionResponse["extracted_parameters"]; label: string; unit: string }[] = [
+  { key: "lot_area", label: "Área do lote", unit: "m²" },
+  { key: "built_area", label: "Área construída", unit: "m²" },
+  { key: "front_setback", label: "Recuo frontal", unit: "m" },
+  { key: "rear_setback", label: "Recuo dos fundos", unit: "m" },
+  { key: "permeability_rate", label: "Permeabilidade", unit: "%" },
+  { key: "floors", label: "Pavimentos", unit: "" },
+];
 
 export default function DocumentsPage() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+  const {
+    projects,
+    selectedProjectId,
+    setSelectedProjectId,
+    replaceProject,
+    isLoading: isLoadingProjects,
+    error: projectsError,
+    reload: reloadProjects,
+  } = useProjects();
+
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<ApiError | Error | null>(null);
+
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<ApiError | Error | null>(null);
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
 
-  // Extraction State
-  const [isExtractingId, setIsExtractingId] = useState<string | null>(null);
-  const [extractionResult, setExtractionResult] = useState<ExtractionResponse | null>(null);
+  const [extractingId, setExtractingId] = useState<string | null>(null);
+  const [extraction, setExtraction] = useState<ExtractionResponse | null>(null);
+  const [extractionError, setExtractionError] = useState<ApiError | Error | null>(null);
   const [isApplied, setIsApplied] = useState(false);
 
-  // Form state
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("projeto_arquitetonico");
   const [version, setVersion] = useState("v1.0");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
-  useEffect(() => {
-    async function loadProjects() {
-      const data = await fetchProjects();
-      if (data && data.length > 0) {
-        setProjects(data);
-        setSelectedProjectId(data[0].id);
-      }
+  const loadDocuments = useCallback(async () => {
+    if (!selectedProjectId) {
+      setDocuments([]);
+      return;
     }
-    loadProjects();
-  }, []);
-
-  useEffect(() => {
-    if (!selectedProjectId) return;
-    async function loadDocs() {
-      const docs = await fetchProjectDocuments(selectedProjectId);
-      setDocuments(docs);
+    setIsLoading(true);
+    setError(null);
+    try {
+      setDocuments(await fetchProjectDocuments(selectedProjectId));
+    } catch (err) {
+      setDocuments([]);
+      setError(err instanceof Error ? err : new Error(String(err)));
+    } finally {
+      setIsLoading(false);
     }
-    loadDocs();
   }, [selectedProjectId]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setSelectedFile(e.target.files[0]);
-      if (!title) {
-        setTitle(e.target.files[0].name.replace(/\.[^/.]+$/, ""));
-      }
-    }
-  };
+  useEffect(() => {
+    loadDocuments();
+    setExtraction(null);
+    setExtractionError(null);
+  }, [loadDocuments]);
 
-  const handleUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleUpload = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (!selectedFile || !selectedProjectId || !title) return;
 
     setIsUploading(true);
-    const formData = new FormData();
-    formData.append("title", title);
-    formData.append("category", category);
-    formData.append("version", version);
-    formData.append("file", selectedFile);
+    setUploadError(null);
+    try {
+      const formData = new FormData();
+      formData.append("title", title);
+      formData.append("category", category);
+      formData.append("version", version);
+      formData.append("file", selectedFile);
 
-    const uploaded = await uploadProjectDocument(selectedProjectId, formData);
-
-    if (uploaded) {
-      setDocuments(prev => [uploaded, ...prev]);
+      const uploaded = await uploadProjectDocument(selectedProjectId, formData);
+      setDocuments((prev) => [uploaded, ...prev]);
       setTitle("");
       setSelectedFile(null);
-    } else {
-      const fallback: DocumentItem = {
-        id: `doc-${Date.now()}`,
-        project_id: selectedProjectId,
-        title,
-        category,
-        version,
-        file_path: `uploads/${selectedFile.name}`,
-        hash_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        status: "vigente",
-        created_at: new Date().toISOString()
-      };
-      setDocuments(prev => [fallback, ...prev]);
-      setTitle("");
-      setSelectedFile(null);
+    } catch (err) {
+      // Sem documento no servidor não há documento na lista. O protótipo
+      // inseria uma entrada local com um hash fixo, dando a impressão de um
+      // upload que nunca aconteceu.
+      setUploadError(err instanceof Error ? err : new Error(String(err)));
+    } finally {
+      setIsUploading(false);
     }
-    setIsUploading(false);
+  };
+
+  const handleExtract = async (documentId: string) => {
+    if (!selectedProjectId) return;
+    setExtractingId(documentId);
+    setExtraction(null);
+    setExtractionError(null);
+    setIsApplied(false);
+    try {
+      setExtraction(await extractDocumentParameters(selectedProjectId, documentId));
+    } catch (err) {
+      setExtractionError(err instanceof Error ? err : new Error(String(err)));
+    } finally {
+      setExtractingId(null);
+    }
+  };
+
+  const handleApplyExtracted = async () => {
+    if (!extraction || !selectedProjectId) return;
+    const parameters = extraction.extracted_parameters;
+
+    // Só o que foi efetivamente extraído é aplicado; campos nulos ficam como
+    // "não informado" no cadastro.
+    const payload: Partial<Project> = {};
+    for (const { key } of EXTRACTION_FIELDS) {
+      const value = parameters[key];
+      if (value !== null && value !== undefined) {
+        (payload as Record<string, number>)[key] = value;
+      }
+    }
+    if (Object.keys(payload).length === 0) return;
+
+    try {
+      const updated = await updateProjectParameters(selectedProjectId, payload);
+      replaceProject(updated);
+      setIsApplied(true);
+    } catch (err) {
+      setExtractionError(err instanceof Error ? err : new Error(String(err)));
+    }
   };
 
   const handleCopyHash = (hash: string) => {
@@ -118,357 +156,283 @@ export default function DocumentsPage() {
     setTimeout(() => setCopiedHash(null), 2000);
   };
 
-  const handleExtract = async (docId: string) => {
-    setIsExtractingId(docId);
-    setIsApplied(false);
-
-    const res = await extractDocumentParameters(selectedProjectId, docId);
-    if (res) {
-      setExtractionResult(res);
-    } else {
-      // Fallback demo extraction result
-      setExtractionResult({
-        document_id: docId,
-        document_title: documents.find(d => d.id === docId)?.title || "Prancha Arquitetônica",
-        extracted_parameters: {
-          lot_area: 450.0,
-          built_area: 240.0,
-          front_setback: 4.50,
-          rear_setback: 3.50,
-          permeability_rate: 22.5,
-          floors: 2,
-          confidence_score: 95.0,
-          raw_matches: [
-            "Área do Lote: 450,00 m²",
-            "Área Construída: 240,00 m²",
-            "Recuo Frontal: 4,50 m",
-            "Recuo Fundos: 3,50 m",
-            "Permeabilidade: 22.5%"
-          ]
-        }
-      });
-    }
-    setIsExtractingId(null);
-  };
-
-  const handleApplyExtractedParameters = async () => {
-    if (!extractionResult || !selectedProjectId) return;
-
-    const ext = extractionResult.extracted_parameters;
-    const updatePayload: Partial<Project> = {};
-    if (ext.lot_area) updatePayload.lot_area = ext.lot_area;
-    if (ext.built_area) updatePayload.built_area = ext.built_area;
-    if (ext.front_setback) updatePayload.front_setback = ext.front_setback;
-    if (ext.rear_setback) updatePayload.rear_setback = ext.rear_setback;
-    if (ext.permeability_rate) updatePayload.permeability_rate = ext.permeability_rate;
-
-    await updateProjectParameters(selectedProjectId, updatePayload);
-    
-    // Update local project state
-    setProjects(prev => prev.map(p => p.id === selectedProjectId ? { ...p, ...updatePayload } : p));
-    setIsApplied(true);
-  };
-
-  const activeProject = projects.find(p => p.id === selectedProjectId);
+  const appliedCount = extraction
+    ? EXTRACTION_FIELDS.filter(
+        ({ key }) => extraction.extracted_parameters[key] !== null
+      ).length
+    : 0;
 
   return (
     <div className="space-y-8">
-      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <FileText className="w-5 h-5 text-cyan-400" />
-            <span className="text-xs font-bold text-cyan-400 uppercase tracking-widest">Módulo Documental • Extração Assistida & Hashing</span>
+            <span className="text-xs font-bold text-cyan-400 uppercase tracking-widest">
+              Módulo documental
+            </span>
           </div>
-          <h1 className="text-2xl font-bold text-white">Gestão Documental & Leitor de Pranchas</h1>
+          <h1 className="text-2xl font-bold text-white">
+            Gestão documental e extração assistida
+          </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Repositório oficial com registro criptográfico de versões, extração assistida do Quadro de Áreas e selo SHA-256.
+            Cada upload recebe hash SHA-256. A extração devolve apenas o que estiver
+            escrito no documento — nunca um valor estimado.
           </p>
         </div>
 
-        {/* Project Switcher */}
         {projects.length > 0 && (
-          <div className="flex items-center gap-2 p-1.5 rounded-xl bg-slate-900 border border-slate-800">
-            {projects.map(p => (
+          <div className="flex items-center gap-2 p-1.5 rounded-xl bg-slate-900 border border-slate-800 flex-wrap">
+            {projects.map((project) => (
               <button
-                key={p.id}
-                onClick={() => setSelectedProjectId(p.id)}
+                key={project.id}
+                onClick={() => setSelectedProjectId(project.id)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  selectedProjectId === p.id
-                    ? "bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-bold shadow-md shadow-cyan-500/20"
+                  selectedProjectId === project.id
+                    ? "bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-bold"
                     : "text-slate-400 hover:text-white"
                 }`}
               >
-                {p.name.split(" ")[0]} {p.name.split(" ")[1] || ""}
+                {projectShortLabel(project)}
               </button>
             ))}
           </div>
         )}
       </div>
 
-      {/* Upload Box Card */}
-      <div className="glass-panel rounded-2xl p-6 border-cyan-500/30 glow-blue space-y-4">
-        <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
-          <UploadCloud className="w-5 h-5 text-cyan-400" />
-          <h2 className="text-sm font-bold text-white">Upload de Prancha / Documento Oficial de Projeto</h2>
-        </div>
+      {projectsError && <ErrorBanner error={projectsError} onRetry={reloadProjects} />}
+      {error && <ErrorBanner error={error} onRetry={loadDocuments} />}
+      {(isLoadingProjects || isLoading) && <LoadingState label="Carregando documentos..." />}
 
-        <form onSubmit={handleUpload} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-            <div>
-              <label className="block font-semibold text-slate-300 mb-1">Título do Documento:</label>
-              <input
-                type="text"
-                required
-                placeholder="Ex: Prancha de Arquitetura 01 - Implantação"
-                value={title}
-                onChange={e => setTitle(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 focus:outline-none focus:border-cyan-500"
-              />
+      {!isLoadingProjects && !projectsError && projects.length === 0 && (
+        <EmptyState
+          title="Nenhum empreendimento cadastrado"
+          description="Cadastre um empreendimento para anexar documentos e pranchas."
+        />
+      )}
+
+      {selectedProjectId && !isLoading && (
+        <>
+          <div className="glass-panel rounded-2xl p-6 border-cyan-500/30 glow-blue space-y-4">
+            <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+              <UploadCloud className="w-5 h-5 text-cyan-400" />
+              <h2 className="text-sm font-bold text-white">
+                Upload de prancha ou documento de projeto
+              </h2>
             </div>
 
-            <div>
-              <label className="block font-semibold text-slate-300 mb-1">Categoria:</label>
-              <select
-                value={category}
-                onChange={e => setCategory(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-slate-200"
-              >
-                <option value="projeto_arquitetonico">Projeto Arquitetônico (PDF/DXF)</option>
-                <option value="modelo_bim">Modelo BIM (IFC)</option>
-                <option value="quadro_areas">Quadro de Áreas (NB 140)</option>
-                <option value="ppci">PPCI / Bombeiros</option>
-                <option value="matricula">Matrícula / Documentação Legal</option>
-              </select>
-            </div>
+            {uploadError && <ErrorBanner error={uploadError} />}
 
-            <div>
-              <label className="block font-semibold text-slate-300 mb-1">Versão do Documento:</label>
-              <input
-                type="text"
-                value={version}
-                onChange={e => setVersion(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-slate-200"
-              />
-            </div>
+            <form onSubmit={handleUpload} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                <label className="block">
+                  <span className="block font-semibold text-slate-300 mb-1">Título:</span>
+                  <input
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:border-cyan-500 outline-none"
+                  />
+                </label>
+                <label className="block">
+                  <span className="block font-semibold text-slate-300 mb-1">Categoria:</span>
+                  <select
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white outline-none"
+                  >
+                    <option value="projeto_arquitetonico">Projeto arquitetônico</option>
+                    <option value="memorial">Memorial descritivo</option>
+                    <option value="levantamento">Levantamento topográfico</option>
+                    <option value="matricula">Matrícula do imóvel</option>
+                    <option value="outros">Outros</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="block font-semibold text-slate-300 mb-1">Versão:</span>
+                  <input
+                    value={version}
+                    onChange={(e) => setVersion(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:border-cyan-500 outline-none"
+                  />
+                </label>
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                <input
+                  type="file"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] ?? null;
+                    setSelectedFile(file);
+                    if (file && !title) setTitle(file.name.replace(/\.[^/.]+$/, ""));
+                  }}
+                  className="text-xs text-slate-400 file:mr-3 file:px-3 file:py-2 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-200 file:text-xs file:font-semibold"
+                />
+                <button
+                  type="submit"
+                  disabled={isUploading || !selectedFile}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {isUploading ? "Enviando..." : "Enviar documento"}
+                </button>
+              </div>
+            </form>
           </div>
 
-          {/* Drag & Drop File Selector */}
-          <div className="relative border-2 border-dashed border-slate-700 hover:border-cyan-500/50 rounded-xl p-6 text-center transition-colors bg-slate-900/40">
-            <input
-              type="file"
-              onChange={handleFileChange}
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-            />
-            <div className="space-y-2 pointer-events-none">
-              <FileCode className="w-8 h-8 text-cyan-400 mx-auto" />
-              <p className="text-xs font-semibold text-slate-200">
-                {selectedFile ? selectedFile.name : "Arraste um arquivo (PDF, DXF, IFC) ou clique para selecionar"}
-              </p>
-              <p className="text-[10px] text-slate-500">
-                Cálculo automático de Hash SHA-256 e extração do Quadro de Áreas
-              </p>
-            </div>
-          </div>
+          {extractionError && <ErrorBanner error={extractionError} />}
 
-          <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={isUploading || !selectedFile}
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-50 text-white font-bold text-xs transition-all shadow-lg shadow-cyan-500/20 flex items-center gap-2"
-            >
-              <Lock className="w-4 h-4" />
-              {isUploading ? "Calculando Hash e Salvando..." : "Registrar Documento com Hash SHA-256"}
-            </button>
-          </div>
-        </form>
-      </div>
-
-      {/* Documents Table */}
-      <div className="glass-panel rounded-2xl p-6 space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-          <div>
-            <h2 className="text-base font-bold text-white">
-              Linha de Base Documental: {activeProject ? activeProject.name : "Todos os Projetos"}
-            </h2>
-            <p className="text-xs text-slate-400">Documentos vigentes, leitor assistido e prova de integridade</p>
-          </div>
-          <span className="text-xs text-slate-400 font-mono font-semibold">
-            {documents.length} documento(s) cadastrado(s)
-          </span>
-        </div>
-
-        {documents.length === 0 ? (
-          <div className="text-center py-8 text-slate-500 text-xs">
-            Nenhum documento cadastrado para este empreendimento ainda.
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {documents.map((doc) => (
-              <div key={doc.id} className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 transition-colors space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 font-bold text-xs">
-                      {doc.version}
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-white">{doc.title}</h3>
-                      <p className="text-xs text-slate-400 flex items-center gap-2 mt-0.5">
-                        <span className="capitalize text-cyan-400 font-medium">{doc.category.replace("_", " ")}</span>
-                        <span>•</span>
-                        <span>{new Date(doc.created_at).toLocaleDateString("pt-BR")}</span>
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    {/* Extract Data Button */}
-                    <button
-                      onClick={() => handleExtract(doc.id)}
-                      disabled={isExtractingId === doc.id}
-                      className="px-3 py-1.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 font-semibold text-xs flex items-center gap-1.5 transition-all"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      {isExtractingId === doc.id ? "Analisando..." : "Extrair Parâmetros (IA)"}
-                    </button>
-
-                    <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-extrabold uppercase flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                      Vigente
-                    </span>
-                  </div>
+          {extraction && (
+            <div className="glass-panel rounded-2xl p-6 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-cyan-400" />
+                  <h2 className="text-sm font-bold text-white">
+                    Extração assistida: {extraction.document_title}
+                  </h2>
                 </div>
+                <span
+                  className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border ${
+                    extraction.status === "extraido"
+                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                      : extraction.status === "extraido_parcial"
+                      ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                      : "bg-blue-500/10 text-blue-300 border-blue-500/40"
+                  }`}
+                >
+                  {extraction.status.replace(/_/g, " ")} · {extraction.fields_found} de{" "}
+                  {extraction.fields_expected}
+                </span>
+              </div>
 
-                {/* SHA-256 Hash Display Badge */}
-                {doc.hash_sha256 && (
-                  <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800/80 flex items-center justify-between gap-3 text-[11px]">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Hash className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                      <span className="text-slate-500 font-mono shrink-0">SHA-256:</span>
-                      <span className="font-mono text-slate-300 truncate">{doc.hash_sha256}</span>
-                    </div>
-
-                    <button
-                      onClick={() => handleCopyHash(doc.hash_sha256!)}
-                      className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-semibold flex items-center gap-1 shrink-0 transition-colors"
-                    >
-                      {copiedHash === doc.hash_sha256 ? (
-                        <>
-                          <Check className="w-3 h-3 text-emerald-400" /> Copiado!
-                        </>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                {EXTRACTION_FIELDS.map(({ key, label, unit }) => {
+                  const value = extraction.extracted_parameters[key];
+                  return (
+                    <div key={key}>
+                      <span className="text-slate-500 text-[11px] block">{label}:</span>
+                      {value === null || value === undefined ? (
+                        <span className="font-mono text-blue-300/70 italic">
+                          não encontrado
+                        </span>
                       ) : (
-                        <>
-                          <Copy className="w-3 h-3 text-slate-400" /> Copiar Hash
-                        </>
+                        <span className="font-mono text-cyan-400 font-bold">
+                          {value} {unit}
+                        </span>
                       )}
-                    </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {extraction.evidence.length > 0 && (
+                <div className="space-y-1.5 pt-3 border-t border-slate-800">
+                  <span className="text-[11px] font-semibold text-slate-400 uppercase">
+                    Evidência (trecho de origem)
+                  </span>
+                  {extraction.evidence.map((item, index) => (
+                    <p key={index} className="text-[11px] text-slate-300 font-mono">
+                      • {item}
+                    </p>
+                  ))}
+                </div>
+              )}
+
+              {extraction.warnings.length > 0 && (
+                <div className="p-3 rounded-xl border border-blue-500/40 bg-blue-950/20 space-y-1">
+                  <span className="text-[11px] font-bold text-blue-300 flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5" /> Avisos da extração
+                  </span>
+                  {extraction.warnings.map((warning, index) => (
+                    <p key={index} className="text-[11px] text-blue-200/80">
+                      {warning}
+                    </p>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-3 border-t border-slate-800 gap-3 flex-wrap">
+                <p className="text-[11px] text-slate-400">
+                  {appliedCount === 0
+                    ? "Nada a aplicar: nenhum parâmetro foi localizado no documento."
+                    : `${appliedCount} parâmetro(s) serão gravados no cadastro. Os demais permanecem "não informado".`}
+                </p>
+                <button
+                  onClick={handleApplyExtracted}
+                  disabled={appliedCount === 0 || isApplied}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isApplied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" /> Aplicado
+                    </>
+                  ) : (
+                    "Aplicar ao cadastro"
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="glass-panel rounded-2xl p-6 space-y-4">
+            <h2 className="text-base font-bold text-white border-b border-slate-800 pb-4">
+              Documentos do empreendimento
+            </h2>
+
+            {documents.length === 0 ? (
+              <EmptyState
+                title="Nenhum documento anexado"
+                description="Envie a prancha arquitetônica ou o memorial descritivo para iniciar a extração assistida."
+              />
+            ) : (
+              <div className="space-y-3">
+                {documents.map((doc) => (
+                  <div
+                    key={doc.id}
+                    className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-white truncate">{doc.title}</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          {doc.category.replace(/_/g, " ")} • {doc.version}
+                          {doc.original_filename && ` • ${doc.original_filename}`}
+                          {doc.size_bytes &&
+                            ` • ${(doc.size_bytes / 1024).toFixed(0)} KB`}
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={() => handleExtract(doc.id)}
+                        disabled={extractingId === doc.id}
+                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 shrink-0 disabled:opacity-50"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                        {extractingId === doc.id ? "Extraindo..." : "Extrair parâmetros"}
+                      </button>
+                    </div>
+
+                    {doc.hash_sha256 && (
+                      <button
+                        onClick={() => handleCopyHash(doc.hash_sha256!)}
+                        className="w-full flex items-center gap-2 p-2 rounded-lg bg-slate-950/60 border border-slate-800 text-left group"
+                      >
+                        <Hash className="w-3 h-3 text-cyan-400 shrink-0" />
+                        <span className="text-[10px] font-mono text-slate-400 truncate flex-1">
+                          {doc.hash_sha256}
+                        </span>
+                        {copiedHash === doc.hash_sha256 ? (
+                          <Check className="w-3 h-3 text-emerald-400 shrink-0" />
+                        ) : (
+                          <Copy className="w-3 h-3 text-slate-500 group-hover:text-slate-300 shrink-0" />
+                        )}
+                      </button>
+                    )}
                   </div>
-                )}
+                ))}
               </div>
-            ))}
+            )}
           </div>
-        )}
-      </div>
-
-      {/* Extraction Results Modal */}
-      {extractionResult && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="glass-panel w-full max-w-lg rounded-2xl p-6 space-y-5 border border-cyan-500/40 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-cyan-400" />
-                <h2 className="text-base font-bold text-white">Extração Assistida de Desenho</h2>
-              </div>
-              <button onClick={() => setExtractionResult(null)} className="text-slate-400 hover:text-white">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-4 text-xs">
-              <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between">
-                <div>
-                  <span className="text-slate-400">Documento Origem:</span>
-                  <p className="font-bold text-white text-sm">{extractionResult.document_title}</p>
-                </div>
-                <div className="text-right">
-                  <span className="text-slate-400">Confiança do Leitor:</span>
-                  <p className="font-mono font-extrabold text-cyan-400 text-sm">
-                    {extractionResult.extracted_parameters.confidence_score}%
-                  </p>
-                </div>
-              </div>
-
-              {/* Extracted Metrics Grid */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-                  <span className="text-slate-400 text-[10px]">Área do Terreno (Lote):</span>
-                  <p className="font-mono text-sm font-bold text-white">
-                    {extractionResult.extracted_parameters.lot_area ? `${extractionResult.extracted_parameters.lot_area} m²` : "Não identificado"}
-                  </p>
-                </div>
-
-                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-                  <span className="text-slate-400 text-[10px]">Área Construída (Projeção):</span>
-                  <p className="font-mono text-sm font-bold text-white">
-                    {extractionResult.extracted_parameters.built_area ? `${extractionResult.extracted_parameters.built_area} m²` : "Não identificado"}
-                  </p>
-                </div>
-
-                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-                  <span className="text-slate-400 text-[10px]">Recuo Frontal:</span>
-                  <p className="font-mono text-sm font-bold text-white">
-                    {extractionResult.extracted_parameters.front_setback ? `${extractionResult.extracted_parameters.front_setback} m` : "Não identificado"}
-                  </p>
-                </div>
-
-                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-                  <span className="text-slate-400 text-[10px]">Recuo dos Fundos:</span>
-                  <p className="font-mono text-sm font-bold text-white">
-                    {extractionResult.extracted_parameters.rear_setback ? `${extractionResult.extracted_parameters.rear_setback} m` : "Não identificado"}
-                  </p>
-                </div>
-              </div>
-
-              {/* Raw Matches */}
-              {extractionResult.extracted_parameters.raw_matches.length > 0 && (
-                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">Textos Mapeados no Quadro de Áreas:</span>
-                  <ul className="text-[11px] font-mono text-cyan-300 space-y-1">
-                    {extractionResult.extracted_parameters.raw_matches.map((m, i) => (
-                      <li key={i}>• {m}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {isApplied && (
-                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-semibold text-center flex items-center justify-center gap-2">
-                  <CheckCircle2 className="w-4 h-4" /> Parâmetros aplicados ao projeto com sucesso! Copiloto reavaliado.
-                </div>
-              )}
-            </div>
-
-            <div className="pt-3 border-t border-slate-800 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setExtractionResult(null)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs"
-              >
-                Fechar
-              </button>
-
-              <button
-                type="button"
-                onClick={handleApplyExtractedParameters}
-                disabled={isApplied}
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-50 text-white font-bold text-xs transition-all shadow-lg shadow-cyan-500/20 flex items-center gap-2"
-              >
-                <Sliders className="w-4 h-4" />
-                {isApplied ? "Aplicado!" : "Aplicar Parâmetros ao Projeto"}
-              </button>
-            </div>
-          </div>
-        </div>
+        </>
       )}
     </div>
   );

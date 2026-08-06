@@ -1,184 +1,206 @@
 "use client";
 
 import Link from "next/link";
-import { 
-  Building2, 
-  CheckCircle2, 
-  AlertTriangle, 
-  HelpCircle, 
-  ArrowUpRight, 
-  ShieldCheck, 
-  FileSpreadsheet,
-  Clock,
-  Sparkles
+import {
+  ArrowUpRight,
+  Building2,
+  CheckCircle2,
+  HelpCircle,
+  ShieldCheck,
+  Sparkles,
+  XCircle,
 } from "lucide-react";
+import { formatParam } from "@/lib/api";
+import { useProjects } from "@/lib/useProjects";
+import {
+  EmptyState,
+  ErrorBanner,
+  LoadingState,
+  StatusChip,
+  UnvalidatedRulesBanner,
+} from "@/components/StateViews";
 
+/**
+ * Painel geral.
+ *
+ * Todos os números vêm da API. O protótipo trazia indicadores fixos no JSX,
+ * que pareciam medições reais do portfólio.
+ */
 export default function DashboardPage() {
+  const { projects, isLoading, error, reload } = useProjects();
+
+  const allValidations = projects.flatMap((p) => p.validations ?? []);
+  const totals = {
+    conforme: allValidations.filter((v) => v.status === "conforme").length,
+    naoConforme: allValidations.filter((v) => v.status === "nao_conforme").length,
+    atencao: allValidations.filter((v) => v.status === "atencao").length,
+    naoVerificavel: allValidations.filter((v) => v.status === "nao_verificavel").length,
+  };
+  const hasUnvalidatedRules = allValidations.some((v) => !v.is_publishable);
+
   return (
     <div className="space-y-8">
-      {/* Header Banner */}
       <div className="p-6 rounded-2xl bg-gradient-to-r from-blue-900/40 via-slate-900 to-cyan-950/40 border border-blue-500/20 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <Sparkles className="w-4 h-4 text-cyan-400" />
-            <span className="text-xs font-bold text-cyan-400 uppercase tracking-widest">Atlas AI Copilot</span>
-          </div>
-          <h1 className="text-2xl font-bold text-white">Painel Geral dos Empreendimentos</h1>
-          <p className="text-xs text-slate-400 mt-1">
-            Conformidade legal, aprovação municipal e linha de base operacional em tempo real.
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Link
-            href="/approvals"
-            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold text-xs transition-all shadow-lg shadow-cyan-500/20 flex items-center gap-2"
-          >
-            <ShieldCheck className="w-4 h-4" />
-            Nova Pré-Análise Legal
-          </Link>
-        </div>
-      </div>
-
-      {/* Metrics Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        <div className="glass-panel p-5 rounded-2xl space-y-3">
-          <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-semibold uppercase tracking-wider">Empreendimentos</span>
-            <Building2 className="w-5 h-5 text-blue-400" />
-          </div>
-          <div className="flex items-baseline justify-between">
-            <span className="text-3xl font-extrabold text-white">2</span>
-            <span className="text-xs text-emerald-400 font-semibold flex items-center gap-0.5">
-              <ArrowUpRight className="w-3 h-3" /> Ativos
+            <span className="text-xs font-bold text-cyan-400 uppercase tracking-widest">
+              Atlas • Copiloto de Aprovação
             </span>
           </div>
-          <p className="text-[11px] text-slate-500">Jurisdição: Lajeado / RS</p>
+          <h1 className="text-2xl font-bold text-white">Painel geral dos empreendimentos</h1>
+          <p className="text-xs text-slate-400 mt-1">
+            Conformidade urbanística consolidada a partir da análise mais recente de cada
+            empreendimento.
+          </p>
         </div>
 
-        <div className="glass-panel p-5 rounded-2xl space-y-3">
-          <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-semibold uppercase tracking-wider">Regras Conformes</span>
-            <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-          </div>
-          <div className="flex items-baseline justify-between">
-            <span className="text-3xl font-extrabold text-emerald-400">7</span>
-            <span className="text-xs text-slate-400">de 9 checadas</span>
-          </div>
-          <p className="text-[11px] text-slate-500">Taxa de Ocupação & Gabarito OK</p>
-        </div>
-
-        <div className="glass-panel p-5 rounded-2xl space-y-3">
-          <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-semibold uppercase tracking-wider">Incompatibilidades</span>
-            <AlertTriangle className="w-5 h-5 text-amber-400" />
-          </div>
-          <div className="flex items-baseline justify-between">
-            <span className="text-3xl font-extrabold text-amber-400">2</span>
-            <span className="text-xs text-amber-400/80 font-medium">Requer atenção</span>
-          </div>
-          <p className="text-[11px] text-slate-500">Recuo frontal em Sol Nascente</p>
-        </div>
-
-        <div className="glass-panel p-5 rounded-2xl space-y-3">
-          <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-semibold uppercase tracking-wider">Não Verificáveis</span>
-            <HelpCircle className="w-5 h-5 text-slate-400" />
-          </div>
-          <div className="flex items-baseline justify-between">
-            <span className="text-3xl font-extrabold text-slate-300">2</span>
-            <span className="text-xs text-slate-400">NBR 9050</span>
-          </div>
-          <p className="text-[11px] text-slate-500">Aguardando arquivo de projeto</p>
-        </div>
+        <Link
+          href="/approvals"
+          className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold text-xs transition-all shadow-lg shadow-cyan-500/20 flex items-center gap-2"
+        >
+          <ShieldCheck className="w-4 h-4" />
+          Abrir pré-análise legal
+        </Link>
       </div>
 
-      {/* Main Content Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Active Projects Table */}
-        <div className="lg:col-span-2 glass-panel rounded-2xl p-6 space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-            <div>
-              <h2 className="text-base font-bold text-white">Empreendimentos em Licenciamento</h2>
-              <p className="text-xs text-slate-400">Projetos sob análise prévia e aprovação municipal</p>
-            </div>
-            <Link href="/projects" className="text-xs text-cyan-400 hover:text-cyan-300 font-semibold">
-              Ver todos →
+      {error && <ErrorBanner error={error} onRetry={reload} />}
+      {isLoading && <LoadingState label="Carregando painel..." />}
+
+      {!isLoading && !error && projects.length === 0 && (
+        <EmptyState
+          title="Nenhum empreendimento cadastrado"
+          description="Cadastre um empreendimento para que o painel exiba indicadores de conformidade."
+          action={
+            <Link
+              href="/projects"
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white text-xs font-bold"
+            >
+              Cadastrar empreendimento
             </Link>
+          }
+        />
+      )}
+
+      {!isLoading && !error && projects.length > 0 && (
+        <>
+          {hasUnvalidatedRules && <UnvalidatedRulesBanner />}
+
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-5">
+            <MetricCard
+              label="Empreendimentos"
+              value={projects.length}
+              icon={<Building2 className="w-7 h-7 text-cyan-400/80" />}
+              accent="border-l-cyan-500"
+            />
+            <MetricCard
+              label="Conformes"
+              value={totals.conforme}
+              icon={<CheckCircle2 className="w-7 h-7 text-emerald-400/80" />}
+              accent="border-l-emerald-500"
+              valueClass="text-emerald-400"
+            />
+            <MetricCard
+              label="Não conformes"
+              value={totals.naoConforme}
+              icon={<XCircle className="w-7 h-7 text-red-400/80" />}
+              accent="border-l-red-500"
+              valueClass="text-red-400"
+            />
+            <MetricCard
+              label="Atenção"
+              value={totals.atencao}
+              icon={<HelpCircle className="w-7 h-7 text-amber-400/80" />}
+              accent="border-l-amber-500"
+              valueClass="text-amber-400"
+            />
+            <MetricCard
+              label="Não verificáveis"
+              value={totals.naoVerificavel}
+              icon={<HelpCircle className="w-7 h-7 text-blue-400/80" />}
+              accent="border-l-blue-500"
+              valueClass="text-blue-300"
+            />
           </div>
 
-          <div className="space-y-3">
-            {/* Project 1 */}
-            <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 transition-colors flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold text-sm">
-                  RA
-                </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-white">Residencial das Acácias</h3>
-                  <p className="text-xs text-slate-400">Zona Z2 • Lajeado-RS • 240 m²</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-4">
-                <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-semibold">
-                  100% Conforme
-                </span>
-                <Link href="/approvals" className="text-xs text-slate-400 hover:text-white">
-                  Detalhes
-                </Link>
-              </div>
+          <div className="glass-panel rounded-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <h2 className="text-base font-bold text-white">Situação por empreendimento</h2>
+              <Link
+                href="/projects"
+                className="text-xs font-semibold text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
+              >
+                Ver todos <ArrowUpRight className="w-3.5 h-3.5" />
+              </Link>
             </div>
 
-            {/* Project 2 */}
-            <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 transition-colors flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold text-sm">
-                  SN
-                </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-white">Residencial Sol Nascente</h3>
-                  <p className="text-xs text-slate-400">Zona Z2 • Lajeado-RS • 220 m²</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-4">
-                <span className="px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[11px] font-semibold">
-                  Incompatibilidade (Recuo)
-                </span>
-                <Link href="/approvals" className="text-xs text-slate-400 hover:text-white">
-                  Detalhes
-                </Link>
-              </div>
-            </div>
-          </div>
-        </div>
+            <div className="space-y-3">
+              {projects.map((project) => {
+                const validations = project.validations ?? [];
+                const blockers = validations.filter((v) => v.status === "nao_conforme");
+                const pending = validations.filter((v) => v.status === "nao_verificavel");
+                const worst = blockers[0] ?? pending[0] ?? validations[0];
 
-        {/* Regulatory Updates & Recent Actions */}
-        <div className="glass-panel rounded-2xl p-6 space-y-4">
-          <div className="border-b border-slate-800 pb-4">
-            <h2 className="text-base font-bold text-white">Monitor Regulatório</h2>
-            <p className="text-xs text-slate-400">Legislação e normas de Lajeado/RS</p>
-          </div>
+                return (
+                  <div
+                    key={project.id}
+                    className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-white truncate">{project.name}</p>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        {project.city_name}/{project.state} • Zona {project.zone} • ocupação{" "}
+                        {formatParam(project.occupancy_rate, "%", 1)}
+                      </p>
+                    </div>
 
-          <div className="space-y-4">
-            <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 text-xs space-y-1">
-              <div className="flex items-center justify-between text-slate-400">
-                <span className="font-semibold text-cyan-400">Plano Diretor Lajeado</span>
-                <span>Vigente</span>
-              </div>
-              <p className="text-slate-300">Lei Complementar nº 01/2026</p>
-              <p className="text-[11px] text-slate-500">Última checagem autônoma: Hoje, 20:45</p>
-            </div>
-
-            <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 text-xs space-y-1">
-              <div className="flex items-center justify-between text-slate-400">
-                <span className="font-semibold text-blue-400">Código de Edificações</span>
-                <span>Vigente</span>
-              </div>
-              <p className="text-slate-300">Recuos mínimos e taxa de ocupação Z2</p>
-              <p className="text-[11px] text-slate-500">Validado por Responsável Técnico</p>
+                    <div className="flex items-center gap-3 shrink-0">
+                      {validations.length === 0 ? (
+                        <span className="text-[11px] text-slate-500 italic">
+                          sem análise registrada
+                        </span>
+                      ) : (
+                        <>
+                          <span className="text-[11px] text-slate-400">
+                            {blockers.length} bloqueio(s) · {pending.length} pendente(s)
+                          </span>
+                          {worst && <StatusChip status={worst.status} />}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
-        </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  icon,
+  accent,
+  valueClass = "text-white",
+}: {
+  label: string;
+  value: number;
+  icon: React.ReactNode;
+  accent: string;
+  valueClass?: string;
+}) {
+  return (
+    <div
+      className={`glass-panel p-5 rounded-2xl border-l-4 ${accent} flex items-center justify-between gap-2`}
+    >
+      <div className="min-w-0">
+        <p className="text-[11px] font-bold text-slate-400 uppercase truncate">{label}</p>
+        <p className={`text-2xl font-extrabold mt-1 ${valueClass}`}>{value}</p>
       </div>
+      <div className="shrink-0">{icon}</div>
     </div>
   );
 }

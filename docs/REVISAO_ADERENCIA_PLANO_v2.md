@@ -4,6 +4,16 @@ Data da revisão: 2026-08-06
 Commit revisado: `35f19e0`
 Escopo: `backend/`, `frontend/`, `docker-compose.yml`, testes.
 
+> **Situação em 2026-08-06 — Fase A concluída.**
+> Os oito itens da Fase A (§6) foram implementados. Os seis bloqueadores de
+> risco legal do §4.1 estão resolvidos e cobertos por teste de regressão
+> (suíte: 8 → 51 testes). O diagnóstico abaixo é preservado como registro do
+> estado original; a coluna de status na §6 indica o que já foi feito.
+>
+> **As Fases B e C permanecem pendentes** — em especial autenticação,
+> multitenancy, Postgres com migrations e validação humana do catálogo. O
+> sistema continua sem autenticação e não deve ser exposto na internet.
+
 ---
 
 ## 1. Sumário executivo
@@ -244,25 +254,41 @@ assistido") está fechado, porque o Nível 1 pressupõe regras cadastradas **com
 
 ## 6. Próximos passos
 
-### Fase A — Correções de risco (dias, não semanas)
+### Fase A — Correções de risco ✅ concluída
 
-Nenhum uso com cliente real antes disto.
+| # | Item | Status |
+|---|---|---|
+| 1 | Remover o *fallback* fabricado de `pdf_parser.py`; adicionar `pypdf`; corrigir os regex; retornar `nao_verificavel` sem evidência | ✅ |
+| 2 | Reescrever o laudo: remover a afirmação de validade oficial; incluir as ressalvas do §12 | ✅ |
+| 3 | Distinguir `atencao` e `nao_verificavel` de `nao_conforme` no PDF | ✅ |
+| 4 | Sanitizar o upload (UUID no disco, allowlist de extensão, limite de tamanho) | ✅ |
+| 5 | Tornar a avaliação *append-only*; tirar o efeito colateral do `GET` do laudo | ✅ |
+| 6 | Unificar as citações legais numa fonte única; marcar como não verificadas | ✅ |
+| 7 | Remover mocks do frontend; tornar visível o erro de backend indisponível | ✅ |
+| 8 | Limpar o repositório, corrigir `.gitignore`, adicionar `README.md` e `.env.example` | ✅ |
 
-1. Remover o *fallback* fabricado de `pdf_parser.py`; adicionar `pypdf` a `requirements.txt`;
-   corrigir os regex; retornar `nao_verificavel` quando não houver evidência.
-2. Reescrever o rodapé do laudo: remover a afirmação de validade oficial; adicionar aviso
-   de não substituição do responsável técnico, limitação de responsabilidade, seção
-   destacada de **não verificáveis** e nível de confiança (§12).
-3. Distinguir visualmente `atencao` e `nao_verificavel` de `nao_conforme` no PDF
-   (hoje tudo que não é `conforme` vira "✗" vermelho).
-4. Sanitizar o upload (UUID no disco, validação de MIME e tamanho).
-5. Tornar `evaluate_project` *append-only* e mover a geração do laudo para `POST`.
-6. Unificar as citações legais numa única fonte; marcar como não verificadas até revisão
-   humana da legislação real de Lajeado.
-7. Remover mocks do frontend ou marcá-los inequivocamente como "dados de demonstração";
-   tornar visível o erro quando o backend está fora do ar.
-8. Limpar o repositório (`.pyc`, `.db`, `tsbuildinfo`), corrigir `.gitignore`, adicionar
-   `README.md` e `.env.example`.
+Detalhes do que foi entregue além do enunciado dos itens:
+
+- **Catálogo regulatório como dado** (`app/regulatory/`): as regras saíram do código
+  para YAML versionado, com os estados do §7.4, vigência, severidade, tolerância e
+  evidências exigidas. Foi o que tornou exequível a regra de segurança §7.5 — o campo
+  `is_publishable` agora bloqueia laudo com regra não validada.
+- **`AnalysisRun`**: cada avaliação é uma análise imutável, com contagens, versão do
+  catálogo, versão do motor e hash de conteúdo. O `GET` do laudo passou a ser somente
+  leitura e aceita `run_id` para reemitir análises históricas.
+- **Parâmetros nulos**: os campos urbanísticos passaram a aceitar `NULL`. Antes, o
+  padrão `0.0` fazia um cadastro novo reprovar em recuo — ausência de dado virava
+  não conformidade.
+- **Taxa de ocupação derivada**: deixou de ser coluna armazenada, eliminando a
+  divergência entre o valor gravado e o recalculado.
+- **Severidade `alerta`**: o contador `atencao`, que era código morto, passou a ser
+  alcançável.
+- **Vazamento de jurisdição corrigido**: as regras de vagas e acessibilidade não se
+  aplicam mais a qualquer município.
+- **Robustez do extrator**: normalização de números BR/EN e busca insensível a acentos
+  preservando o trecho original como evidência.
+
+Suíte de testes: **8 → 51**, com um teste de regressão para cada bloqueador do §4.1.
 
 ### Fase B — Núcleo do Estágio 1 (o retrofit caro)
 
