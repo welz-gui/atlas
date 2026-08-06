@@ -23,3 +23,6 @@ qrcode>=7.4.2
 # QUEUE_BACKEND=redis ou STORAGE_BACKEND=s3. O import é sob demanda.
 redis>=5.0.0
 boto3>=1.34.0
+
+# Camada de IA. Sem AI_PROVIDER configurado nada é chamado.
+anthropic>=0.120.0

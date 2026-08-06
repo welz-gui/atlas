@@ -44,6 +44,17 @@ class Settings(BaseSettings):
     # apagado: o que sai é o blob, e a linha passa a constar como expurgada.
     OBSOLETE_RETENTION_DAYS: int = 0
 
+    # Camada de IA (§3.3, §6.8)
+    # `none` é o padrão: sem provedor, o assistente responde por busca
+    # determinística no catálogo e diz que é isso que está fazendo.
+    AI_PROVIDER: str = "none"  # none | anthropic
+    ANTHROPIC_API_KEY: str = ""
+    AI_MODEL: str = "claude-opus-5"
+    AI_TIMEOUT_SECONDS: int = 60
+    #: Horas que uma resposta idêntica (mesma pergunta, mesmo catálogo, mesmo
+    #: modelo) pode ser reaproveitada. Zero desliga o cache.
+    AI_CACHE_HOURS: int = 24
+
     # Filas e workers (§6.7)
     # `inline` executa no próprio processo da API — e o registro do trabalho
     # diz isso. `redis` entrega a um worker separado.

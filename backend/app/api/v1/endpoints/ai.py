@@ -1,85 +1,94 @@
-"""Assistente de consulta ao catálogo regulatório.
+"""Assistente normativo e extração assistida de regras (§3.3, §6.8).
 
-Não há modelo de linguagem aqui: é uma busca por palavra-chave sobre o
-catálogo — e a resposta diz isso ao usuário, em vez de se apresentar como IA.
+Toda a lógica vive em `app.ai.service`. O que este arquivo garante é o
+contorno: quem pode pedir o quê, e o que a resposta declara sobre si mesma.
 
-O módulo também não guarda nenhuma referência legal própria. Toda citação vem
-do catálogo, que é a fonte única. Foi a duplicação dessas referências que
-produziu, no protótipo, artigos conflitantes entre o motor e o assistente para
-o mesmo parâmetro.
+A resposta sempre diz **como** foi produzida (`method`, `is_ai_generated`,
+`model`), porque a diferença entre uma busca no catálogo e uma resposta de
+modelo importa para quem vai usá-la em um protocolo. E nunca cita artigo de lei
+por texto do modelo: a citação é resolvida a partir do catálogo, que é a fonte
+única (§3.4).
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.ai import service as ai_service
+from app.ai.provider import get_provider
+from app.api.deps import get_current_user, require_permission
 from app.core.database import get_db
-from app.models.domain import Project, User
-from app.regulatory.catalog import RegulatoryCatalog, RuleState
+from app.models.domain import AIInteraction, Project, RegulatoryDocument, User
 from app.services.regulatory_engine import RegulatoryEngine
 
 router = APIRouter()
 
-DISCLAIMER = (
-    "Resposta gerada por busca determinística no catálogo regulatório do Atlas — "
-    "não é interpretação jurídica, não substitui o responsável técnico e não "
-    "constitui manifestação de órgão público."
-)
-
-#: Palavras-chave → regras do catálogo.
-TOPIC_KEYWORDS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
-    (("recuo frontal", "frontal", "alinhamento"), "lajeado_recuo_frontal_z2"),
-    (("fundos", "posterior"), "lajeado_recuo_fundos_z2"),
-    (("ocupacao", "ocupação"), "lajeado_taxa_ocupacao_max_z2"),
-    (
-        ("permeabilidade", "permeavel", "permeável", "drenante", "solo"),
-        "lajeado_taxa_permeabilidade_min_z2",
-    ),
-    (("pavimento", "gabarito", "altura", "andar"), "lajeado_gabarito_maximo_z2"),
-    (("vaga", "estacionamento", "garagem"), "lajeado_vagas_estacionamento"),
-    (("acessibilidade", "nbr", "rampa", "9050"), "lajeado_acessibilidade_nbr9050"),
-)
-
-# "recuo" isolado cobre os dois recuos cadastrados.
-BROAD_KEYWORDS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
-    ("recuo", ("lajeado_recuo_frontal_z2", "lajeado_recuo_fundos_z2")),
-    ("afastamento", ("lajeado_recuo_frontal_z2", "lajeado_recuo_fundos_z2")),
-)
-
 
 class AIChatRequest(BaseModel):
-    prompt: str
+    prompt: str = Field(min_length=2, max_length=4000)
     project_id: Optional[str] = None
 
 
 class AIChatResponse(BaseModel):
     answer: str
-    law_citations: List[str]
-    suggested_actions: List[str]
-    disclaimer: str = DISCLAIMER
-    #: Falso por definição enquanto não houver camada de modelo (§6.8).
-    is_ai_generated: bool = False
-    method: str = "busca_por_palavra_chave_no_catalogo"
+    law_citations: List[str] = []
+    suggested_actions: List[str] = []
     matched_rules: List[str] = []
+    disclaimer: str
+    #: Falso quando a resposta veio da busca determinística no catálogo.
+    is_ai_generated: bool = False
+    method: str
+    model: Optional[str] = None
+    #: Falso quando o modelo referenciou regra fora do contexto entregue.
+    grounded: bool = True
+    warnings: List[str] = []
+    interaction_id: Optional[str] = None
+    served_from_cache: bool = False
 
 
-def _match_rule_ids(prompt: str) -> List[str]:
-    lowered = prompt.lower()
-    matched: List[str] = []
+class RuleDraftRequest(BaseModel):
+    legal_text: str = Field(
+        min_length=40,
+        max_length=60000,
+        description="Trecho do texto legal a partir do qual extrair regras.",
+    )
+    jurisdiction: str = Field(default="BR-RS-4311403")
+    regulatory_document_id: Optional[str] = None
 
-    for keywords, rule_id in TOPIC_KEYWORDS:
-        if any(keyword in lowered for keyword in keywords):
-            matched.append(rule_id)
 
-    for keyword, rule_ids in BROAD_KEYWORDS:
-        if keyword in lowered:
-            matched.extend(rule_ids)
+class RuleDraftResponse(BaseModel):
+    created_rule_ids: List[str] = []
+    drafts: List[dict] = []
+    notes: Optional[str] = None
+    interaction_id: Optional[str] = None
+    error: Optional[str] = None
+    #: Constante: rascunho de IA nasce e permanece em rascunho até validação.
+    state: str = "rascunho_extraido_por_ia"
+    reminder: str = (
+        "Rascunhos não são aplicados pelo motor nem entram em laudo. Confira cada um "
+        "contra o texto legal publicado e publique pela fila de validação (§7.5)."
+    )
 
-    seen = set()
-    return [r for r in matched if not (r in seen or seen.add(r))]
+
+class AIStatusResponse(BaseModel):
+    provider: str
+    available: bool
+    model: Optional[str] = None
+    description: str
+
+
+@router.get("/ai/status", response_model=AIStatusResponse)
+def ai_status(user: User = Depends(get_current_user)):
+    """Diz se há modelo por trás — a interface precisa poder ser honesta."""
+    provider = get_provider()
+    return AIStatusResponse(
+        provider=provider.name,
+        available=provider.available,
+        model=getattr(provider, "model", None),
+        description=provider.describe(),
+    )
 
 
 @router.post("/ai/chat", response_model=AIChatResponse)
@@ -99,100 +108,97 @@ def atlas_ai_chat(
             .first()
         )
 
-    jurisdiction = project.city_ibge if project else "BR-RS-4311403"
-    municipality = project.city_name if project else "Lajeado"
-
-    catalog = RegulatoryCatalog.from_db(db, jurisdiction)
-    rule_ids = _match_rule_ids(req.prompt)
-    rules = [r for r in (catalog.get(rule_id) for rule_id in rule_ids) if r]
-
-    citations: List[str] = []
-    actions: List[str] = []
-    lines: List[str] = []
-
-    # Estado das verificações do projeto, quando houver análise registrada.
-    statuses: Dict[str, str] = {}
+    # Situação das verificações do projeto, quando houver análise registrada.
+    statuses = {}
     if project:
         run = RegulatoryEngine.latest_run(db, project.id)
         if run:
             statuses = {v.rule_id: v.status for v in run.validations}
 
-    if rules:
-        lines.append(
-            f"O catálogo regulatório do Atlas para {municipality} registra os "
-            f"seguintes parâmetros relacionados à sua consulta:"
+    resposta = ai_service.ask(db, req.prompt, user, project=project, statuses=statuses)
+    return AIChatResponse(**resposta.__dict__)
+
+
+@router.post(
+    "/ai/rule-drafts",
+    response_model=RuleDraftResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def extract_rule_drafts(
+    req: RuleDraftRequest,
+    user: User = Depends(require_permission("catalog:validate")),
+    db: Session = Depends(get_db),
+):
+    """Propõe regras a partir de texto legal, como rascunho (§7.4).
+
+    Restrito a quem valida o catálogo — não porque a extração publique algo
+    (ela não publica), mas porque quem enfileira trabalho de conferência deve
+    ser quem vai conferir.
+    """
+    document: Optional[RegulatoryDocument] = None
+    if req.regulatory_document_id:
+        document = (
+            db.query(RegulatoryDocument)
+            .filter(RegulatoryDocument.id == req.regulatory_document_id)
+            .first()
         )
-        for rule in rules:
-            limit = (
-                rule.expected_label()
-                if rule.check
-                else "verificação documental (não derivável de parâmetros numéricos)"
+        if not document:
+            raise HTTPException(
+                status_code=404, detail="Documento regulatório não encontrado."
             )
-            pending = "" if rule.is_publishable else " — regra ainda não validada tecnicamente"
-            line = f"• {rule.title}: {limit}{pending}."
-            if rule.rule_id in statuses:
-                line += (
-                    f" No empreendimento analisado, esta verificação está "
-                    f"'{statuses[rule.rule_id]}'."
-                )
-            lines.append(line)
 
-            citations.append(f"{rule.title} — {rule.source.citation()}")
-            if rule.check:
-                actions.append(
-                    f"Conferir '{rule.check['field']}' no projeto contra o limite "
-                    f"{rule.expected_label()} e anexar evidência: "
-                    f"{', '.join(rule.evidence_required) or 'não especificada'}."
-                )
-            else:
-                actions.append(
-                    f"Providenciar análise técnica de {rule.title.lower()} "
-                    f"({', '.join(rule.evidence_required) or 'evidência não especificada'})."
-                )
-    else:
-        available = catalog.for_jurisdiction(jurisdiction)
-        lines.append(
-            f"Não encontrei no catálogo de {municipality} nenhum parâmetro "
-            f"correspondente a '{req.prompt}'."
-        )
-        if available:
-            lines.append(
-                "Parâmetros cadastrados para esta jurisdição: "
-                + "; ".join(rule.title for rule in available)
-                + "."
-            )
-        citations.append(
-            f"Catálogo regulatório de {municipality} "
-            f"(versão {catalog.version_for(jurisdiction)})"
-        )
-        actions.append(
-            "Reformule a consulta usando um dos parâmetros cadastrados, ou solicite "
-            "o cadastro da norma faltante ao responsável pelo catálogo."
-        )
-
-    unvalidated = [r for r in rules if r.state != RuleState.VIGENTE or not r.validated_by]
-    if unvalidated:
-        lines.append("")
-        lines.append(
-            f"Atenção: {len(unvalidated)} de {len(rules)} regra(s) citada(s) estão em "
-            "validação e tiveram a referência de artigo removida por não terem sido "
-            "conferidas contra o texto legal publicado. Não utilize estes valores como "
-            "base para protocolo sem conferência do responsável técnico."
-        )
-
-    if project:
-        version = project.current_version
-        lines.append("")
-        lines.append(
-            f"Empreendimento em contexto: '{project.name}' — {municipality}, "
-            f"zona {version.zone if version else '—'}, "
-            f"lote {(version.lot_area if version else None) or 'não informado'} m², "
-            f"área construída {(version.built_area if version else None) or 'não informado'} m²."
-        )
-
-    return AIChatResponse(
-        answer="\n".join(lines),
-        law_citations=citations,
-        suggested_actions=actions,
-        matched_rules=[rule.rule_id for rule in rules],
+    resultado = ai_service.extract_rule_drafts(
+        db,
+        legal_text=req.legal_text,
+        jurisdiction=req.jurisdiction,
+        user=user,
+        document=document,
     )
+    return RuleDraftResponse(
+        created_rule_ids=resultado.created_rule_ids,
+        drafts=resultado.drafts,
+        notes=resultado.notes,
+        interaction_id=resultado.interaction_id,
+        error=resultado.error,
+    )
+
+
+@router.get("/ai/interactions", response_model=List[dict])
+def list_ai_interactions(
+    limit: int = 50,
+    user: User = Depends(require_permission("catalog:validate")),
+    db: Session = Depends(get_db),
+):
+    """Proveniência das consultas ao modelo (§3.5).
+
+    Existe para responder à pergunta que aparece meses depois: *de onde saiu
+    esta frase?*
+    """
+    registros = (
+        db.query(AIInteraction)
+        .filter(AIInteraction.organization_id == user.organization_id)
+        .order_by(AIInteraction.created_at.desc())
+        .limit(min(limit, 200))
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "created_at": r.created_at,
+            "purpose": r.purpose,
+            "provider": r.provider,
+            "model": r.model,
+            "prompt": r.prompt,
+            "retrieved_rule_keys": r.retrieved_rule_keys,
+            "cited_rule_keys": r.cited_rule_keys,
+            "grounded": r.grounded,
+            "answer_is_advisory": r.answer_is_advisory,
+            "served_from_cache": r.served_from_cache,
+            "input_tokens": r.input_tokens,
+            "output_tokens": r.output_tokens,
+            "latency_ms": r.latency_ms,
+            "error": r.error,
+            "created_by_id": r.created_by_id,
+        }
+        for r in registros
+    ]

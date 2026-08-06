@@ -758,6 +758,72 @@ class ProtocolEvent(Base):
 
 
 # =============================================================================
+# Camada de IA (§3.3, §6.8)
+# =============================================================================
+
+class AIInteraction(Base):
+    """Proveniência de toda chamada a um modelo de linguagem (§3.3, §3.5).
+
+    Existe para responder, meses depois, a uma pergunta incômoda: *de onde saiu
+    esta frase?* Guarda quem perguntou, o que foi perguntado, qual modelo
+    respondeu, quais regras do catálogo foram entregues como contexto e o que
+    voltou — incluindo recusas e falhas.
+
+    Duas colunas merecem atenção:
+
+    - `grounded` é falso quando o modelo citou regra que não estava no contexto
+      recuperado. Nesse caso a resposta é devolvida ao usuário com a citação
+      removida e um aviso, porque uma citação legal inventada é exatamente o
+      dano que este sistema não pode causar;
+    - `answer_is_advisory` é sempre verdadeiro. A coluna existe para que
+      nenhuma consulta futura precise supor: nada que saia de um modelo tem
+      valor de veredicto — o veredicto vem do motor determinístico (§3.4).
+    """
+
+    __tablename__ = "ai_interactions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    organization_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    project_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("projects.id"), nullable=True, index=True
+    )
+
+    purpose: Mapped[str] = mapped_column(String(60), default="consulta_normativa")
+    provider: Mapped[str] = mapped_column(String(60), nullable=False)
+    model: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    #: SHA-256 de (pergunta + regras recuperadas + modelo). Chave do cache e
+    #: prova de que a mesma pergunta, sobre o mesmo catálogo, deu a mesma volta.
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+
+    #: Chaves das regras entregues como contexto — o RAG fica auditável.
+    retrieved_rule_keys: Mapped[list] = mapped_column(JSON, default=list)
+    #: Chaves efetivamente citadas na resposta, após conferência.
+    cited_rule_keys: Mapped[list] = mapped_column(JSON, default=list)
+
+    response_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    response_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    stop_reason: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+
+    input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    #: Falso quando o modelo citou regra fora do contexto recuperado.
+    grounded: Mapped[bool] = mapped_column(Boolean, default=True)
+    #: Invariante, não configuração: resposta de modelo é sempre assistiva.
+    answer_is_advisory: Mapped[bool] = mapped_column(Boolean, default=True)
+    served_from_cache: Mapped[bool] = mapped_column(Boolean, default=False)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_by_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    project: Mapped[Optional["Project"]] = relationship()
+
+
+# =============================================================================
 # Trabalhos assíncronos (§6.7)
 # =============================================================================
 
