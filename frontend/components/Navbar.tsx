@@ -1,45 +1,48 @@
 "use client";
 
-import { Bell, Search, User, ChevronDown, CheckCircle2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Building, LogOut, ShieldCheck } from "lucide-react";
+import { Organization, fetchOrganization } from "@/lib/api";
+import { ROLE_LABELS, useAuth } from "@/lib/auth";
 
 export default function Navbar() {
+  const { user, signOut } = useAuth();
+  const [organization, setOrganization] = useState<Organization | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    fetchOrganization()
+      .then(setOrganization)
+      .catch(() => setOrganization(null));
+  }, [user]);
+
+  if (!user) return null;
+
   return (
-    <header className="h-16 ml-64 border-b border-slate-800 glass-panel sticky top-0 z-30 flex items-center justify-between px-6">
-      {/* Search Input */}
-      <div className="relative w-96">
-        <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-        <input
-          type="text"
-          placeholder="Buscar empreendimento, regra normativa ou documento..."
-          className="w-full pl-10 pr-4 py-2 rounded-lg bg-slate-900/80 border border-slate-700/60 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 transition-colors placeholder:text-slate-500"
-        />
+    <header className="ml-64 h-16 border-b border-slate-800 glass-panel flex items-center justify-between px-8 sticky top-0 z-30">
+      <div className="flex items-center gap-2 text-xs text-slate-400 min-w-0">
+        <Building className="w-4 h-4 text-slate-500 shrink-0" />
+        <span className="font-semibold text-slate-300 truncate">
+          {organization?.name ?? "Organização"}
+        </span>
       </div>
 
-      {/* Right Controls */}
       <div className="flex items-center gap-4">
-        {/* Baseline Status Badge */}
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-medium">
-          <CheckCircle2 className="w-3.5 h-3.5 text-blue-400" />
-          <span>Linha de Base Ativa</span>
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800">
+          <ShieldCheck className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+          <div className="text-right leading-tight">
+            <p className="text-[11px] font-semibold text-slate-200">{user.name}</p>
+            <p className="text-[10px] text-cyan-400">{ROLE_LABELS[user.role]}</p>
+          </div>
         </div>
 
-        {/* Notifications */}
-        <button className="relative p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors">
-          <Bell className="w-4 h-4" />
-          <span className="w-2 h-2 rounded-full bg-cyan-400 absolute top-1.5 right-1.5" />
+        <button
+          onClick={signOut}
+          className="p-2 rounded-lg text-slate-400 hover:text-red-300 hover:bg-red-500/10 transition-all"
+          title="Sair"
+        >
+          <LogOut className="w-4 h-4" />
         </button>
-
-        {/* User Profile */}
-        <div className="flex items-center gap-3 pl-2 border-l border-slate-800">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center font-bold text-xs text-white shadow-inner">
-            EA
-          </div>
-          <div className="text-left hidden sm:block">
-            <p className="text-xs font-semibold text-slate-200">Eng. Delta</p>
-            <p className="text-[10px] text-slate-400">Construtora Delta</p>
-          </div>
-          <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
-        </div>
       </div>
     </header>
   );

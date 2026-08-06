@@ -1,37 +1,51 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import {
   ArrowUpRight,
   Building2,
   CheckCircle2,
   HelpCircle,
+  Landmark,
   Plus,
-  ShieldCheck,
   X,
   XCircle,
 } from "lucide-react";
-import {
-  ApiError,
-  Organization,
-  createProject,
-  fetchOrganizations,
-  formatParam,
-} from "@/lib/api";
+import { ApiError, createProject, formatParam, humanize } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { useProjects } from "@/lib/useProjects";
 import { EmptyState, ErrorBanner, LoadingState } from "@/components/StateViews";
 
-export default function ProjectsPage() {
-  const { projects, isLoading, error, reload } = useProjects();
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+const NUMERIC_FIELDS = [
+  { key: "lot_area", label: "Área do lote (m²)" },
+  { key: "built_area", label: "Área construída (m²)" },
+  { key: "floors", label: "Pavimentos" },
+  { key: "front_setback", label: "Recuo frontal (m)" },
+  { key: "side_setback", label: "Recuo lateral (m)" },
+  { key: "rear_setback", label: "Recuo dos fundos (m)" },
+  { key: "permeability_rate", label: "Permeabilidade (%)" },
+  { key: "parking_spaces", label: "Vagas" },
+];
 
-  useEffect(() => {
-    fetchOrganizations()
-      .then(setOrganizations)
-      .catch(() => setOrganizations([]));
-  }, []);
+const IDENTITY_FIELDS = [
+  { key: "address", label: "Logradouro" },
+  { key: "address_number", label: "Número" },
+  { key: "district", label: "Bairro" },
+  { key: "postal_code", label: "CEP" },
+  { key: "lot", label: "Lote" },
+  { key: "block", label: "Quadra" },
+  { key: "registry_number", label: "Matrícula" },
+  { key: "municipal_registration", label: "Inscrição municipal" },
+  { key: "owner_name", label: "Proprietário" },
+  { key: "technical_responsible_name", label: "Responsável técnico" },
+  { key: "technical_responsible_registry", label: "CREA / CAU" },
+];
+
+export default function ProjectsPage() {
+  const { can } = useAuth();
+  const { projects, isLoading, error, reload } = useProjects();
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   return (
     <div className="space-y-8">
@@ -50,13 +64,14 @@ export default function ProjectsPage() {
           </p>
         </div>
 
-        <button
-          onClick={() => setIsModalOpen(true)}
-          disabled={organizations.length === 0}
-          className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold text-xs transition-all shadow-lg shadow-cyan-500/20 flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" /> Novo empreendimento
-        </button>
+        {can("project:write") && (
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold text-xs transition-all shadow-lg shadow-cyan-500/20 flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" /> Novo empreendimento
+          </button>
+        )}
       </div>
 
       {error && <ErrorBanner error={error} onRetry={reload} />}
@@ -72,6 +87,7 @@ export default function ProjectsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {projects.map((project) => {
           const validations = project.validations ?? [];
+          const version = project.current_version;
           const conforme = validations.filter((v) => v.status === "conforme").length;
           const naoConforme = validations.filter((v) => v.status === "nao_conforme").length;
           const naoVerificavel = validations.filter(
@@ -81,33 +97,52 @@ export default function ProjectsPage() {
           return (
             <div key={project.id} className="glass-panel rounded-2xl p-6 space-y-4">
               <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-base font-bold text-white">{project.name}</h2>
+                <div className="min-w-0">
+                  <h2 className="text-base font-bold text-white truncate">
+                    {project.name}
+                  </h2>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    {project.city_name}/{project.state} • Zona {project.zone} •{" "}
-                    {project.building_type.replace(/_/g, " ")}
+                    {project.city_name}/{project.state}
+                    {version && ` • Zona ${version.zone}`}
+                    {project.lot && ` • lote ${project.lot}`}
+                    {project.block && `, quadra ${project.block}`}
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Licenciamento: {humanize(project.licensing_status)}
                   </p>
                 </div>
-                {project.is_official_baseline && (
-                  <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 shrink-0">
-                    Linha de base
-                  </span>
-                )}
+
+                <div className="flex flex-col items-end gap-1.5 shrink-0">
+                  {version && (
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700">
+                      v{version.version_number} · {humanize(version.state)}
+                    </span>
+                  )}
+                  {project.official_baseline && (
+                    <span className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-cyan-500/10 text-cyan-300 border border-cyan-500/30">
+                      <Landmark className="w-3 h-3" /> base v
+                      {project.official_baseline.version_number}
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
-                <Param label="Área do lote" value={formatParam(project.lot_area, "m²")} />
-                <Param label="Área construída" value={formatParam(project.built_area, "m²")} />
+                <Param label="Área do lote" value={formatParam(version?.lot_area, "m²", 0)} />
                 <Param
-                  label="Taxa de ocupação"
-                  value={formatParam(project.occupancy_rate, "%", 1)}
+                  label="Área construída"
+                  value={formatParam(version?.built_area, "m²", 0)}
+                />
+                <Param
+                  label="Ocupação"
+                  value={formatParam(version?.occupancy_rate, "%", 1)}
                   hint="derivada"
                 />
-                <Param label="Recuo frontal" value={formatParam(project.front_setback, "m")} />
-                <Param label="Recuo fundos" value={formatParam(project.rear_setback, "m")} />
+                <Param label="Recuo frontal" value={formatParam(version?.front_setback, "m")} />
+                <Param label="Recuo fundos" value={formatParam(version?.rear_setback, "m")} />
                 <Param
                   label="Permeabilidade"
-                  value={formatParam(project.permeability_rate, "%", 1)}
+                  value={formatParam(version?.permeability_rate, "%", 1)}
                 />
               </div>
 
@@ -138,7 +173,6 @@ export default function ProjectsPage() {
 
       {isModalOpen && (
         <NewProjectModal
-          organizations={organizations}
           onClose={() => setIsModalOpen(false)}
           onCreated={() => {
             setIsModalOpen(false);
@@ -179,47 +213,36 @@ function Param({
 
 /** Campos numéricos ficam vazios por padrão — vazio significa não informado. */
 function NewProjectModal({
-  organizations,
   onClose,
   onCreated,
 }: {
-  organizations: Organization[];
   onClose: () => void;
   onCreated: () => void;
 }) {
   const [name, setName] = useState("");
-  const [organizationId, setOrganizationId] = useState(organizations[0]?.id ?? "");
   const [zone, setZone] = useState("Z2");
   const [values, setValues] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<ApiError | Error | null>(null);
 
-  const numericFields = [
-    { key: "lot_area", label: "Área do lote (m²)" },
-    { key: "built_area", label: "Área construída (m²)" },
-    { key: "floors", label: "Pavimentos" },
-    { key: "front_setback", label: "Recuo frontal (m)" },
-    { key: "side_setback", label: "Recuo lateral (m)" },
-    { key: "rear_setback", label: "Recuo dos fundos (m)" },
-    { key: "permeability_rate", label: "Permeabilidade (%)" },
-    { key: "parking_spaces", label: "Vagas" },
-  ];
-
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!name || !organizationId) return;
+    if (!name) return;
 
     setIsSaving(true);
     setError(null);
     try {
       const numeric = Object.fromEntries(
-        numericFields.map(({ key }) => {
+        NUMERIC_FIELDS.map(({ key }) => {
           const raw = values[key];
           // String vazia vira null: o campo não foi informado.
           return [key, raw === undefined || raw.trim() === "" ? null : Number(raw)];
         })
       );
-      await createProject({ organization_id: organizationId, name, zone, ...numeric });
+      const identity = Object.fromEntries(
+        IDENTITY_FIELDS.map(({ key }) => [key, values[key]?.trim() || undefined])
+      );
+      await createProject({ name, zone, ...identity, ...numeric });
       onCreated();
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
@@ -228,14 +251,25 @@ function NewProjectModal({
     }
   };
 
+  const field = (key: string, label: string, type = "text") => (
+    <label key={key} className="block">
+      <span className="text-[11px] font-semibold text-slate-400 block mb-1.5">{label}</span>
+      <input
+        type={type}
+        step={type === "number" ? "any" : undefined}
+        placeholder={type === "number" ? "não informado" : undefined}
+        value={values[key] ?? ""}
+        onChange={(e) => setValues((prev) => ({ ...prev, [key]: e.target.value }))}
+        className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-sm text-white focus:border-cyan-500 outline-none placeholder:text-slate-600 placeholder:text-[11px]"
+      />
+    </label>
+  );
+
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="glass-panel rounded-2xl p-6 w-full max-w-2xl space-y-5 my-8">
+      <div className="glass-panel rounded-2xl p-6 w-full max-w-3xl space-y-5 my-8">
         <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-cyan-400" />
-            <h2 className="text-sm font-bold text-white">Novo empreendimento</h2>
-          </div>
+          <h2 className="text-sm font-bold text-white">Novo empreendimento</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white">
             <X className="w-4 h-4" />
           </button>
@@ -243,60 +277,52 @@ function NewProjectModal({
 
         {error && <ErrorBanner error={error} />}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Nome do empreendimento" required>
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <label className="block sm:col-span-2">
+              <span className="text-[11px] font-semibold text-slate-400 block mb-1.5">
+                Nome do empreendimento <span className="text-cyan-400">*</span>
+              </span>
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
                 className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-sm text-white focus:border-cyan-500 outline-none"
               />
-            </Field>
-            <Field label="Organização" required>
-              <select
-                value={organizationId}
-                onChange={(e) => setOrganizationId(e.target.value)}
-                required
-                className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-sm text-white focus:border-cyan-500 outline-none"
-              >
-                {organizations.map((org) => (
-                  <option key={org.id} value={org.id}>
-                    {org.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Zona">
+            </label>
+            <label className="block">
+              <span className="text-[11px] font-semibold text-slate-400 block mb-1.5">
+                Zona
+              </span>
               <input
                 value={zone}
                 onChange={(e) => setZone(e.target.value)}
                 className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-sm text-white focus:border-cyan-500 outline-none"
               />
-            </Field>
+            </label>
           </div>
 
-          <p className="text-[11px] text-blue-300 pt-2">
-            Deixe em branco o que ainda não souber. Campo vazio é registrado como
-            &quot;não informado&quot; e gera verificação não verificável — o Atlas não
-            assume zero.
-          </p>
+          <div>
+            <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-3">
+              Localização e partes
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {IDENTITY_FIELDS.map(({ key, label }) => field(key, label))}
+            </div>
+          </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {numericFields.map(({ key, label }) => (
-              <Field key={key} label={label}>
-                <input
-                  type="number"
-                  step="any"
-                  placeholder="não informado"
-                  value={values[key] ?? ""}
-                  onChange={(e) =>
-                    setValues((prev) => ({ ...prev, [key]: e.target.value }))
-                  }
-                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-sm text-white focus:border-cyan-500 outline-none placeholder:text-slate-600 placeholder:text-[11px]"
-                />
-              </Field>
-            ))}
+          <div>
+            <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-1">
+              Parâmetros urbanísticos (versão 1)
+            </h3>
+            <p className="text-[11px] text-blue-300 mb-3">
+              Deixe em branco o que ainda não souber. Campo vazio é registrado como
+              &quot;não informado&quot; e gera verificação não verificável — o Atlas não
+              assume zero.
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {NUMERIC_FIELDS.map(({ key, label }) => field(key, label, "number"))}
+            </div>
           </div>
 
           <div className="flex justify-end gap-3 pt-2">
@@ -318,25 +344,5 @@ function NewProjectModal({
         </form>
       </div>
     </div>
-  );
-}
-
-function Field({
-  label,
-  required,
-  children,
-}: {
-  label: string;
-  required?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="block">
-      <span className="text-[11px] font-semibold text-slate-400 block mb-1.5">
-        {label}
-        {required && <span className="text-cyan-400"> *</span>}
-      </span>
-      {children}
-    </label>
   );
 }

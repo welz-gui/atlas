@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
+  Archive,
   Check,
   Copy,
   FileText,
   Hash,
+  QrCode,
   Sparkles,
   UploadCloud,
 } from "lucide-react";
@@ -14,16 +16,22 @@ import {
   ApiError,
   DocumentItem,
   ExtractionResponse,
-  Project,
+  createProjectVersion,
   extractDocumentParameters,
   fetchProjectDocuments,
-  updateProjectParameters,
+  humanize,
+  markDocumentObsolete,
   uploadProjectDocument,
 } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { projectShortLabel, useProjects } from "@/lib/useProjects";
 import { EmptyState, ErrorBanner, LoadingState } from "@/components/StateViews";
 
-const EXTRACTION_FIELDS: { key: keyof ExtractionResponse["extracted_parameters"]; label: string; unit: string }[] = [
+const EXTRACTION_FIELDS: {
+  key: keyof ExtractionResponse["extracted_parameters"];
+  label: string;
+  unit: string;
+}[] = [
   { key: "lot_area", label: "Área do lote", unit: "m²" },
   { key: "built_area", label: "Área construída", unit: "m²" },
   { key: "front_setback", label: "Recuo frontal", unit: "m" },
@@ -33,11 +41,14 @@ const EXTRACTION_FIELDS: { key: keyof ExtractionResponse["extracted_parameters"]
 ];
 
 export default function DocumentsPage() {
+  const { can } = useAuth();
+  const canWrite = can("document:write");
+  const canVersion = can("project:write");
+
   const {
     projects,
     selectedProjectId,
     setSelectedProjectId,
-    replaceProject,
     isLoading: isLoadingProjects,
     error: projectsError,
     reload: reloadProjects,
@@ -59,6 +70,7 @@ export default function DocumentsPage() {
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("projeto_arquitetonico");
   const [version, setVersion] = useState("v1.0");
+  const [supersedesId, setSupersedesId] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const loadDocuments = useCallback(async () => {
@@ -95,16 +107,16 @@ export default function DocumentsPage() {
       formData.append("title", title);
       formData.append("category", category);
       formData.append("version", version);
+      if (supersedesId) formData.append("supersedes_id", supersedesId);
       formData.append("file", selectedFile);
 
-      const uploaded = await uploadProjectDocument(selectedProjectId, formData);
-      setDocuments((prev) => [uploaded, ...prev]);
+      await uploadProjectDocument(selectedProjectId, formData);
       setTitle("");
       setSelectedFile(null);
+      setSupersedesId("");
+      await loadDocuments();
     } catch (err) {
-      // Sem documento no servidor não há documento na lista. O protótipo
-      // inseria uma entrada local com um hash fixo, dando a impressão de um
-      // upload que nunca aconteceu.
+      // Sem documento no servidor não há documento na lista.
       setUploadError(err instanceof Error ? err : new Error(String(err)));
     } finally {
       setIsUploading(false);
@@ -126,27 +138,38 @@ export default function DocumentsPage() {
     }
   };
 
+  /**
+   * Aplicar o extraído cria uma versão nova do projeto — não sobrescreve a
+   * atual. Apenas o que foi efetivamente lido no documento é gravado.
+   */
   const handleApplyExtracted = async () => {
     if (!extraction || !selectedProjectId) return;
     const parameters = extraction.extracted_parameters;
 
-    // Só o que foi efetivamente extraído é aplicado; campos nulos ficam como
-    // "não informado" no cadastro.
-    const payload: Partial<Project> = {};
+    const payload: Record<string, number> = {};
     for (const { key } of EXTRACTION_FIELDS) {
       const value = parameters[key];
-      if (value !== null && value !== undefined) {
-        (payload as Record<string, number>)[key] = value;
-      }
+      if (value !== null && value !== undefined) payload[key] = value;
     }
     if (Object.keys(payload).length === 0) return;
 
     try {
-      const updated = await updateProjectParameters(selectedProjectId, payload);
-      replaceProject(updated);
+      await createProjectVersion(selectedProjectId, {
+        ...payload,
+        change_reason: `Parâmetros extraídos do documento "${extraction.document_title}".`,
+      });
       setIsApplied(true);
     } catch (err) {
       setExtractionError(err instanceof Error ? err : new Error(String(err)));
+    }
+  };
+
+  const handleObsolete = async (documentId: string) => {
+    try {
+      await markDocumentObsolete(documentId);
+      await loadDocuments();
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)));
     }
   };
 
@@ -157,10 +180,10 @@ export default function DocumentsPage() {
   };
 
   const appliedCount = extraction
-    ? EXTRACTION_FIELDS.filter(
-        ({ key }) => extraction.extracted_parameters[key] !== null
-      ).length
+    ? EXTRACTION_FIELDS.filter(({ key }) => extraction.extracted_parameters[key] !== null)
+        .length
     : 0;
+  const currentDocuments = documents.filter((d) => d.is_current);
 
   return (
     <div className="space-y-8">
@@ -213,71 +236,100 @@ export default function DocumentsPage() {
 
       {selectedProjectId && !isLoading && (
         <>
-          <div className="glass-panel rounded-2xl p-6 border-cyan-500/30 glow-blue space-y-4">
-            <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
-              <UploadCloud className="w-5 h-5 text-cyan-400" />
-              <h2 className="text-sm font-bold text-white">
-                Upload de prancha ou documento de projeto
-              </h2>
-            </div>
+          {canWrite && (
+            <div className="glass-panel rounded-2xl p-6 border-cyan-500/30 glow-blue space-y-4">
+              <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+                <UploadCloud className="w-5 h-5 text-cyan-400" />
+                <h2 className="text-sm font-bold text-white">
+                  Upload de prancha ou documento de projeto
+                </h2>
+              </div>
 
-            {uploadError && <ErrorBanner error={uploadError} />}
+              {uploadError && <ErrorBanner error={uploadError} />}
 
-            <form onSubmit={handleUpload} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                <label className="block">
-                  <span className="block font-semibold text-slate-300 mb-1">Título:</span>
+              <form onSubmit={handleUpload} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
+                  <label className="block">
+                    <span className="block font-semibold text-slate-300 mb-1">Título:</span>
+                    <input
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:border-cyan-500 outline-none"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="block font-semibold text-slate-300 mb-1">
+                      Categoria:
+                    </span>
+                    <select
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white outline-none"
+                    >
+                      <option value="projeto_arquitetonico">Projeto arquitetônico</option>
+                      <option value="memorial">Memorial descritivo</option>
+                      <option value="levantamento">Levantamento topográfico</option>
+                      <option value="matricula">Matrícula do imóvel</option>
+                      <option value="art_rrt">ART / RRT</option>
+                      <option value="outros">Outros</option>
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="block font-semibold text-slate-300 mb-1">Versão:</span>
+                    <input
+                      value={version}
+                      onChange={(e) => setVersion(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:border-cyan-500 outline-none"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="block font-semibold text-slate-300 mb-1">
+                      Substitui:
+                    </span>
+                    <select
+                      value={supersedesId}
+                      onChange={(e) => setSupersedesId(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white outline-none"
+                    >
+                      <option value="">Nenhum (documento novo)</option>
+                      {currentDocuments.map((doc) => (
+                        <option key={doc.id} value={doc.id}>
+                          {doc.title} ({doc.version})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                {supersedesId && (
+                  <p className="text-[11px] text-amber-300">
+                    O documento substituído passa a obsoleto e deixa de alimentar
+                    análises.
+                  </p>
+                )}
+
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                   <input
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    required
-                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:border-cyan-500 outline-none"
+                    type="file"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] ?? null;
+                      setSelectedFile(file);
+                      if (file && !title) setTitle(file.name.replace(/\.[^/.]+$/, ""));
+                    }}
+                    className="text-xs text-slate-400 file:mr-3 file:px-3 file:py-2 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-200 file:text-xs file:font-semibold"
                   />
-                </label>
-                <label className="block">
-                  <span className="block font-semibold text-slate-300 mb-1">Categoria:</span>
-                  <select
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white outline-none"
+                  <button
+                    type="submit"
+                    disabled={isUploading || !selectedFile}
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    <option value="projeto_arquitetonico">Projeto arquitetônico</option>
-                    <option value="memorial">Memorial descritivo</option>
-                    <option value="levantamento">Levantamento topográfico</option>
-                    <option value="matricula">Matrícula do imóvel</option>
-                    <option value="outros">Outros</option>
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="block font-semibold text-slate-300 mb-1">Versão:</span>
-                  <input
-                    value={version}
-                    onChange={(e) => setVersion(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:border-cyan-500 outline-none"
-                  />
-                </label>
-              </div>
-
-              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                <input
-                  type="file"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0] ?? null;
-                    setSelectedFile(file);
-                    if (file && !title) setTitle(file.name.replace(/\.[^/.]+$/, ""));
-                  }}
-                  className="text-xs text-slate-400 file:mr-3 file:px-3 file:py-2 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-200 file:text-xs file:font-semibold"
-                />
-                <button
-                  type="submit"
-                  disabled={isUploading || !selectedFile}
-                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {isUploading ? "Enviando..." : "Enviar documento"}
-                </button>
-              </div>
-            </form>
-          </div>
+                    {isUploading ? "Enviando..." : "Enviar documento"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
 
           {extractionError && <ErrorBanner error={extractionError} />}
 
@@ -299,7 +351,7 @@ export default function DocumentsPage() {
                       : "bg-blue-500/10 text-blue-300 border-blue-500/40"
                   }`}
                 >
-                  {extraction.status.replace(/_/g, " ")} · {extraction.fields_found} de{" "}
+                  {humanize(extraction.status)} · {extraction.fields_found} de{" "}
                   {extraction.fields_expected}
                 </span>
               </div>
@@ -350,26 +402,28 @@ export default function DocumentsPage() {
                 </div>
               )}
 
-              <div className="flex items-center justify-between pt-3 border-t border-slate-800 gap-3 flex-wrap">
-                <p className="text-[11px] text-slate-400">
-                  {appliedCount === 0
-                    ? "Nada a aplicar: nenhum parâmetro foi localizado no documento."
-                    : `${appliedCount} parâmetro(s) serão gravados no cadastro. Os demais permanecem "não informado".`}
-                </p>
-                <button
-                  onClick={handleApplyExtracted}
-                  disabled={appliedCount === 0 || isApplied}
-                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  {isApplied ? (
-                    <>
-                      <Check className="w-3.5 h-3.5" /> Aplicado
-                    </>
-                  ) : (
-                    "Aplicar ao cadastro"
-                  )}
-                </button>
-              </div>
+              {canVersion && (
+                <div className="flex items-center justify-between pt-3 border-t border-slate-800 gap-3 flex-wrap">
+                  <p className="text-[11px] text-slate-400">
+                    {appliedCount === 0
+                      ? "Nada a aplicar: nenhum parâmetro foi localizado no documento."
+                      : `${appliedCount} parâmetro(s) serão gravados numa versão nova do projeto.`}
+                  </p>
+                  <button
+                    onClick={handleApplyExtracted}
+                    disabled={appliedCount === 0 || isApplied}
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {isApplied ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" /> Nova versão criada
+                      </>
+                    ) : (
+                      "Criar versão com os parâmetros extraídos"
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -388,27 +442,55 @@ export default function DocumentsPage() {
                 {documents.map((doc) => (
                   <div
                     key={doc.id}
-                    className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3"
+                    className={`p-4 rounded-xl border space-y-3 ${
+                      doc.is_current
+                        ? "bg-slate-900/60 border-slate-800"
+                        : "bg-slate-950/40 border-slate-800/60 opacity-70"
+                    }`}
                   >
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-sm font-bold text-white truncate">{doc.title}</p>
+                        <p className="text-sm font-bold text-white truncate flex items-center gap-2">
+                          {doc.title}
+                          {!doc.is_current && (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase bg-slate-800 text-slate-400 border border-slate-700 shrink-0">
+                              obsoleto
+                            </span>
+                          )}
+                        </p>
                         <p className="text-[11px] text-slate-400 mt-0.5">
-                          {doc.category.replace(/_/g, " ")} • {doc.version}
+                          {humanize(doc.category)} • {doc.version}
                           {doc.original_filename && ` • ${doc.original_filename}`}
-                          {doc.size_bytes &&
-                            ` • ${(doc.size_bytes / 1024).toFixed(0)} KB`}
+                          {doc.size_bytes && ` • ${(doc.size_bytes / 1024).toFixed(0)} KB`}
                         </p>
                       </div>
 
-                      <button
-                        onClick={() => handleExtract(doc.id)}
-                        disabled={extractingId === doc.id}
-                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 shrink-0 disabled:opacity-50"
-                      >
-                        <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                        {extractingId === doc.id ? "Extraindo..." : "Extrair parâmetros"}
-                      </button>
+                      <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                        <a
+                          href={`/api/v1/documents/${doc.id}/qrcode`}
+                          onClick={(e) => e.preventDefault()}
+                          title="QR Code de verificação"
+                          className="px-2.5 py-1.5 rounded-lg bg-slate-800 text-slate-400 cursor-default"
+                        >
+                          <QrCode className="w-3.5 h-3.5" />
+                        </a>
+                        {doc.is_current && canWrite && (
+                          <button
+                            onClick={() => handleObsolete(doc.id)}
+                            className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1.5"
+                          >
+                            <Archive className="w-3.5 h-3.5" /> Obsoletar
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleExtract(doc.id)}
+                          disabled={extractingId === doc.id || !doc.is_current}
+                          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                          {extractingId === doc.id ? "Extraindo..." : "Extrair"}
+                        </button>
+                      </div>
                     </div>
 
                     {doc.hash_sha256 && (

@@ -4,15 +4,18 @@ Data da revisão: 2026-08-06
 Commit revisado: `35f19e0`
 Escopo: `backend/`, `frontend/`, `docker-compose.yml`, testes.
 
-> **Situação em 2026-08-06 — Fase A concluída.**
-> Os oito itens da Fase A (§6) foram implementados. Os seis bloqueadores de
-> risco legal do §4.1 estão resolvidos e cobertos por teste de regressão
-> (suíte: 8 → 51 testes). O diagnóstico abaixo é preservado como registro do
-> estado original; a coluna de status na §6 indica o que já foi feito.
+> **Situação em 2026-08-06 — Fases A e B concluídas.**
+> Os oito itens da Fase A e os oito da Fase B (§6) foram implementados. Os seis
+> bloqueadores de risco legal do §4.1 e os desvios estruturais do §4.2 estão
+> resolvidos e cobertos por teste de regressão (suíte: 8 → 110 testes). O
+> diagnóstico abaixo é preservado como registro do estado original; as tabelas
+> de status na §6 indicam o que já foi feito.
 >
-> **As Fases B e C permanecem pendentes** — em especial autenticação,
-> multitenancy, Postgres com migrations e validação humana do catálogo. O
-> sistema continua sem autenticação e não deve ser exposto na internet.
+> **A Fase C permanece pendente** — workers, camada de IA de verdade, storage
+> abstraído, PWA e portal do cliente. Restam também dois pontos das fases
+> anteriores que dependem de operação, não de código: a **validação humana do
+> catálogo** (nenhuma regra publicada) e a **ativação da RLS** (as políticas
+> existem; falta o `SET LOCAL` por transação).
 
 ---
 
@@ -290,27 +293,40 @@ Detalhes do que foi entregue além do enunciado dos itens:
 
 Suíte de testes: **8 → 51**, com um teste de regressão para cada bloqueador do §4.1.
 
-### Fase B — Núcleo do Estágio 1 (o retrofit caro)
+### Fase B — Núcleo do Estágio 1 ✅ concluída
 
-9. **Autenticação e multitenancy**: usuário/sessão, `organization_id` em todas as entidades,
-   dependency de tenant em todos os endpoints, perfis e permissões (§8.1).
-10. **Migrar para Postgres + Alembic** (ou migrations SQL versionadas), ativando o serviço
-    que já está no `docker-compose`. Habilitar PostGIS e pgvector. Definir política de RLS.
-11. **Catálogo regulatório como dado**: tabelas `regulatory_document` e `regulatory_rule`
-    com os estados de §7.3/§7.4, vigência, severidade, tolerância, evidências exigidas e
-    validador. Migrar as 7 regras de Lajeado do código para o catálogo, no formato YAML do
-    §7.6. Motor passa a executar **apenas regras `vigente`** (§7.5).
-12. **`ProjectVersion` imutável + `AnalysisRun`**: parâmetros urbanísticos passam a
-    pertencer à versão; a linha de base oficial é uma versão marcada; toda análise
-    referencia (versão do projeto × conjunto de regras × documentos de origem).
-13. **Auditabilidade completa** em `ValidationRecord`: origem, método, confiança, validador,
-    vigência da regra (§3.5).
-14. **Tela de validação humana** (§15.12): fila de regras em `em_validacao`, aprovação/rejeição
-    com registro de quem validou — é o que destrava a publicação de regras.
-15. **Campos faltantes do empreendimento** (§8.2) e gestão documental com versionamento,
-    documento vigente, bloqueio de obsoleto e QR Code (§8.3).
-16. **Tramitação** (§8.5): protocolo, notificações, exigências, prazos — é a dor central da
-    tese do produto (§2) e hoje não existe.
+| # | Item | Status |
+|---|---|---|
+| 9 | Autenticação e multitenancy: `organization_id` em todas as entidades, dependency de tenant, perfis e permissões (§8.1) | ✅ |
+| 10 | Postgres + Alembic; política de RLS definida (§6.5) | ✅ (ativação da RLS pendente de operação) |
+| 11 | Catálogo regulatório como dado, com estados de §7.3/§7.4, vigência e validador | ✅ |
+| 12 | `ProjectVersion` imutável; linha de base oficial; análise referencia a versão | ✅ |
+| 13 | Auditabilidade completa em `ValidationRecord` | ✅ (já entregue na Fase A) |
+| 14 | Tela de validação humana (§15.12) | ✅ |
+| 15 | Campos do §8.2 e gestão documental com versionamento, obsoleto e QR Code (§8.3) | ✅ |
+| 16 | Tramitação (§8.5) | ✅ |
+
+Decisões que valem registro:
+
+- **Recurso de outro tenant responde 404, não 403.** Informar que o recurso existe
+  mas está fora do alcance já é vazamento entre organizações.
+- **A RLS é segunda linha de defesa, não a primeira.** As políticas existem na
+  migration e negam tudo por padrão (`current_setting(..., true)` nulo ⇒ nega).
+  Falta o `SET LOCAL atlas.organization_id` por transação e um usuário de banco
+  sem `BYPASSRLS` — trabalho de infraestrutura, documentado no README.
+- **Publicar regra exige documento *e* artigo conferidos.** Sem os dois, a fonte
+  permanece não verificada e a regra não pode ser `vigente`. Sair de `vigente`
+  retira a validação: uma regra suspensa deixa de ser publicável no mesmo ato.
+- **A reimportação do YAML não sobrescreve regra publicada.** Quem publicou
+  assumiu a responsabilidade técnica; um arquivo não pode desfazer isso
+  silenciosamente.
+- **Parâmetros urbanísticos saíram do projeto para a versão.** Foi o que tornou
+  exequível o §14.15: não existe "salvar por cima" de uma medida.
+- **A exigência do órgão pode ser vinculada à regra que deveria tê-la previsto.**
+  É o que transforma o recall de bloqueios (§11) em medição, e não suposição — e o
+  endpoint devolve `null` quando não há vínculo, em vez de estimar um número.
+
+Suíte de testes: **51 → 110**.
 
 ### Fase C — Consolidação
 

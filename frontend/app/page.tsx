@@ -6,11 +6,13 @@ import {
   Building2,
   CheckCircle2,
   HelpCircle,
+  Landmark,
+  ScrollText,
   ShieldCheck,
   Sparkles,
   XCircle,
 } from "lucide-react";
-import { formatParam } from "@/lib/api";
+import { formatParam, humanize } from "@/lib/api";
 import { useProjects } from "@/lib/useProjects";
 import {
   EmptyState,
@@ -37,6 +39,7 @@ export default function DashboardPage() {
     naoVerificavel: allValidations.filter((v) => v.status === "nao_verificavel").length,
   };
   const hasUnvalidatedRules = allValidations.some((v) => !v.is_publishable);
+  const withBaseline = projects.filter((p) => p.official_baseline).length;
 
   return (
     <div className="space-y-8">
@@ -50,7 +53,7 @@ export default function DashboardPage() {
           </div>
           <h1 className="text-2xl font-bold text-white">Painel geral dos empreendimentos</h1>
           <p className="text-xs text-slate-400 mt-1">
-            Conformidade urbanística consolidada a partir da análise mais recente de cada
+            Conformidade consolidada a partir da análise mais recente de cada
             empreendimento.
           </p>
         </div>
@@ -86,42 +89,69 @@ export default function DashboardPage() {
         <>
           {hasUnvalidatedRules && <UnvalidatedRulesBanner />}
 
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-5">
+          <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
             <MetricCard
               label="Empreendimentos"
               value={projects.length}
-              icon={<Building2 className="w-7 h-7 text-cyan-400/80" />}
+              icon={<Building2 className="w-6 h-6 text-cyan-400/80" />}
+              accent="border-l-cyan-500"
+            />
+            <MetricCard
+              label="Com linha de base"
+              value={withBaseline}
+              icon={<Landmark className="w-6 h-6 text-cyan-400/80" />}
               accent="border-l-cyan-500"
             />
             <MetricCard
               label="Conformes"
               value={totals.conforme}
-              icon={<CheckCircle2 className="w-7 h-7 text-emerald-400/80" />}
+              icon={<CheckCircle2 className="w-6 h-6 text-emerald-400/80" />}
               accent="border-l-emerald-500"
               valueClass="text-emerald-400"
             />
             <MetricCard
               label="Não conformes"
               value={totals.naoConforme}
-              icon={<XCircle className="w-7 h-7 text-red-400/80" />}
+              icon={<XCircle className="w-6 h-6 text-red-400/80" />}
               accent="border-l-red-500"
               valueClass="text-red-400"
             />
             <MetricCard
               label="Atenção"
               value={totals.atencao}
-              icon={<HelpCircle className="w-7 h-7 text-amber-400/80" />}
+              icon={<HelpCircle className="w-6 h-6 text-amber-400/80" />}
               accent="border-l-amber-500"
               valueClass="text-amber-400"
             />
             <MetricCard
               label="Não verificáveis"
               value={totals.naoVerificavel}
-              icon={<HelpCircle className="w-7 h-7 text-blue-400/80" />}
+              icon={<HelpCircle className="w-6 h-6 text-blue-400/80" />}
               accent="border-l-blue-500"
               valueClass="text-blue-300"
             />
           </div>
+
+          {hasUnvalidatedRules && (
+            <Link
+              href="/catalog"
+              className="glass-panel rounded-2xl p-5 flex items-center justify-between gap-4 hover:border-cyan-500/30 transition-all"
+            >
+              <div className="flex items-center gap-3">
+                <ScrollText className="w-5 h-5 text-amber-400 shrink-0" />
+                <div>
+                  <p className="text-sm font-bold text-white">
+                    Há regras aguardando validação técnica
+                  </p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Enquanto elas não forem conferidas, os laudos saem marcados como uso
+                    interno.
+                  </p>
+                </div>
+              </div>
+              <ArrowUpRight className="w-4 h-4 text-cyan-400 shrink-0" />
+            </Link>
+          )}
 
           <div className="glass-panel rounded-2xl p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
@@ -140,6 +170,7 @@ export default function DashboardPage() {
                 const blockers = validations.filter((v) => v.status === "nao_conforme");
                 const pending = validations.filter((v) => v.status === "nao_verificavel");
                 const worst = blockers[0] ?? pending[0] ?? validations[0];
+                const version = project.current_version;
 
                 return (
                   <div
@@ -149,8 +180,12 @@ export default function DashboardPage() {
                     <div className="min-w-0">
                       <p className="text-sm font-bold text-white truncate">{project.name}</p>
                       <p className="text-[11px] text-slate-400 mt-0.5">
-                        {project.city_name}/{project.state} • Zona {project.zone} • ocupação{" "}
-                        {formatParam(project.occupancy_rate, "%", 1)}
+                        {project.city_name}/{project.state}
+                        {version && ` • v${version.version_number} (${humanize(version.state)})`}
+                        {version && ` • ocupação ${formatParam(version.occupancy_rate, "%", 1)}`}
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        Licenciamento: {humanize(project.licensing_status)}
                       </p>
                     </div>
 
@@ -194,11 +229,11 @@ function MetricCard({
 }) {
   return (
     <div
-      className={`glass-panel p-5 rounded-2xl border-l-4 ${accent} flex items-center justify-between gap-2`}
+      className={`glass-panel p-4 rounded-2xl border-l-4 ${accent} flex items-center justify-between gap-2`}
     >
       <div className="min-w-0">
-        <p className="text-[11px] font-bold text-slate-400 uppercase truncate">{label}</p>
-        <p className={`text-2xl font-extrabold mt-1 ${valueClass}`}>{value}</p>
+        <p className="text-[10px] font-bold text-slate-400 uppercase truncate">{label}</p>
+        <p className={`text-xl font-extrabold mt-1 ${valueClass}`}>{value}</p>
       </div>
       <div className="shrink-0">{icon}</div>
     </div>
