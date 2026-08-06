@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List
 from datetime import datetime
 
@@ -80,6 +80,10 @@ class DailyLogResponse(DailyLogBase):
     model_config = ConfigDict(from_attributes=True)
 
 # Project Schemas
+#
+# Os parâmetros urbanísticos são opcionais por definição: `None` significa
+# "não informado" e produz verificação `nao_verificavel`. Nunca use 0 como
+# valor padrão — zero é uma medida, ausência não é.
 class ProjectBase(BaseModel):
     name: str
     description: Optional[str] = None
@@ -88,15 +92,14 @@ class ProjectBase(BaseModel):
     state: str = "RS"
     zone: str = "Z2"
     building_type: str = "residencial_unifamiliar"
-    lot_area: float = 0.0
-    built_area: float = 0.0
-    floors: int = 1
-    front_setback: float = 0.0
-    side_setback: float = 0.0
-    rear_setback: float = 0.0
-    occupancy_rate: float = 0.0
-    permeability_rate: float = 20.0
-    parking_spaces: int = 1
+    lot_area: Optional[float] = None
+    built_area: Optional[float] = None
+    floors: Optional[int] = None
+    front_setback: Optional[float] = None
+    side_setback: Optional[float] = None
+    rear_setback: Optional[float] = None
+    permeability_rate: Optional[float] = None
+    parking_spaces: Optional[int] = None
 
 class ProjectCreate(ProjectBase):
     organization_id: str
@@ -112,7 +115,6 @@ class ProjectUpdate(BaseModel):
     front_setback: Optional[float] = None
     side_setback: Optional[float] = None
     rear_setback: Optional[float] = None
-    occupancy_rate: Optional[float] = None
     permeability_rate: Optional[float] = None
     parking_spaces: Optional[int] = None
     status: Optional[str] = None
@@ -120,22 +122,57 @@ class ProjectUpdate(BaseModel):
 
 class ValidationRecordResponse(BaseModel):
     id: str
+    analysis_run_id: str
     rule_id: str
     rule_title: str
-    status: str # conforme, nao_conforme, atencao, nao_verificavel
+    status: str # conforme, nao_conforme, atencao, nao_aplicavel, nao_verificavel
     field: str
     expected_value: str
     actual_value: str
     details: Optional[str] = None
+
+    # Proveniência (§3.5)
+    rule_state: str
+    severity: str
+    method: str
+    source_document: Optional[str] = None
+    source_article: Optional[str] = None
     source_citation: Optional[str] = None
+    source_is_verified: bool = False
+    evidence_required: Optional[str] = None
+    validated_by: Optional[str] = None
+    is_publishable: bool = False
+
     validated_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+class AnalysisRunResponse(BaseModel):
+    id: str
+    project_id: str
+    jurisdiction: str
+    catalog_version: str
+    engine_version: str
+    trigger: str
+    total_checks: int
+    conforme_count: int
+    nao_conforme_count: int
+    atencao_count: int
+    nao_verificavel_count: int
+    is_publishable: bool
+    content_hash: Optional[str] = None
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+class AnalysisRunDetail(AnalysisRunResponse):
+    validations: List[ValidationRecordResponse] = []
 
 class ProjectResponse(ProjectBase):
     id: str
     organization_id: str
     status: str
     is_official_baseline: bool
+    #: Derivado de área construída ÷ área do lote. Somente leitura.
+    occupancy_rate: Optional[float] = None
     created_at: datetime
     updated_at: datetime
     validations: List[ValidationRecordResponse] = []
@@ -155,10 +192,29 @@ class DocumentResponse(BaseModel):
     category: str
     version: str
     file_path: str
+    original_filename: Optional[str] = None
+    content_type: Optional[str] = None
+    size_bytes: Optional[int] = None
     hash_sha256: Optional[str] = None
     status: str
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+# Extração assistida
+class ExtractedField(BaseModel):
+    value: Optional[float | int] = None
+    status: str  # extraido | nao_verificavel
+    evidence: Optional[str] = None
+
+class ExtractionResponse(BaseModel):
+    document_id: str
+    document_title: str
+    status: str  # extraido_parcial | extraido | nao_verificavel
+    fields_found: int
+    fields_expected: int
+    extracted_parameters: dict
+    evidence: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
 
 # Regulatory Engine Schemas
 class RegulatoryAnalysisRequest(BaseModel):
@@ -166,9 +222,14 @@ class RegulatoryAnalysisRequest(BaseModel):
 
 class RegulatoryAnalysisReport(BaseModel):
     project_id: str
+    analysis_run_id: str
+    catalog_version: str
+    engine_version: str
     total_checks: int
     conforme_count: int
     nao_conforme_count: int
     atencao_count: int
     nao_verificavel_count: int
+    is_publishable: bool
+    content_hash: Optional[str] = None
     results: List[ValidationRecordResponse]

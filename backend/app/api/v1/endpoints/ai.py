@@ -1,87 +1,178 @@
-from fastapi import APIRouter, Depends, HTTPException
+"""Assistente de consulta ao catálogo regulatório.
+
+Importante sobre o que este módulo **não** é: não há modelo de linguagem aqui.
+É uma busca por palavra-chave sobre o catálogo — e a resposta diz isso ao
+usuário, em vez de se apresentar como IA.
+
+O módulo também não guarda nenhuma referência legal própria. Toda citação vem
+do catálogo (`app/regulatory/data/*.yaml`), que é a fonte única. Foi a
+duplicação dessas referências que produziu, no protótipo, artigos conflitantes
+entre o motor e o assistente para o mesmo parâmetro.
+"""
+
+from typing import Dict, List, Optional, Tuple
+
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from typing import Optional, List
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.domain import Project
+from app.regulatory.catalog import RuleState, catalog
+from app.services.regulatory_engine import RegulatoryEngine
 
 router = APIRouter()
+
+DISCLAIMER = (
+    "Resposta gerada por busca determinística no catálogo regulatório do Atlas — "
+    "não é interpretação jurídica, não substitui o responsável técnico e não "
+    "constitui manifestação de órgão público."
+)
+
+#: Palavras-chave → regras do catálogo.
+TOPIC_KEYWORDS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
+    (("recuo frontal", "frontal", "alinhamento"), "lajeado_recuo_frontal_z2"),
+    (("fundos", "posterior"), "lajeado_recuo_fundos_z2"),
+    (("ocupacao", "ocupação", "taxa de ocupacao", "taxa de ocupação"), "lajeado_taxa_ocupacao_max_z2"),
+    (("permeabilidade", "permeavel", "permeável", "drenante", "solo"), "lajeado_taxa_permeabilidade_min_z2"),
+    (("pavimento", "gabarito", "altura", "andar"), "lajeado_gabarito_maximo_z2"),
+    (("vaga", "estacionamento", "garagem"), "lajeado_vagas_estacionamento"),
+    (("acessibilidade", "nbr", "rampa", "9050"), "lajeado_acessibilidade_nbr9050"),
+)
+
+# "recuo" isolado cobre os dois recuos cadastrados.
+BROAD_KEYWORDS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("recuo", ("lajeado_recuo_frontal_z2", "lajeado_recuo_fundos_z2")),
+    ("afastamento", ("lajeado_recuo_frontal_z2", "lajeado_recuo_fundos_z2")),
+)
+
 
 class AIChatRequest(BaseModel):
     prompt: str
     project_id: Optional[str] = None
 
+
 class AIChatResponse(BaseModel):
     answer: str
     law_citations: List[str]
     suggested_actions: List[str]
+    disclaimer: str = DISCLAIMER
+    #: Falso por definição enquanto não houver camada de modelo (§6.8).
+    is_ai_generated: bool = False
+    method: str = "busca_por_palavra_chave_no_catalogo"
+    matched_rules: List[str] = []
 
-# Lajeado / RS Regulatory Knowledge Base Context
-KNOWLEDGE_BASE = {
-    "recuo_frontal": "Art. 42 do Código de Edificações de Lajeado/RS: Para zonas Z2, o recuo frontal mínimo obrigatório é de 4,00m a contar do alinhamento predial.",
-    "taxa_ocupacao": "Art. 35 do Plano Diretor de Lajeado/RS: A Taxa de Ocupação Máxima para zona residencial unifamiliar Z2 é de 60%. Área construída no pavimento térreo não deve exceder 60% da área total do lote.",
-    "recuo_fundos": "Art. 45 do Código de Edificações: O recuo dos fundos mínimo é de 3,00m para edifícios de até 2 pavimentos.",
-    "permeabilidade": "Art. 50 do Código Ambiental Municipal: A Taxa de Permeabilidade mínima é de 15% (ou 20% dependendo do tipo de piso drenante).",
-    "estacionamento": "Art. 60 da Lei de Zoneamento: Mínimo de 1 vaga de garagem coberta ou descoberta por unidade residencial unifamiliar.",
-    "nbr_9050": "NBR 9050/2020: Garante acessibilidade a pessoas com deficiência. Exige rampa de acesso com inclinação máxima de 8,33% e portas com largura útil mínima de 0,80m."
-}
+
+def _match_rule_ids(prompt: str) -> List[str]:
+    lowered = prompt.lower()
+    matched: List[str] = []
+
+    for keywords, rule_id in TOPIC_KEYWORDS:
+        if any(keyword in lowered for keyword in keywords):
+            matched.append(rule_id)
+
+    for keyword, rule_ids in BROAD_KEYWORDS:
+        if keyword in lowered:
+            matched.extend(rule_ids)
+
+    seen = set()
+    return [r for r in matched if not (r in seen or seen.add(r))]
+
 
 @router.post("/ai/chat", response_model=AIChatResponse)
 def atlas_ai_chat(req: AIChatRequest, db: Session = Depends(get_db)):
-    prompt_lower = req.prompt.lower()
-    
-    project_info = ""
+    project: Optional[Project] = None
     if req.project_id:
         project = db.query(Project).filter(Project.id == req.project_id).first()
-        if project:
-            project_info = f"Empreendimento Analisado: '{project.name}' (Zona {project.zone}, Lote: {project.lot_area}m², Área Construída: {project.built_area}m²)."
 
-    citations = []
-    actions = []
-    
-    if "recuo" in prompt_lower or "frontal" in prompt_lower:
-        citations.append(KNOWLEDGE_BASE["recuo_frontal"])
-        citations.append(KNOWLEDGE_BASE["recuo_fundos"])
-        actions.append("Ajustar o recuo frontal do projeto para no mínimo 4,00m.")
-        actions.append("Verificar afastamento dos fundos de no mínimo 3,00m.")
-    
-    if "taxa" in prompt_lower or "ocupacao" in prompt_lower or "ocupação" in prompt_lower:
-        citations.append(KNOWLEDGE_BASE["taxa_ocupacao"])
-        actions.append("Reduzir a projeção do pavimento térreo para não ultrapassar 60% da área do lote.")
-    
-    if "permeabilidade" in prompt_lower or "solo" in prompt_lower:
-        citations.append(KNOWLEDGE_BASE["permeabilidade"])
-        actions.append("Especificar piso intertravado drenante ou área verde de no mínimo 15%.")
-        
-    if "vagas" in prompt_lower or "estacionamento" in prompt_lower or "garagem" in prompt_lower:
-        citations.append(KNOWLEDGE_BASE["estacionamento"])
-        actions.append("Garantir pelo menos 1 vaga de estacionamento livre com dimensões mínimas de 2,40m x 5,00m.")
+    jurisdiction = project.city_ibge if project else "BR-RS-4311403"
+    municipality = project.city_name if project else "Lajeado"
 
-    if "acessibilidade" in prompt_lower or "nbr" in prompt_lower or "rampa" in prompt_lower:
-        citations.append(KNOWLEDGE_BASE["nbr_9050"])
-        actions.append("Adicionar rampa com inclinação de 8.33% no acesso principal.")
+    rule_ids = _match_rule_ids(req.prompt)
+    rules = [r for r in (catalog.get(rule_id) for rule_id in rule_ids) if r]
 
-    if not citations:
-        citations.append("Código de Edificações e Plano Diretor do Município de Lajeado / RS (Lei Complementar Vigente).")
-        actions.append("Consulte o Copiloto de Aprovações para simular parâmetros específicos em tempo real.")
+    citations: List[str] = []
+    actions: List[str] = []
+    lines: List[str] = []
 
-    answer = f"Com base na legislação urbanística municipal de Lajeado/RS"
-    if project_info:
-        answer += f" e no contexto do {project_info}"
-    answer += ":\n\n"
-    
-    if "recuo" in prompt_lower:
-        answer += "Para a zona Z2, os recuos são obrigatórios. O recuo frontal não pode ser inferior a 4,00m e o recuo dos fundos deve respeitar o mínimo de 3,00m."
-    elif "taxa" in prompt_lower or "ocupacao" in prompt_lower:
-        answer += "A Taxa de Ocupação limite é de 60%. Caso seu projeto exceda esse valor, será apontado como 'NÃO CONFORME' durante o protocolo municipal."
-    elif "permeabilidade" in prompt_lower:
-        answer += "A taxa de permeabilidade exige pelo menos 15% do solo livre de pavimentação impermeável."
+    # Estado das verificações do projeto, quando houver análise registrada.
+    statuses: Dict[str, str] = {}
+    if project:
+        run = RegulatoryEngine.latest_run(db, project.id)
+        if run:
+            statuses = {v.rule_id: v.status for v in run.validations}
+
+    if rules:
+        lines.append(
+            f"O catálogo regulatório do Atlas para {municipality} registra os "
+            f"seguintes parâmetros relacionados à sua consulta:"
+        )
+        for rule in rules:
+            limit = (
+                rule.expected_label()
+                if rule.check
+                else "verificação documental (não derivável de parâmetros numéricos)"
+            )
+            pending = " — regra ainda não validada tecnicamente" if not rule.is_publishable else ""
+            line = f"• {rule.title}: {limit}{pending}."
+            if rule.rule_id in statuses:
+                line += f" No empreendimento analisado, esta verificação está '{statuses[rule.rule_id]}'."
+            lines.append(line)
+
+            citations.append(f"{rule.title} — {rule.source.citation()}")
+            if rule.check:
+                actions.append(
+                    f"Conferir '{rule.check['field']}' no projeto contra o limite "
+                    f"{rule.expected_label()} e anexar evidência: "
+                    f"{', '.join(rule.evidence_required) or 'não especificada'}."
+                )
+            else:
+                actions.append(
+                    f"Providenciar análise técnica de {rule.title.lower()} "
+                    f"({', '.join(rule.evidence_required) or 'evidência não especificada'})."
+                )
     else:
-        answer += f"Analisando sua consulta '{req.prompt}': Todos os parâmetros urbanísticos do município de Lajeado/RS estão mapeados de forma determinística no motor regulatório do Atlas."
+        available = catalog.for_jurisdiction(jurisdiction)
+        lines.append(
+            f"Não encontrei no catálogo de {municipality} nenhum parâmetro "
+            f"correspondente a '{req.prompt}'."
+        )
+        if available:
+            lines.append(
+                "Parâmetros cadastrados para esta jurisdição: "
+                + "; ".join(rule.title for rule in available)
+                + "."
+            )
+        citations.append(
+            f"Catálogo regulatório de {municipality} "
+            f"(versão {catalog.version_for(jurisdiction)})"
+        )
+        actions.append(
+            "Reformule a consulta usando um dos parâmetros cadastrados, ou solicite "
+            "o cadastro da norma faltante ao responsável pelo catálogo."
+        )
+
+    unvalidated = [r for r in rules if r.state != RuleState.VIGENTE or not r.validated_by]
+    if unvalidated:
+        lines.append("")
+        lines.append(
+            f"Atenção: {len(unvalidated)} de {len(rules)} regra(s) citada(s) estão em "
+            "validação e tiveram a referência de artigo removida por não terem sido "
+            "conferidas contra o texto legal publicado. Não utilize estes valores como "
+            "base para protocolo sem conferência do responsável técnico."
+        )
+
+    if project:
+        lines.append("")
+        lines.append(
+            f"Empreendimento em contexto: '{project.name}' — {municipality}, "
+            f"zona {project.zone}, lote {project.lot_area or 'não informado'} m², "
+            f"área construída {project.built_area or 'não informado'} m²."
+        )
 
     return AIChatResponse(
-        answer=answer,
+        answer="\n".join(lines),
         law_citations=citations,
-        suggested_actions=actions
+        suggested_actions=actions,
+        matched_rules=[rule.rule_id for rule in rules],
     )

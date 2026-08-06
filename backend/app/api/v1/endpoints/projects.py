@@ -36,11 +36,11 @@ def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
     db.add(db_project)
     db.commit()
     db.refresh(db_project)
-    
-    # Auto-run initial regulatory check
-    RegulatoryEngine.evaluate_project(db, db_project)
+
+    # Análise inicial. Cria um AnalysisRun; não sobrescreve nada.
+    RegulatoryEngine.evaluate_project(db, db_project, trigger="project_created")
     db.refresh(db_project)
-    
+
     return db_project
 
 @router.get("/projects", response_model=List[ProjectResponse])
@@ -68,9 +68,9 @@ def update_project(project_id: str, project_update: ProjectUpdate, db: Session =
         setattr(project, key, value)
         
     db.commit()
-    
-    # Re-evaluate regulatory rules on project parameter change
-    RegulatoryEngine.evaluate_project(db, project)
+
+    # Nova análise a cada alteração de parâmetro; o histórico é preservado.
+    RegulatoryEngine.evaluate_project(db, project, trigger="project_updated")
     db.refresh(project)
-    
+
     return project

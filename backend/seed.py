@@ -37,7 +37,6 @@ def seed_db():
         front_setback=4.50,
         side_setback=1.80,
         rear_setback=3.50,
-        occupancy_rate=53.3,
         permeability_rate=22.5,
         parking_spaces=2,
         status="pre_analise",
@@ -59,20 +58,34 @@ def seed_db():
         front_setback=3.20,
         side_setback=1.20,
         rear_setback=2.50,
-        occupancy_rate=61.1,
         permeability_rate=12.0,
         parking_spaces=1,
         status="estudo_preliminar",
         is_official_baseline=False
     )
     
+    project3 = Project(
+        organization_id=org.id,
+        name="Terreno Rua das Hortênsias (Cadastro Incompleto)",
+        description="Cadastro sem medidas informadas — demonstra o estado 'não verificável'",
+        city_ibge="BR-RS-4311403",
+        city_name="Lajeado",
+        state="RS",
+        zone="Z2",
+        building_type="residencial_unifamiliar",
+        status="estudo_preliminar",
+        is_official_baseline=False
+    )
+
     db.add(project1)
     db.add(project2)
+    db.add(project3)
     db.commit()
     
     # Avaliar regras regulatórias
-    RegulatoryEngine.evaluate_project(db, project1)
-    RegulatoryEngine.evaluate_project(db, project2)
+    RegulatoryEngine.evaluate_project(db, project1, trigger="seed")
+    RegulatoryEngine.evaluate_project(db, project2, trigger="seed")
+    RegulatoryEngine.evaluate_project(db, project3, trigger="seed")
 
     # Documento de Exemplo
     sample_content = b"Prancha Arquitetonica v1.0 - Residencial das Acacias"
@@ -83,7 +96,10 @@ def seed_db():
         title="Prancha Arquitetônica de Implantação",
         category="projeto_arquitetonico",
         version="v1.0",
-        file_path="uploads/acacias_implantação.pdf",
+        file_path="0f4c1d7a9b2e4f0c8a6d5b3e1f7c9a2d.pdf",
+        original_filename="acacias_implantacao.pdf",
+        content_type="application/pdf",
+        size_bytes=len(sample_content),
         hash_sha256=doc_hash,
         status="vigente"
     )
@@ -140,7 +156,7 @@ def seed_db():
     db.add_all([log1, log2])
     db.commit()
 
-    print("Seed complete! Daily log entries generated successfully.")
+    print("Seed concluído: 3 empreendimentos, análises regulatórias registradas.")
     db.close()
 
 if __name__ == "__main__":

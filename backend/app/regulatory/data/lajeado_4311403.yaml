@@ -1,0 +1,217 @@
+# =============================================================================
+# Catálogo Regulatório — Município de Lajeado / RS
+# Plano de Implementação §7.2 (Catálogo) e §7.6 (formato da regra)
+# =============================================================================
+#
+# AVISO DE PROVENIÊNCIA — LEIA ANTES DE USAR
+#
+# Nenhuma regra deste arquivo foi conferida contra o texto legal publicado pelo
+# Município de Lajeado/RS. Os parâmetros vieram do protótipo inicial e NÃO têm
+# fonte verificada. Por isso:
+#
+#   * todas as regras estão no estado `em_validacao`;
+#   * o campo `source.article` está `null` — números de artigo NÃO devem ser
+#     inventados. Preencher somente após conferência do texto oficial;
+#   * `validated_by` está `null`, e o laudo gerado carrega a ressalva
+#     correspondente (§7.5 e §12).
+#
+# Para promover uma regra a `vigente`: conferir o texto legal, preencher
+# `source` (documento, artigo, URL, hash, data de consulta), `effective_from`
+# e `validated_by`, e então alterar `state`.
+# =============================================================================
+
+jurisdiction:
+  code: BR-RS-4311403
+  municipality: Lajeado
+  state: RS
+
+catalog_version: "0.1.0-em-validacao"
+
+rules:
+  - rule_id: lajeado_recuo_frontal_z2
+    title: Recuo Frontal Mínimo — Zona Z2
+    state: em_validacao
+    severity: bloqueio
+    applies_to:
+      zone: [Z2]
+      building_type: [residencial_unifamiliar, residencial_geminado]
+    check:
+      field: front_setback
+      operator: ">="
+      value: 4.0
+      unit: m
+      tolerance: 0.02
+    evidence_required: [implantacao, quadro_areas]
+    source:
+      document: Plano Diretor de Lajeado
+      article: null
+      url: null
+      consulted_at: null
+    effective_from: null
+    effective_until: null
+    validated_by: null
+    validated_at: null
+    notes: >-
+      Parâmetro herdado do protótipo. O protótipo divergia internamente sobre a
+      base legal (Plano Diretor Art. 45 no motor, Código de Edificações Art. 42
+      no assistente). Ambas as referências foram removidas por não terem sido
+      conferidas.
+
+  - rule_id: lajeado_taxa_ocupacao_max_z2
+    title: Taxa de Ocupação Máxima — Zona Z2
+    state: em_validacao
+    severity: bloqueio
+    applies_to:
+      zone: [Z2]
+      building_type: [residencial_unifamiliar, residencial_geminado]
+    check:
+      field: occupancy_rate
+      operator: "<="
+      value: 60.0
+      unit: "%"
+      tolerance: 0.1
+    evidence_required: [quadro_areas, implantacao]
+    source:
+      document: Plano Diretor de Lajeado — Tabela de Zoneamento
+      article: null
+      url: null
+      consulted_at: null
+    effective_from: null
+    effective_until: null
+    validated_by: null
+    validated_at: null
+    notes: >-
+      A taxa é sempre derivada de área construída ÷ área do lote. Não se usa o
+      campo armazenado no projeto, para evitar duas fontes da verdade
+      divergentes.
+
+  - rule_id: lajeado_recuo_fundos_z2
+    title: Recuo dos Fundos Mínimo — Zona Z2
+    state: em_validacao
+    severity: bloqueio
+    applies_to:
+      zone: [Z2]
+      building_type: [residencial_unifamiliar, residencial_geminado]
+    check:
+      field: rear_setback
+      operator: ">="
+      value: 3.0
+      unit: m
+      tolerance: 0.02
+    evidence_required: [implantacao, quadro_areas]
+    source:
+      document: Plano Diretor de Lajeado
+      article: null
+      url: null
+      consulted_at: null
+    effective_from: null
+    effective_until: null
+    validated_by: null
+    validated_at: null
+    notes: >-
+      O protótipo divergia quanto à aplicabilidade: o motor aplicava a toda a
+      Z2, o assistente restringia a edificações de até 2 pavimentos. A condição
+      por número de pavimentos foi omitida até conferência do texto legal.
+
+  - rule_id: lajeado_taxa_permeabilidade_min_z2
+    title: Taxa de Permeabilidade Mínima — Zona Z2
+    state: em_validacao
+    severity: bloqueio
+    applies_to:
+      zone: [Z2]
+    check:
+      field: permeability_rate
+      operator: ">="
+      value: 15.0
+      unit: "%"
+      tolerance: 0.1
+    evidence_required: [implantacao, projeto_drenagem]
+    source:
+      document: Código de Edificações de Lajeado
+      article: null
+      url: null
+      consulted_at: null
+    effective_from: null
+    effective_until: null
+    validated_by: null
+    validated_at: null
+    notes: >-
+      O protótipo divergia quanto ao valor (15% no motor; "15% ou 20% conforme
+      o tipo de piso drenante" no assistente) e quanto ao diploma legal
+      (Código de Edificações vs. Código Ambiental Municipal).
+
+  - rule_id: lajeado_gabarito_maximo_z2
+    title: Gabarito Máximo de Pavimentos — Residencial Z2
+    state: em_validacao
+    severity: bloqueio
+    applies_to:
+      zone: [Z2]
+      building_type: [residencial_unifamiliar, residencial_geminado]
+    check:
+      field: floors
+      operator: "<="
+      value: 3
+      unit: pavimentos
+      tolerance: 0
+    evidence_required: [cortes, fachadas]
+    source:
+      document: Plano Diretor de Lajeado
+      article: null
+      url: null
+      consulted_at: null
+    effective_from: null
+    effective_until: null
+    validated_by: null
+    validated_at: null
+    notes: Parâmetro herdado do protótipo, sem fonte conferida.
+
+  - rule_id: lajeado_vagas_estacionamento
+    title: Vagas de Estacionamento — Mínimo por Unidade
+    state: em_validacao
+    severity: alerta
+    applies_to:
+      building_type: [residencial_unifamiliar, residencial_geminado]
+    check:
+      field: parking_spaces
+      operator: ">="
+      value: 1
+      unit: vaga(s)
+      tolerance: 0
+    evidence_required: [implantacao]
+    source:
+      document: Código de Edificações de Lajeado
+      article: null
+      url: null
+      consulted_at: null
+    effective_from: null
+    effective_until: null
+    validated_by: null
+    validated_at: null
+    notes: >-
+      No protótipo esta regra tinha `applies: lambda p: True` e vazava para
+      qualquer município. Agora é restrita à jurisdição do catálogo.
+
+  - rule_id: lajeado_acessibilidade_nbr9050
+    title: Conformidade NBR 9050 — Acessibilidade e Rota Acessível
+    state: em_validacao
+    severity: bloqueio
+    applies_to: {}
+    check: null
+    requires_manual_review: true
+    manual_review_reason: >-
+      A verificação de rota acessível exige análise gráfica das pranchas
+      (larguras úteis, inclinações, desníveis). Não é derivável dos parâmetros
+      numéricos do cadastro.
+    evidence_required: [projeto_arquitetonico, laudo_acessibilidade]
+    source:
+      document: ABNT NBR 9050
+      article: null
+      url: null
+      consulted_at: null
+    effective_from: null
+    effective_until: null
+    validated_by: null
+    validated_at: null
+    notes: >-
+      Norma técnica federal, não municipal. Mantida no catálogo de Lajeado por
+      ora; deve migrar para um catálogo de normas nacionais.

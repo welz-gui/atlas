@@ -1,118 +1,164 @@
-from typing import List, Dict, Any
-from sqlalchemy.orm import Session
-from app.models.domain import Project, ValidationRecord
+"""Motor de regras determinístico (§3.4).
 
-# Regras cadastradas para o Município de Lajeado (BR-RS-4311403)
-LAJEADO_RULES = [
-    {
-        "rule_id": "lajeado_recuo_frontal_z2",
-        "rule_title": "Recuo Frontal Mínimo - Zona Z2",
-        "field": "front_setback",
-        "check": lambda p: p.front_setback >= 4.0 if p.zone == "Z2" else True,
-        "expected": ">= 4.00m",
-        "get_actual": lambda p: f"{p.front_setback:.2f}m",
-        "citation": "Plano Diretor de Lajeado, Art. 45 (Zona Z2)",
-        "applies": lambda p: p.zone == "Z2" and p.city_ibge == "BR-RS-4311403"
-    },
-    {
-        "rule_id": "lajeado_taxa_ocupacao_max_z2",
-        "rule_title": "Taxa de Ocupação Máxima - Zona Z2",
-        "field": "occupancy_rate",
-        "check": lambda p: (p.built_area / p.lot_area * 100 <= 60.0) if (p.lot_area > 0 and p.zone == "Z2") else (p.occupancy_rate <= 60.0),
-        "expected": "<= 60.0%",
-        "get_actual": lambda p: f"{(p.built_area / p.lot_area * 100):.1f}%" if p.lot_area > 0 else f"{p.occupancy_rate:.1f}%",
-        "citation": "Plano Diretor de Lajeado, Tabela de Zoneamento Z2",
-        "applies": lambda p: p.zone == "Z2" and p.city_ibge == "BR-RS-4311403"
-    },
-    {
-        "rule_id": "lajeado_recuo_fundos_z2",
-        "rule_title": "Recuo dos Fundos Mínimo - Zona Z2",
-        "field": "rear_setback",
-        "check": lambda p: p.rear_setback >= 3.00 if p.zone == "Z2" else True,
-        "expected": ">= 3.00m",
-        "get_actual": lambda p: f"{p.rear_setback:.2f}m",
-        "citation": "Plano Diretor de Lajeado, Art. 46 (Zona Z2)",
-        "applies": lambda p: p.zone == "Z2" and p.city_ibge == "BR-RS-4311403"
-    },
-    {
-        "rule_id": "lajeado_taxa_permeabilidade_min_z2",
-        "rule_title": "Taxa de Permeabilidade Mínima - Zona Z2",
-        "field": "permeability_rate",
-        "check": lambda p: p.permeability_rate >= 15.0 if p.zone == "Z2" else True,
-        "expected": ">= 15.0%",
-        "get_actual": lambda p: f"{p.permeability_rate:.1f}%",
-        "citation": "Código de Edificações de Lajeado, Art. 38",
-        "applies": lambda p: p.zone == "Z2" and p.city_ibge == "BR-RS-4311403"
-    },
-    {
-        "rule_id": "lajeado_gabarito_maximo_z2",
-        "rule_title": "Gabarito Máximo de Pavimentos - Residencial Z2",
-        "field": "floors",
-        "check": lambda p: p.floors <= 3 if (p.building_type in ["residencial_unifamiliar", "residencial_geminado"]) else True,
-        "expected": "<= 3 pavimentos",
-        "get_actual": lambda p: f"{p.floors} pavimentos",
-        "citation": "Plano Diretor de Lajeado, Art. 52",
-        "applies": lambda p: p.zone == "Z2" and p.building_type in ["residencial_unifamiliar", "residencial_geminado"]
-    },
-    {
-        "rule_id": "lajeado_vagas_estacionamento",
-        "rule_title": "Vagas de Garagem / Estacionamento Mínimo",
-        "field": "parking_spaces",
-        "check": lambda p: p.parking_spaces >= 1,
-        "expected": ">= 1 vaga",
-        "get_actual": lambda p: f"{p.parking_spaces} vaga(s)",
-        "citation": "Código de Edificações de Lajeado, Art. 55",
-        "applies": lambda p: True
-    },
-    {
-        "rule_id": "lajeado_acessibilidade_nbr9050",
-        "rule_title": "Conformidade NBR 9050 (Acessibilidade e Rota Acessível)",
-        "field": "accessibility_check",
-        "check": lambda p: None, # Requer upload de arquivo de projeto
-        "expected": "Laudo Acessibilidade / Prancha ARQ",
-        "get_actual": "Pendente de análise gráfica",
-        "citation": "ABNT NBR 9050 / Lei Federal de Acessibilidade",
-        "applies": lambda p: True
-    }
-]
+O motor não conhece nenhuma regra: ele carrega o catálogo regulatório e
+executa apenas as regras em estado executável. Toda execução gera um
+`AnalysisRun` novo — nada é sobrescrito nem apagado (§3.5).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy.orm import Session
+
+from app.models.domain import AnalysisRun, Project, ValidationRecord
+from app.regulatory.catalog import CheckOutcome, Rule, catalog
+
+ENGINE_VERSION = "1.1.0"
+
+#: Parâmetros do empreendimento expostos às regras.
+PARAM_FIELDS = (
+    "zone",
+    "building_type",
+    "lot_area",
+    "built_area",
+    "floors",
+    "front_setback",
+    "side_setback",
+    "rear_setback",
+    "permeability_rate",
+    "parking_spaces",
+)
+
 
 class RegulatoryEngine:
     @staticmethod
-    def evaluate_project(db: Session, project: Project) -> List[ValidationRecord]:
-        # Limpar verificações anteriores do projeto
-        db.query(ValidationRecord).filter(ValidationRecord.project_id == project.id).delete()
-        
-        records = []
-        for rule in LAJEADO_RULES:
-            if not rule["applies"](project):
-                continue
-                
-            check_result = rule["check"](project)
-            actual_val = rule["get_actual"](project) if callable(rule["get_actual"]) else str(rule["get_actual"])
-            
-            if check_result is None:
-                status = "nao_verificavel"
-                details = "Necessita upload de arquivo de projeto (IFC/PDF) na aba 'Projetos e Documentos' para medição assistida."
-            elif check_result is True:
-                status = "conforme"
-                details = "Parâmetro dentro do limite exigido pela norma municipal vigente."
-            else:
-                status = "nao_conforme"
-                details = f"O valor informado ({actual_val}) viola o limite especificado ({rule['expected']})."
-                
-            record = ValidationRecord(
-                project_id=project.id,
-                rule_id=rule["rule_id"],
-                rule_title=rule["rule_title"],
-                status=status,
-                field=rule["field"],
-                expected_value=rule["expected"],
-                actual_value=actual_val,
-                details=details,
-                source_citation=rule["citation"]
+    def project_params(project: Project) -> Dict[str, Any]:
+        params = {name: getattr(project, name) for name in PARAM_FIELDS}
+        # Derivado — ver Project.occupancy_rate.
+        params["occupancy_rate"] = project.occupancy_rate
+        return params
+
+    @staticmethod
+    def _content_hash(
+        project: Project, params: Dict[str, Any], results: List[Dict[str, Any]]
+    ) -> str:
+        """SHA-256 sobre o conteúdo canônico da análise.
+
+        Cobre os parâmetros avaliados, as regras aplicadas e os resultados —
+        de modo que o selo do laudo comprove *o que foi analisado*, e não
+        apenas o instante da emissão.
+        """
+        payload = {
+            "project_id": project.id,
+            "jurisdiction": project.city_ibge,
+            "engine_version": ENGINE_VERSION,
+            "catalog_version": catalog.version_for(project.city_ibge),
+            "params": {k: params[k] for k in sorted(params)},
+            "results": sorted(
+                (
+                    {
+                        "rule_id": r["rule_id"],
+                        "rule_state": r["rule_state"],
+                        "status": r["status"],
+                        "expected": r["expected_value"],
+                        "actual": r["actual_value"],
+                    }
+                    for r in results
+                ),
+                key=lambda item: item["rule_id"],
+            ),
+        }
+        canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _build_result(cls, rule: Rule, params: Dict[str, Any]) -> Dict[str, Any]:
+        evaluation = rule.evaluate(params)
+        return {
+            "rule_id": rule.rule_id,
+            "rule_title": rule.title,
+            "field": (rule.check or {}).get("field", "analise_documental"),
+            "status": evaluation["outcome"],
+            "expected_value": rule.expected_label(),
+            "actual_value": evaluation["actual_label"],
+            "details": evaluation["details"],
+            "rule_state": rule.state,
+            "severity": rule.severity,
+            "method": "analise_manual" if rule.requires_manual_review else "regra_deterministica",
+            "source_document": rule.source.document,
+            "source_article": rule.source.article,
+            "source_citation": rule.source.citation(),
+            "source_is_verified": rule.source.is_verified,
+            "evidence_required": ", ".join(rule.evidence_required) or None,
+            "validated_by": rule.validated_by,
+            "is_publishable": rule.is_publishable,
+        }
+
+    @classmethod
+    def evaluate_project(
+        cls,
+        db: Session,
+        project: Project,
+        trigger: str = "manual",
+    ) -> AnalysisRun:
+        """Executa o catálogo sobre o projeto e persiste uma nova análise.
+
+        Devolve o `AnalysisRun` criado. Análises anteriores permanecem
+        intactas.
+        """
+        params = cls.project_params(project)
+        jurisdiction = project.city_ibge
+
+        rules = [
+            rule
+            for rule in catalog.executable_for(jurisdiction)
+            if rule.applies_to_project(params, jurisdiction)
+        ]
+        results = [cls._build_result(rule, params) for rule in rules]
+
+        run = AnalysisRun(
+            project_id=project.id,
+            organization_id=project.organization_id,
+            jurisdiction=jurisdiction,
+            catalog_version=catalog.version_for(jurisdiction),
+            engine_version=ENGINE_VERSION,
+            trigger=trigger,
+            total_checks=len(results),
+            conforme_count=sum(1 for r in results if r["status"] == CheckOutcome.CONFORME),
+            nao_conforme_count=sum(1 for r in results if r["status"] == CheckOutcome.NAO_CONFORME),
+            atencao_count=sum(1 for r in results if r["status"] == CheckOutcome.ATENCAO),
+            nao_verificavel_count=sum(
+                1 for r in results if r["status"] == CheckOutcome.NAO_VERIFICAVEL
+            ),
+            # §7.5 — o laudo só é publicável se toda regra aplicada estiver
+            # validada. Uma análise sem regra alguma também não é publicável.
+            is_publishable=bool(results) and all(r["is_publishable"] for r in results),
+            content_hash=cls._content_hash(project, params, results),
+        )
+        db.add(run)
+        db.flush()
+
+        for result in results:
+            db.add(
+                ValidationRecord(
+                    analysis_run_id=run.id,
+                    project_id=project.id,
+                    **result,
+                )
             )
-            db.add(record)
-            records.append(record)
-            
+
         db.commit()
-        return records
+        db.refresh(run)
+        return run
+
+    @staticmethod
+    def latest_run(db: Session, project_id: str) -> Optional[AnalysisRun]:
+        return (
+            db.query(AnalysisRun)
+            .filter(AnalysisRun.project_id == project_id)
+            .order_by(AnalysisRun.created_at.desc(), AnalysisRun.id.desc())
+            .first()
+        )
