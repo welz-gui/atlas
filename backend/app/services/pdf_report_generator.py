@@ -110,27 +110,10 @@ class RegulatoryReportGenerator:
         ]))
         return table
 
-    # -- documento ---------------------------------------------------------
+    # -- construtores de seção ---------------------------------------------
     @classmethod
-    def generate_pdf(
-        cls,
-        project_data: Dict[str, Any],
-        validations: List[Dict[str, Any]],
-        run_data: Optional[Dict[str, Any]] = None,
-    ) -> bytes:
-        run_data = run_data or {}
-        styles = cls._styles()
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(
-            buffer, pagesize=A4,
-            rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36,
-            title=f"Pré-análise urbanística — {project_data.get('name', '')}",
-            author="Atlas",
-        )
-
+    def _build_header(cls, project_data: Dict[str, Any], styles: Dict[str, ParagraphStyle]) -> List[Any]:
         story: List[Any] = []
-
-        # 1. Cabeçalho
         story.append(Paragraph("<b>ATLAS</b> — PRÉ-ANÁLISE URBANÍSTICA", styles["title"]))
         story.append(Paragraph(
             "Documento técnico de apoio — não constitui aprovação nem licença",
@@ -145,8 +128,11 @@ class RegulatoryReportGenerator:
         story.append(Spacer(1, 8))
         story.append(HRFlowable(width="100%", thickness=1.5,
                                 color=colors.HexColor("#0284c7"), spaceAfter=12))
+        return story
 
-        # 2. Tarja de não publicável (§7.5)
+    @classmethod
+    def _build_warning_banner(cls, run_data: Dict[str, Any], styles: Dict[str, ParagraphStyle]) -> List[Any]:
+        story: List[Any] = []
         if not run_data.get("is_publishable", False):
             story.append(cls._warning_banner(
                 "<b>USO INTERNO — NÃO ENTREGÁVEL AO CLIENTE.</b> Este laudo aplica regras "
@@ -156,9 +142,13 @@ class RegulatoryReportGenerator:
                 styles, "#b45309", "#fffbeb",
             ))
             story.append(Spacer(1, 12))
+        return story
 
-        # 3. Dados do empreendimento
+    @classmethod
+    def _build_project_data(cls, project_data: Dict[str, Any], styles: Dict[str, ParagraphStyle]) -> List[Any]:
+        story: List[Any] = []
         story.append(Paragraph("1. DADOS DO EMPREENDIMENTO", styles["h2"]))
+        municipality = project_data.get("city_name", "—")
         rows = [
             ("Nome do Projeto", str(project_data.get("name", "—")),
              "Município / Zona", f"{municipality} / {project_data.get('zone', '—')}"),
@@ -189,8 +179,11 @@ class RegulatoryReportGenerator:
         ]))
         story.append(proj_table)
         story.append(Spacer(1, 14))
+        return story
 
-        # 4. Resultado das verificações
+    @classmethod
+    def _build_validation_results(cls, validations: List[Dict[str, Any]], styles: Dict[str, ParagraphStyle]) -> List[Any]:
+        story: List[Any] = []
         story.append(Paragraph("2. VERIFICAÇÃO DETERMINÍSTICA DE REGRAS", styles["h2"]))
 
         header = [Paragraph(f"<b>{h}</b>", styles["bold"])
@@ -229,8 +222,11 @@ class RegulatoryReportGenerator:
         ]))
         story.append(rules_table)
         story.append(Spacer(1, 14))
+        return story
 
-        # 5. Não verificáveis em destaque (§7.7)
+    @classmethod
+    def _build_unverifiable_items(cls, validations: List[Dict[str, Any]], styles: Dict[str, ParagraphStyle]) -> List[Any]:
+        story: List[Any] = []
         unverifiable = [v for v in validations if v.get("status") == "nao_verificavel"]
         story.append(Paragraph("3. ITENS NÃO VERIFICÁVEIS", styles["h2"]))
         if unverifiable:
@@ -265,15 +261,21 @@ class RegulatoryReportGenerator:
             story.append(Paragraph(
                 "Nenhum item ficou sem verificação nesta análise.", styles["normal"]))
         story.append(Spacer(1, 14))
+        return story
 
-        # 6. Ressalvas obrigatórias (§12)
+    @classmethod
+    def _build_disclaimers(cls, styles: Dict[str, ParagraphStyle]) -> List[Any]:
+        story: List[Any] = []
         story.append(Paragraph("4. RESSALVAS E LIMITAÇÕES", styles["h2"]))
         for index, text in enumerate(DISCLAIMERS, start=1):
             story.append(Paragraph(f"{index}. {text}", styles["normal"]))
             story.append(Spacer(1, 4))
         story.append(Spacer(1, 10))
+        return story
 
-        # 7. Proveniência
+    @classmethod
+    def _build_provenance(cls, run_data: Dict[str, Any], validations: List[Dict[str, Any]], styles: Dict[str, ParagraphStyle]) -> List[Any]:
+        story: List[Any] = []
         story.append(Paragraph("5. PROVENIÊNCIA DA ANÁLISE", styles["h2"]))
         verified = sum(1 for v in validations if v.get("source_is_verified"))
         emitted_at = datetime.utcnow().strftime("%d/%m/%Y %H:%M:%S UTC")
@@ -307,6 +309,34 @@ class RegulatoryReportGenerator:
             "alterada.",
             styles["small"],
         ))
+        return story
+
+    # -- documento ---------------------------------------------------------
+    @classmethod
+    def generate_pdf(
+        cls,
+        project_data: Dict[str, Any],
+        validations: List[Dict[str, Any]],
+        run_data: Optional[Dict[str, Any]] = None,
+    ) -> bytes:
+        run_data = run_data or {}
+        styles = cls._styles()
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buffer, pagesize=A4,
+            rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36,
+            title=f"Pré-análise urbanística — {project_data.get('name', '')}",
+            author="Atlas",
+        )
+
+        story: List[Any] = []
+        story.extend(cls._build_header(project_data, styles))
+        story.extend(cls._build_warning_banner(run_data, styles))
+        story.extend(cls._build_project_data(project_data, styles))
+        story.extend(cls._build_validation_results(validations, styles))
+        story.extend(cls._build_unverifiable_items(validations, styles))
+        story.extend(cls._build_disclaimers(styles))
+        story.extend(cls._build_provenance(run_data, validations, styles))
 
         doc.build(story)
         pdf_bytes = buffer.getvalue()
