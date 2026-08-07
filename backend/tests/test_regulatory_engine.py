@@ -227,3 +227,29 @@ def test_evaluate_nonexistent_project_returns_404(client, engineer_headers):
     )
     assert response.status_code == 404
     assert response.json()["detail"] == "Empreendimento não encontrado."
+
+
+def test_generate_regulatory_pdf_report_headers_and_content(client, engineer_headers, seeded_catalog):
+    projeto = _criar_projeto(client, engineer_headers, "Selo e Headers PDF")
+    report = client.post(
+        f"/api/v1/projects/{projeto['id']}/evaluate", headers=engineer_headers
+    ).json()
+
+    response = client.get(
+        f"/api/v1/projects/{projeto['id']}/report/pdf", headers=engineer_headers
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert "inline; filename=" in response.headers["content-disposition"]
+    assert response.headers["X-Atlas-Analysis-Run"] == report["analysis_run_id"]
+    assert response.headers["X-Atlas-Content-Hash"] == report["content_hash"]
+    assert len(response.headers["X-Atlas-Pdf-Sha256"]) == 64
+    assert response.headers["X-Atlas-Publishable"] == ("true" if report["is_publishable"] else "false")
+    assert response.content.startswith(b"%PDF")
+
+def test_generate_regulatory_pdf_report_project_not_found(client, engineer_headers):
+    response = client.get(
+        "/api/v1/projects/nonexistent-project-id/report/pdf", headers=engineer_headers
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Empreendimento não encontrado."
