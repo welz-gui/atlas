@@ -84,6 +84,82 @@ def test_hash_e_tamanho_sao_registrados(client, engineer_headers, project, uploa
     assert body["uploaded_by_id"] is not None
 
 
+def test_upload_recusado_pelo_antivirus(
+    client, engineer_headers, project, upload_dir, monkeypatch
+):
+    from app.services.antivirus import ScanResult, ScanStatus
+
+    def mock_scan_file(*args, **kwargs):
+        return ScanResult(
+            status=ScanStatus.INFECTADO,
+            signature="Eicar-Test-Signature",
+        )
+
+    class FakeScanner:
+        def scan_file(self, *args, **kwargs):
+            return mock_scan_file(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.documents.get_scanner", lambda: FakeScanner()
+    )
+
+    response = _upload(
+        client, engineer_headers, project["id"], "virus.pdf", b"infected content"
+    )
+
+    assert response.status_code == 422
+    assert "recusado pelo antivírus" in response.json()["detail"]
+
+
+def test_upload_antivirus_obrigatorio_falha(
+    client, engineer_headers, project, upload_dir, monkeypatch
+):
+    from app.core.config import settings
+    from app.services.antivirus import ScanResult, ScanStatus
+
+    monkeypatch.setattr(settings, "ANTIVIRUS_REQUIRED", True)
+
+    def mock_scan_file(*args, **kwargs):
+        return ScanResult(
+            status=ScanStatus.NAO_VERIFICADO,
+            detail="Timeout na comunicação com o clamd.",
+        )
+
+    class FakeScanner:
+        def scan_file(self, *args, **kwargs):
+            return mock_scan_file(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "app.api.v1.endpoints.documents.get_scanner", lambda: FakeScanner()
+    )
+
+    response = _upload(
+        client, engineer_headers, project["id"], "planta.pdf", b"qualquer"
+    )
+
+    assert response.status_code == 503
+    assert "obrigatória" in response.json()["detail"]
+    assert "Timeout" in response.json()["detail"]
+
+
+def test_upload_erro_inesperado_aborta_escrita(
+    client, engineer_headers, project, upload_dir, monkeypatch
+):
+    from app.services.storage import StorageWriter
+
+    def mock_commit(*args, **kwargs):
+        raise RuntimeError("Erro inesperado no sistema de arquivos")
+
+    monkeypatch.setattr(StorageWriter, "commit", mock_commit)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        _upload(client, engineer_headers, project["id"], "planta.pdf", b"qualquer")
+
+    assert "Erro inesperado" in str(exc_info.value)
+    # The abort is tested implicitly by making sure the file isn't created in the storage dir
+    assert list(upload_dir.iterdir()) == []
+
+
 def test_cliente_nao_faz_upload(client, db_session, org, project, upload_dir):
     from app.models.domain import UserRole
     from tests.conftest import auth_headers, make_user
@@ -95,6 +171,21 @@ def test_cliente_nao_faz_upload(client, db_session, org, project, upload_dir):
 
 
 # --- Versionamento (§8.3) ----------------------------------------------------
+
+def test_upload_supersedes_nao_encontrado(
+    client, engineer_headers, project, upload_dir
+):
+    response = _upload(
+        client,
+        engineer_headers,
+        project["id"],
+        "planta.pdf",
+        version="v2.0",
+        supersedes_id="00000000-0000-0000-0000-000000000000",
+    )
+    assert response.status_code == 404
+    assert "Documento a ser substituído não encontrado" in response.json()["detail"]
+
 
 def test_nova_versao_torna_a_anterior_obsoleta(
     client, engineer_headers, project, upload_dir
