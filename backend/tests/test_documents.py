@@ -41,6 +41,24 @@ def test_path_traversal_nao_escapa_do_diretorio(
     assert response.json()["original_filename"] == "atlas_escape.pdf"
 
 
+def test_path_traversal_windows_backslash_e_limpo(
+    client, engineer_headers, project, upload_dir
+):
+    """Garante que path traversal do Windows seja tratado adequadamente."""
+    response = _upload(
+        client, engineer_headers, project["id"], "..\\..\\..\\etc\\passwd.pdf"
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["original_filename"] == "passwd.pdf"
+
+    # Testa também a injeção de headers
+    response_quote = _upload(
+        client, engineer_headers, project["id"], 'arquivo"malicioso.pdf'
+    )
+    assert response_quote.status_code == 201, response_quote.text
+    assert response_quote.json()["original_filename"] == "arquivo_malicioso.pdf"
+
+
 def test_extensao_fora_da_allowlist_e_recusada(
     client, engineer_headers, project, upload_dir
 ):
