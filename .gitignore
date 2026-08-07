@@ -23,6 +23,10 @@ backend/uploads/
 .env
 .env.local
 
+# Git worktrees — cada frente de trabalho vive em worktrees/<slug>,
+# versionada por sua própria branch, nunca pelo working tree de master.
+worktrees/
+
 # OS / IDE
 .DS_Store
 Thumbs.db
