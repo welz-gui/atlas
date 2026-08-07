@@ -128,32 +128,18 @@ class PDFPlanParser:
     """Extrator assistido para quadros de áreas e memoriais descritivos."""
 
     @staticmethod
-    def parse_text_content(text: str) -> Dict[str, Any]:
-        extracted: Dict[str, Any] = {name: None for name in EXPECTED_FIELDS}
-        evidence: List[str] = []
-        warnings: List[str] = []
+    def _snippet(match: "re.Match[str]", text: str) -> str:
+        return text[match.start():match.end()].strip()
 
-        if not text or not text.strip():
-            extracted.update(
-                status="nao_verificavel",
-                fields_found=0,
-                fields_expected=len(EXPECTED_FIELDS),
-                confidence_score=0.0,
-                evidence=[],
-                warnings=[
-                    "Nenhum texto extraível no documento. Pode ser um PDF digitalizado "
-                    "(imagem), que exige OCR — ainda não disponível."
-                ],
-                raw_matches=[],
-            )
-            return extracted
-
-        # Busca sobre o texto sem acentos; evidência recortada do original.
-        haystack = fold_accents(text)
-
-        def snippet(match: "re.Match[str]") -> str:
-            return text[match.start():match.end()].strip()
-
+    @classmethod
+    def _extract_float_patterns(
+        cls,
+        text: str,
+        haystack: str,
+        extracted: Dict[str, Any],
+        evidence: List[str],
+        warnings: List[str],
+    ) -> None:
         for name, pattern, unit in FLOAT_PATTERNS:
             match = re.search(pattern, haystack, re.IGNORECASE)
             if not match:
@@ -166,9 +152,18 @@ class PDFPlanParser:
                 continue
             extracted[name] = value
             evidence.append(
-                f'{FIELD_LABELS[name]}: {value:g} {unit} — trecho: "{snippet(match)}"'
+                f'{FIELD_LABELS[name]}: {value:g} {unit} — trecho: "{cls._snippet(match, text)}"'
             )
 
+    @classmethod
+    def _extract_int_patterns(
+        cls,
+        text: str,
+        haystack: str,
+        extracted: Dict[str, Any],
+        evidence: List[str],
+        warnings: List[str],
+    ) -> None:
         for name, pattern, unit in INT_PATTERNS:
             match = re.search(pattern, haystack, re.IGNORECASE)
             if not match:
@@ -182,9 +177,13 @@ class PDFPlanParser:
                 continue
             extracted[name] = value
             evidence.append(
-                f'{FIELD_LABELS[name]}: {value} {unit} — trecho: "{snippet(match)}"'
+                f'{FIELD_LABELS[name]}: {value} {unit} — trecho: "{cls._snippet(match, text)}"'
             )
 
+    @classmethod
+    def _finalize_extraction(
+        cls, extracted: Dict[str, Any], evidence: List[str], warnings: List[str]
+    ) -> None:
         found = sum(1 for name in EXPECTED_FIELDS if extracted[name] is not None)
         missing = [FIELD_LABELS[n] for n in EXPECTED_FIELDS if extracted[n] is None]
         if missing:
@@ -211,6 +210,35 @@ class PDFPlanParser:
             warnings=warnings,
             raw_matches=evidence,
         )
+
+    @classmethod
+    def parse_text_content(cls, text: str) -> Dict[str, Any]:
+        extracted: Dict[str, Any] = {name: None for name in EXPECTED_FIELDS}
+        evidence: List[str] = []
+        warnings: List[str] = []
+
+        if not text or not text.strip():
+            extracted.update(
+                status="nao_verificavel",
+                fields_found=0,
+                fields_expected=len(EXPECTED_FIELDS),
+                confidence_score=0.0,
+                evidence=[],
+                warnings=[
+                    "Nenhum texto extraível no documento. Pode ser um PDF digitalizado "
+                    "(imagem), que exige OCR — ainda não disponível."
+                ],
+                raw_matches=[],
+            )
+            return extracted
+
+        # Busca sobre o texto sem acentos; evidência recortada do original.
+        haystack = fold_accents(text)
+
+        cls._extract_float_patterns(text, haystack, extracted, evidence, warnings)
+        cls._extract_int_patterns(text, haystack, extracted, evidence, warnings)
+        cls._finalize_extraction(extracted, evidence, warnings)
+
         return extracted
 
     @staticmethod
