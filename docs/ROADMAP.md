@@ -166,6 +166,7 @@ delas falhar, pare e conserte antes de continuar a construir.
 | Worktree | Branch | PR | Situação |
 |---|---|---|---|
 | `worktrees/estagio-0` | `feat/estagio-0-concierge` | ⬜ nenhum | ⚠️ Aponta para o mesmo commit de `master`, com **trabalho não commitado, não publicado e sem PR** — viola quatro das sete linhas acima. Ver o aviso no Estágio 0. |
+| `worktrees/roadmap-correcoes` | `docs/roadmap-correcoes` | [#16](https://github.com/welz-gui/atlas/pull/16) | 🟨 Em análise. É a frente que trouxe esta seção. |
 
 Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
