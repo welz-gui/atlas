@@ -117,6 +117,21 @@ export type CheckStatus =
   | "nao_aplicavel"
   | "nao_verificavel";
 
+export async function updateProjectParameters(id: string, params: Partial<Project>): Promise<Project | null> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/projects/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    if (!res.ok) throw new Error("Failed to update project");
+    return await res.json();
+  } catch (err) {
+    console.error("Error updating project:", err);
+    return null;
+  }
+}
+
 export type RuleState =
   | "rascunho_extraido_por_ia"
   | "em_validacao"
