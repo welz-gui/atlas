@@ -165,7 +165,7 @@ delas falhar, pare e conserte antes de continuar a construir.
 
 | Worktree | Branch | PR | Situação |
 |---|---|---|---|
-| `worktrees/estagio-0` | `feat/estagio-0-concierge` | ⬜ nenhum | 🛑 Commit `a3955a0` **não publicado e sem PR**. O conteúdo publica regra com citação legal não conferida — ver o aviso no Estágio 0 antes de abrir o PR. |
+| `worktrees/estagio-0` | `feat/estagio-0-concierge` | [#22](https://github.com/welz-gui/atlas/pull/22) | 🟨 Em análise. Scripts de apoio ao Estágio 0; o seed deixou de publicar regra — ver o registro no Estágio 0. |
 | `worktrees/roadmap-correcoes` | `docs/roadmap-correcoes` | [#16](https://github.com/welz-gui/atlas/pull/16) | 🟨 Em análise. É a frente que trouxe esta seção. |
 
 Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
@@ -273,50 +273,58 @@ tê-la previsto (`GET /projects/{id}/prediction-accuracy`).
 Tudo o que é operação: selecionar projetos, cobrar, acompanhar protocolo,
 comparar análise contra exigências reais, estruturar as regras usadas.
 
-> ### 🛑 Aviso sobre a worktree `estagio-0` — não mesclar como está
+> ### Registro: a worktree `estagio-0` e o seed que publicava regra
 >
-> A worktree `worktrees/estagio-0` tem um commit (`a3955a0`) que precisa de
-> decisão antes de virar PR. O arquivo de semente do catálogo ficou intacto —
-> segue em `0.1.0-em-validacao`, com `article: null` — e isso é bom. O problema
-> migrou para código, o que é pior: um dicionário dentro de um script escapa da
-> leitura que um diff de YAML receberia.
+> **Resolvido em [#22](https://github.com/welz-gui/atlas/pull/22)** — fica
+> registrado porque a armadilha é fácil de rearmar, e porque o padrão vale para
+> qualquer script futuro que toque o catálogo.
 >
-> `backend/stage0_concierge_seed.py`, ao rodar, faz três coisas em sequência:
+> O commit `a3955a0` trouxe dois scripts de apoio ao Estágio 0. O arquivo de
+> semente do catálogo ficou intacto — segue em `0.1.0-em-validacao`, com
+> `article: null`. O problema estava no código, o que é pior: um dicionário
+> dentro de um script escapa da leitura que um diff de YAML receberia.
 >
-> 1. escreve sete números de artigo — `Art. 45`, `Anexo II`, `Art. 48`,
+> `backend/stage0_concierge_seed.py`, na versão original, fazia três coisas ao
+> rodar:
+>
+> 1. escrevia sete números de artigo — `Art. 45`, `Anexo II`, `Art. 48`,
 >    `Art. 32`, `Art. 50`, `Art. 88`, `Art. 56` — a partir de um dicionário
->    fixo no código, sem que nenhum texto legal tenha sido aberto;
-> 2. promove as sete regras a `VIGENTE`, com `validated_by_id` preenchido e
+>    fixo no código, sem que nenhum texto legal tivesse sido aberto;
+> 2. promovia as sete regras a `VIGENTE`, com `validated_by_id` preenchido e
 >    `effective_from` em `2026-01-01`;
-> 3. grava um `RuleValidationEvent` por regra, com a nota *"Conferido com
+> 3. gravava um `RuleValidationEvent` por regra, com a nota *"Conferido com
 >    &lt;documento&gt; (&lt;artigo&gt;) durante o Estágio 0"*.
 >
-> O passo 3 é o mais grave. Os dois primeiros produzem dado errado; o terceiro
+> O passo 3 era o mais grave. Os dois primeiros produzem dado errado; o terceiro
 > produz **trilha de auditoria afirmando que uma pessoa nomeada conferiu a
 > lei** — e a trilha é justamente o que o sistema oferece a quem perguntar de
 > onde veio um número. Com regra em `vigente` e validador registrado,
-> `is_publishable` passa a ser verdadeiro: laudo e portal do cliente saem com
-> aquelas citações. É I7 e o §7.5 caindo juntos, por uma porta que o próprio
-> §7.5 tranca na interface.
+> `is_publishable` viraria verdadeiro: laudo e portal do cliente sairiam com
+> aquelas citações. Seriam I7 e o §7.5 caindo juntos, por uma porta que o
+> próprio §7.5 tranca na interface.
 >
 > Aquele `Art. 45` é, ainda por cima, exatamente a citação que a Fase A apagou:
 > o protótipo divergia entre Plano Diretor Art. 45 e Código de Edificações
 > Art. 42, e **nenhum dos dois** havia sido lido no texto oficial.
 >
-> O script também cadastra as exigências do órgão a partir de um dicionário com
-> `linked_rule_key` e `was_predicted` fixos. Recall calculado sobre exigência
-> que nós mesmos escrevemos devolve a nossa suposição com aparência de medição.
+> **A regra que fica.** Nenhum script publica regra — nem seed, nem migration,
+> nem fixture. Promover a `vigente` é ato humano, feito na tela `/catalog` por
+> quem conferiu o texto legal, e o `RuleValidationEvent` resultante só tem valor
+> porque registra uma pessoa que de fato conferiu. Script que grava esse evento
+> está forjando trilha de auditoria, qualquer que seja a intenção.
 >
-> **Dois caminhos legítimos.** Reescrever o script para semear apenas o que é
-> demonstração declarada — projetos e usuários, regras seguindo `em_validacao`,
-> nenhuma exigência inventada — ou abrir a legislação publicada, conferir regra
-> a regra e promover pela tela `/catalog`, que é onde a conferência tem
-> responsável identificado. Publicação de regra não é trabalho de script de
-> seed.
+> **E a que vale para métrica.** O mesmo script afirmava `was_predicted` a
+> partir de um dicionário. Hoje o valor é derivado das `ValidationRecord` da
+> análise que o próprio script rodou. A diferença importa: recall afirmado mede
+> a nossa expectativa; recall derivado mede o motor. Nenhum dos dois substitui
+> exigência que o órgão de fato emitiu — os cenários seguem sendo demonstração
+> declarada.
 >
-> `backend/stage0_report.py` não tem esse problema: apenas lê, e consolida as
-> métricas do §11. Vale separá-lo em PR próprio, que pode ser mesclado como
-> parte de **D5** enquanto o seed é resolvido.
+> Com o seed corrigido, rodá-lo produz **zero laudo publicável em cinco**, e é
+> esse o resultado certo enquanto **D3** não acontecer.
+>
+> `backend/stage0_report.py` nunca teve o problema: apenas lê, e consolida as
+> métricas do §11. É aproveitável em **D5**.
 
 ### Decisões que precisam de dono antes de começar
 
@@ -1235,9 +1243,10 @@ Registrado porque cada item já foi tentação em algum momento:
 7. **Não preencher `source.article` sem ter aberto o texto legal publicado**, e
    isso vale igualmente para YAML, script de seed, migration ou fixture de
    teste. Já aconteceu duas vezes: o protótipo trazia duas citações
-   conflitantes para a mesma regra, e o commit `a3955a0` da worktree
-   `estagio-0` traz sete artigos vindos de um dicionário. Número de artigo
-   plausível é indistinguível de número correto para quem lê o laudo.
+   conflitantes para a mesma regra, e o commit `a3955a0` trouxe sete artigos
+   vindos de um dicionário — corrigido em
+   [#22](https://github.com/welz-gui/atlas/pull/22). Número de artigo plausível
+   é indistinguível de número correto para quem lê o laudo.
    **Corolário:** nada além da tela `/catalog`, operada por gente, promove
    regra a `vigente` — script que grava `RuleValidationEvent` está forjando
    trilha de auditoria, qualquer que seja a intenção.
