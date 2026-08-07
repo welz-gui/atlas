@@ -50,7 +50,7 @@ CHUNK_SIZE = 1024 * 1024
     response_model=DocumentResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def upload_document(
+def upload_document(
     project_id: str,
     title: str = Form(...),
     category: str = Form("projeto_arquitetonico"),
@@ -98,7 +98,7 @@ async def upload_document(
     writer = storage.writer(key, defer_commit=True)
     try:
         with writer:
-            while chunk := await file.read(CHUNK_SIZE):
+            while chunk := file.file.read(CHUNK_SIZE):
                 if writer.write(chunk) > max_bytes:
                     raise HTTPException(
                         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
