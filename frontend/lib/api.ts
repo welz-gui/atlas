@@ -535,8 +535,15 @@ export function logout(): void {
 
 // --- Empreendimentos ---------------------------------------------------------
 
-export function fetchProjects(): Promise<Project[]> {
-  return request<Project[]>("/projects");
+export async function fetchProjects(): Promise<Project[]> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/projects`, { cache: 'no-store' });
+    if (!res.ok) throw new Error("Failed to fetch projects");
+    return await res.json();
+  } catch (err) {
+    console.warn("FastAPI backend unreachable, fallback to initial state", err);
+    return [];
+  }
 }
 
 export function fetchProject(id: string): Promise<Project> {
