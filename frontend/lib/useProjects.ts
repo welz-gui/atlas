@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, Project, fetchProjects } from "@/lib/api";
 
 /**
@@ -36,8 +36,10 @@ export function useProjects() {
     load();
   }, [load]);
 
-  const selectedProject =
-    projects.find((p) => p.id === selectedProjectId) ?? null;
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === selectedProjectId) ?? null,
+    [projects, selectedProjectId]
+  );
 
   const replaceProject = useCallback((updated: Project) => {
     setProjects((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
