@@ -11,7 +11,6 @@ import io
 import os
 import re
 import urllib.parse
-from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
@@ -29,9 +28,9 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.models.domain import Document, DocumentState, User
 from app.schemas.domain import DocumentResponse, ExtractionResponse, PurgeReportResponse
-from app.services.antivirus import ScanStatus, get_scanner
+from app.services.antivirus import get_scanner
 from app.services.pdf_parser import PDFPlanParser
-from app.services.retention import mark_obsolete, purge_expired_documents, retention_deadline
+from app.services.retention import mark_obsolete, purge_expired_documents
 from app.services.storage import ObjectNotFound, build_key, get_storage
 
 router = APIRouter()
