@@ -265,6 +265,10 @@ assistido") está fechado, porque o Nível 1 pressupõe regras cadastradas **com
 
 ## 6. Próximos passos
 
+> O backlog desta seção está **esgotado** — as Fases A, B e C foram entregues.
+> A continuidade (Estágios 2 a 7 do plano e a Fase D de liberação) vive em
+> [`ROADMAP.md`](ROADMAP.md).
+
 ### Fase A — Correções de risco ✅ concluída
 
 | # | Item | Status |
