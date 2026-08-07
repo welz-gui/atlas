@@ -96,6 +96,9 @@ def update_project(
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(project, key, value)
     db.commit()
+
+    # Re-evaluate regulatory rules on project parameter change
+    RegulatoryEngine.evaluate_project(db, project)
     db.refresh(project)
     return project
 
