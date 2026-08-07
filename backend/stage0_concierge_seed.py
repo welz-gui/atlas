@@ -1,14 +1,35 @@
-"""Script de execução do Estágio 0 (Concierge) — Atlas.
+"""Ambiente de demonstração do Estágio 0 (Concierge) — Atlas.
 
-Cadastra 5 cenários reais de pré-análises de Lajeado/RS, valida o catálogo
-regulatório com artigos oficiais, executa o motor de conformidade e simula a
-tramitação de protocolos com exigências do órgão para medição de acurácia.
+Prepara uma organização, os usuários do concierge e cinco cenários de
+**demonstração** em Lajeado/RS, roda o motor sobre cada um e monta a tramitação
+que exercita a medição de acurácia (§11).
+
+O que este script **não** faz, por desenho:
+
+- **não publica regra.** O catálogo é importado e permanece como está — as
+  regras de Lajeado seguem em `em_validacao`, sem artigo, sem validador. Promover
+  regra a `vigente` é ato humano, feito na tela `/catalog` por quem conferiu o
+  texto legal, e fica registrado em `rule_validation_events` com o nome de quem
+  conferiu (§7.5). Script nenhum tem como fazer isso sem forjar essa trilha;
+- **não preenche `source_article`.** Número de artigo entra quando alguém abriu
+  a lei publicada, nunca a partir de um dicionário aqui dentro;
+- **não afirma `was_predicted`.** O valor é derivado do que o motor de fato
+  apontou na análise, não escrito à mão — do contrário o recall devolveria a
+  nossa própria suposição com aparência de medição.
+
+Consequência esperada e correta: os laudos destes cenários saem
+`is_publishable=False`, marcados como uso interno, e o portal do cliente omite o
+resumo de conformidade. É o sistema se recusando a entregar número não
+conferido. Para vê-lo publicar, confira o catálogo de verdade.
+
+Os projetos aqui são **fictícios**, para exercitar a ferramenta. Os projetos
+reais do Estágio 0 entram pela interface, como qualquer análise paga.
 
 Uso:
     python stage0_concierge_seed.py
 """
 
-from datetime import date, datetime, timezone, timedelta
+from datetime import date, timedelta
 from sqlalchemy import inspect
 
 from app.core.database import SessionLocal, engine
@@ -24,14 +45,16 @@ from app.models.domain import (
     RegulatoryDocument,
     RegulatoryDocumentState,
     RegulatoryRule,
-    RuleValidationEvent,
 )
-from app.regulatory.catalog import RuleState
+from app.regulatory.catalog import CheckOutcome, RuleState
 from app.regulatory.importer import import_seed_catalog
 from app.services import project_versions
 from app.services.regulatory_engine import RegulatoryEngine
 
 DEMO_PASSWORD = "atlas-concierge-2026"
+
+#: Resultados que contam como "o Atlas apontou isto antes do órgão".
+APONTADO = (CheckOutcome.NAO_CONFORME, CheckOutcome.ATENCAO)
 
 
 def run_stage0_seed():
@@ -91,45 +114,16 @@ def run_stage0_seed():
             )
             db.add(analista)
 
-        db.flush()
-
-        print("3. Validação e promoção das regras de Lajeado para VIGENTE (pelo validador humano)...")
-        now_utc = datetime.now(timezone.utc)
-        official_sources = {
-            "lajeado_recuo_frontal_z2": ("Lei Complementar nº 002/2014 — Plano Diretor de Lajeado", "Art. 45"),
-            "lajeado_taxa_ocupacao_max_z2": ("Lei Complementar nº 002/2014 — Plano Diretor de Lajeado", "Anexo II"),
-            "lajeado_recuo_fundos_z2": ("Lei Complementar nº 002/2014 — Plano Diretor de Lajeado", "Art. 48"),
-            "lajeado_taxa_permeabilidade_min_z2": ("Lei Complementar nº 001/2014 — Código de Edificações", "Art. 32"),
-            "lajeado_gabarito_maximo_z2": ("Lei Complementar nº 002/2014 — Plano Diretor de Lajeado", "Art. 50"),
-            "lajeado_vagas_estacionamento": ("Lei Complementar nº 001/2014 — Código de Edificações", "Art. 88"),
-            "lajeado_acessibilidade_nbr9050": ("ABNT NBR 9050:2020 / Lei Federal 13.146/2015", "Art. 56"),
-        }
-
-        regras_lajeado = db.query(RegulatoryRule).filter_by(jurisdiction="BR-RS-4311403").all()
-        for regra in regras_lajeado:
-            if regra.rule_key in official_sources:
-                doc_title, art_title = official_sources[regra.rule_key]
-                regra.source_document = doc_title
-                regra.source_article = art_title
-                regra.state = RuleState.VIGENTE
-                regra.effective_from = "2026-01-01"
-                regra.validated_by_id = validador.id
-                regra.validated_at = now_utc
-                db.add(
-                    RuleValidationEvent(
-                        rule_id=regra.id,
-                        from_state=RuleState.EM_VALIDACAO,
-                        to_state=RuleState.VIGENTE,
-                        action="publicar",
-                        actor_id=validador.id,
-                        actor_name=validador.name,
-                        notes=f"Conferido com {doc_title} ({art_title}) durante o Estágio 0.",
-                    )
-                )
-        doc_lajeado.state = RegulatoryDocumentState.VALIDADO
         db.commit()
 
-        print("4. Cadastrando 5 cenários reais do Estágio 0 (Concierge Lajeado)...")
+        print("3. Conferindo o estado do catálogo (nenhuma regra é publicada por aqui)...")
+        regras_lajeado = db.query(RegulatoryRule).filter_by(jurisdiction="BR-RS-4311403").all()
+        pendentes = [r for r in regras_lajeado if r.state != RuleState.VIGENTE]
+        print(f"   {len(regras_lajeado)} regras de Lajeado, {len(pendentes)} aguardando conferência humana.")
+        if pendentes:
+            print(f"   Publique-as em /catalog, como '{validador.email}', depois de conferir o texto legal.")
+
+        print("4. Cadastrando 5 cenários de demonstração (Concierge Lajeado)...")
 
         scenarios = [
             {
@@ -155,9 +149,8 @@ def run_stage0_seed():
                 "requirements": [
                     {
                         "seq": 1,
-                        "desc": "Ajustar o recuo frontal ao mínimo de 4,00m conforme Art. 45 do Plano Diretor.",
+                        "desc": "Ajustar o recuo frontal ao mínimo exigido para a Zona Z2.",
                         "rule": "lajeado_recuo_frontal_z2",
-                        "predicted": True
                     }
                 ]
             },
@@ -173,9 +166,8 @@ def run_stage0_seed():
                 "requirements": [
                     {
                         "seq": 1,
-                        "desc": "Taxa de ocupação de 65% excede o limite máximo de 60% da Zona Z2.",
+                        "desc": "Taxa de ocupação acima do limite máximo da Zona Z2.",
                         "rule": "lajeado_taxa_ocupacao_max_z2",
-                        "predicted": True
                     }
                 ]
             },
@@ -193,7 +185,6 @@ def run_stage0_seed():
                         "seq": 1,
                         "desc": "Apresentar laudo de sondagem de solo e parecer de esgotamento sanitário.",
                         "rule": None,
-                        "predicted": False
                     }
                 ]
             },
@@ -209,6 +200,7 @@ def run_stage0_seed():
         ]
 
         created_projects = []
+        created_runs = []
         for index, sc in enumerate(scenarios, start=1):
             proj = db.query(Project).filter_by(organization_id=org.id, name=sc["name"]).first()
             if not proj:
@@ -236,7 +228,14 @@ def run_stage0_seed():
 
             # Executa a pré-análise pelo motor regulatório
             db.refresh(proj)
-            RegulatoryEngine.evaluate_project(db, proj, trigger=f"concierge_v{index}", user=analista)
+            run = RegulatoryEngine.evaluate_project(
+                db, proj, trigger=f"concierge_v{index}", user=analista
+            )
+
+            # Regras que o motor de fato apontou nesta análise. É daqui que sai
+            # `was_predicted` — afirmá-lo à mão faria o recall medir a nossa
+            # expectativa em vez do desempenho do motor.
+            apontadas = {v.rule_id for v in run.validations if v.status in APONTADO}
 
             # Cadastra protocolo e exigências se houver
             if sc["requirements"]:
@@ -265,14 +264,27 @@ def run_stage0_seed():
                                 raised_at=str(date.today() - timedelta(days=3)),
                                 due_date=str(date.today() + timedelta(days=27)),
                                 linked_rule_key=req["rule"],
-                                was_predicted=req["predicted"]
+                                was_predicted=bool(req["rule"]) and req["rule"] in apontadas,
                             )
                         )
 
             created_projects.append(proj)
+            created_runs.append(run)
 
         db.commit()
-        print(f"[OK] Sucesso! 5 projetos do Estágio 0 (Concierge) semeados e analisados para a Org '{org.name}'.")
+
+        publicaveis = sum(1 for r in created_runs if r.is_publishable)
+        print(
+            f"[OK] {len(created_projects)} cenários de demonstração semeados e analisados "
+            f"para a organização '{org.name}'."
+        )
+        print(f"     Laudos publicáveis: {publicaveis} de {len(created_runs)}.")
+        if publicaveis < len(created_runs):
+            print(
+                "     Os demais saem marcados como uso interno porque aplicam regra ainda\n"
+                "     não conferida — comportamento esperado (§7.5). Confira o catálogo em\n"
+                "     /catalog para que passem a ser publicáveis."
+            )
 
     finally:
         db.close()
