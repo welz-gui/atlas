@@ -19,12 +19,19 @@ app = FastAPI(
 )
 
 # CORS Middleware
+if settings.ENVIRONMENT == "production":
+    cors_allow_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
+    cors_allow_headers = ["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"]
+else:
+    cors_allow_methods = ["*"]
+    cors_allow_headers = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=cors_allow_methods,
+    allow_headers=cors_allow_headers,
 )
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
