@@ -7,9 +7,10 @@ real do código** e o **caminho de execução** de cada estágio.
 - Última atualização: **2026-08-07**
 - Base avaliada: `master` em `7dc50d2`, espelhada em
   [`welz-gui/atlas`](https://github.com/welz-gui/atlas)
-- Suíte: **187 funções de teste** em `backend/tests`. A contagem de 199 casos
-  citada nas fases anteriores inclui parametrização e **não é reproduzível
-  hoje** — não há CI no repositório. Ver **D0** na Fase D.
+- Suíte: **199 casos, todos passando** — 187 funções em `backend/tests`, a
+  diferença vindo de parametrização. Reproduz em ~90 s:
+  `backend/.venv/Scripts/python -m pytest tests/ -q`. O que não existe é **CI**:
+  a suíte só roda quando alguém lembra. Ver **D0** na Fase D.
 - Documentos irmãos: [`REVISAO_ADERENCIA_PLANO_v2.md`](REVISAO_ADERENCIA_PLANO_v2.md)
   (diagnóstico do embrião e backlog das Fases A–C)
 
@@ -132,7 +133,20 @@ agora.
 3. dado simulado alimentando métrica de acurácia;
 4. teste removido ou enfraquecido sem justificativa explícita;
 5. suíte vermelha, ou CI ausente para o caminho alterado (**D0**);
-6. commit direto em `master` dentro da branch — indica rebase malfeito.
+6. commit direto em `master` dentro da branch — indica rebase malfeito;
+7. chamada de API no frontend feita com `fetch` cru em vez do helper
+   `request()` de `lib/api.ts` — perde o `Authorization` e engole a falha de
+   rede, que é o mecanismo do I13;
+8. arquivo de rascunho ou depuração na raiz do repositório.
+
+> **A CI é necessária e não é suficiente.** Em 2026-08-10, os 25 PRs
+> automáticos abertos contra `master` foram revisados um a um. Todos os treze
+> que tocavam `backend/app` passavam nos 199 testes — inclusive um que
+> transformava um `404` em `200`, porque nenhum teste cobria aquele caminho. E
+> os dois mais perigosos do lote eram de frontend, onde não há teste algum:
+> reescreviam `lib/api.ts` com `fetch` cru, devolvendo `[]` e `null` no catch —
+> exatamente o defeito que a Fase A removeu. Suíte verde não é revisão; é o
+> piso a partir do qual a revisão começa.
 
 #### Depois do merge
 
@@ -1172,7 +1186,7 @@ antes do que trava a liberação externa. Cada item é uma worktree e um PR.
 
 | # | Item | Esforço | Por quê antes de tudo |
 |---|---|---|---|
-| **D0** | **CI**: rodar a suíte a cada push e PR, com serviço Postgres | P | Hoje ninguém consegue reproduzir a contagem de testes. D1, D5 e D6 pressupõem CI que não existe. É o item mais barato e o de maior alcance |
+| **D0** | **CI**: rodar a suíte a cada push e PR, com serviço Postgres | P | Nada barra hoje um PR que quebre a suíte. D1, D5 e D6 pressupõem CI que não existe. É o item mais barato e o de maior alcance |
 | **D3** | **Conferir e publicar o catálogo de Lajeado** | G | É o que libera laudo e portal, e é insumo do Estágio 0, não consequência dele. Operação, não código — precisa de quem confere a lei (ver Estágio 0) |
 | **D5** | **Instrumentar métricas §11** (aprovação e IA) em endpoint próprio | M | Sem isso o Portão 0 → 1 é opinião. Aproveitar `stage0_report.py` da worktree, apontado para dado real |
 | **D9** | **Backup com restauração testada**, gestão de segredos e destino de deploy | M | O Estágio 0 manipula projeto de cliente pagante. Ver *Operação e infraestrutura* |
@@ -1206,7 +1220,8 @@ concedido antes de D1 e D2 estarem em `master`.**
 
 | Dívida | Impacto | Onde |
 |---|---|---|
-| **Sem CI** | A suíte só roda na máquina de quem lembrar. Contagem de testes não reproduzível | `.github/workflows/` ausente |
+| **Sem CI** | A suíte passa, mas só roda quando alguém lembra — e nada barra um PR que a quebre | `.github/workflows/` ausente |
+| **Sem teste de frontend** | Nenhum. Um PR que troque `request()` por `fetch` cru passa em tudo | `frontend/` |
 | **Sem backup nem restauração testada** | Perda do corpus do Estágio 0 seria irreversível | — |
 | **Segredos em `.env` de arquivo** | Sem cofre, sem rotação | `backend/.env` |
 | **Sem destino de deploy** | Só `docker-compose` local | `docker-compose.yml` |
