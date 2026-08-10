@@ -213,7 +213,7 @@ def test_extracao_de_documento_inexistente_responde_404(
         headers=engineer_headers,
     )
     assert response.status_code == 404
-    assert "not found" in response.json()["detail"].lower() or "não encontrado" in response.json()["detail"].lower()
+    assert "não encontrado" in response.json()["detail"].lower()
 
 
 def test_extracao_de_documento_projeto_inexistente_responde_404(
