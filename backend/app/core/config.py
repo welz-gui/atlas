@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     # Segurança
     # Sem SECRET_KEY no ambiente, gera-se uma chave efêmera por processo em vez
     # de carregar um valor previsível versionado no repositório.
-    SECRET_KEY: str | None = None
+    SECRET_KEY: str = ""
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 dias
 
     model_config = SettingsConfigDict(
