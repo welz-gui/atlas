@@ -236,7 +236,7 @@ class PDFPlanParser:
                 ]
             try:
                 reader = pypdf.PdfReader(io.BytesIO(file_bytes))
-                text = "".join([page.extract_text() or "" for page in reader.pages])
+                text = "".join(page.extract_text() or "" for page in reader.pages)
             except Exception as exc:  # PDF corrompido, cifrado etc.
                 return "", [f"Falha ao ler o PDF: {exc}"]
 
