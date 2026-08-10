@@ -9,6 +9,8 @@ documento e de contar a verdade sobre o que aconteceu com o arquivo.
 
 import io
 import os
+import re
+import urllib.parse
 from datetime import datetime
 from typing import List, Optional
 
@@ -45,6 +47,20 @@ ALLOWED_EXTENSIONS = {
 CHUNK_SIZE = 1024 * 1024
 
 
+def secure_filename(filename: str) -> str:
+    """Limpa o nome do arquivo, prevenindo path traversal de Windows e injeção de headers."""
+    if not filename:
+        return ""
+    # Decodifica caracteres URL-encoded (ex: %22 vira ", %2e%2e%2f vira ../)
+    filename = urllib.parse.unquote(filename)
+    # Trata separadores de diretório do Windows, mesmo rodando em Linux
+    filename = filename.replace("\\", "/")
+    filename = os.path.basename(filename)
+    # Remove aspas, caracteres de controle e de redirecionamento que possam afetar os headers
+    filename = re.sub(r'[\r\n"\'<>|\0]', '_', filename)
+    return filename
+
+
 @router.post(
     "/projects/{project_id}/documents/upload",
     response_model=DocumentResponse,
@@ -78,7 +94,7 @@ def upload_document(
     # aproveita a extensão, e ainda assim contra uma allowlist. A chave no
     # armazenamento é opaca e gerada pelo servidor, de modo que sequências como
     # "../" não têm efeito algum.
-    original_filename = os.path.basename(file.filename or "")
+    original_filename = secure_filename(file.filename or "")
     extension = os.path.splitext(original_filename)[1].lower()
     if extension not in ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -231,6 +247,7 @@ def download_document(
         yield from chunks
 
     filename = document.original_filename or f"{document.title}{os.path.splitext(document.file_path)[1]}"
+    filename = secure_filename(filename)
     return StreamingResponse(
         body(),
         media_type=document.content_type or "application/octet-stream",
