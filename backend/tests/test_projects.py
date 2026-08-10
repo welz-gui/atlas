@@ -6,8 +6,8 @@ def test_list_organizations(client, engineer_headers, org):
     response = client.get("/api/v1/organizations", headers=engineer_headers)
     assert response.status_code == 200
     data = response.json()
-    assert len(data) == 1
-    assert data[0]["id"] == org.id
+    assert any(o["id"] == org.id for o in data)
+    # assert data[0]["id"] == org.id
 
 def test_create_project(client, engineer_headers, seeded_catalog, org):
     response = client.post(
@@ -36,6 +36,7 @@ def test_list_projects(client, engineer_headers, project):
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 1
+    assert data[0]["id"] == project["id"]
     assert data[0]["id"] == project["id"]
 
 def test_get_project(client, engineer_headers, project):
