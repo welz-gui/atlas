@@ -491,3 +491,19 @@ def test_proveniencia_nao_vaza_entre_organizacoes(
         "/api/v1/ai/interactions", headers=auth_headers(client, intruso.email)
     ).json()
     assert registros == []
+
+def test_extracao_com_documento_inexistente_responde_404(
+    client, validator_headers
+):
+    """Garante que a extração de rascunhos responde 404 para documento inexistente."""
+    response = client.post(
+        "/api/v1/ai/rule-drafts",
+        headers=validator_headers,
+        json={
+            "legal_text": "Este texto deve falhar devido ao ID inválido",
+            "jurisdiction": "BR-RS-4311403",
+            "regulatory_document_id": "documento-que-nao-existe"
+        }
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Documento regulatório não encontrado."

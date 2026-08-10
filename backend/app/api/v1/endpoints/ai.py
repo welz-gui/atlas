@@ -12,7 +12,7 @@ por texto do modelo: a citação é resolvida a partir do catálogo, que é a fo
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -143,7 +143,9 @@ def extract_rule_drafts(
             .first()
         )
         if not document:
-            return RuleDraftResponse(error="Documento regulatório não encontrado.")
+            raise HTTPException(
+                status_code=404, detail="Documento regulatório não encontrado."
+            )
 
     resultado = ai_service.extract_rule_drafts(
         db,
