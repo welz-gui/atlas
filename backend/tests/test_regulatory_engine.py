@@ -1,3 +1,4 @@
+import uuid
 """Motor de regras: aplicabilidade, veredictos e append-only (§3.4, §3.5)."""
 
 import pytest
@@ -219,7 +220,6 @@ def test_ressalvas_do_laudo_estao_completas():
 
 def test_evaluate_nonexistent_project_returns_404(client, engineer_headers):
     """Garante que a avaliação de um projeto inexistente retorna erro 404."""
-    import uuid
     non_existent_id = str(uuid.uuid4())
     response = client.post(
         f"/api/v1/projects/{non_existent_id}/evaluate",
