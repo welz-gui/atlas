@@ -133,13 +133,12 @@ class PDFPlanParser:
 
     @classmethod
     def _extract_float_patterns(
-        cls,
-        text: str,
-        haystack: str,
-        extracted: Dict[str, Any],
-        evidence: List[str],
-        warnings: List[str],
-    ) -> None:
+        cls, text: str, haystack: str
+    ) -> Tuple[Dict[str, Any], List[str], List[str]]:
+        extracted: Dict[str, Any] = {}
+        evidence: List[str] = []
+        warnings: List[str] = []
+
         for name, pattern, unit in FLOAT_PATTERNS:
             match = re.search(pattern, haystack, re.IGNORECASE)
             if not match:
@@ -155,15 +154,16 @@ class PDFPlanParser:
                 f'{FIELD_LABELS[name]}: {value:g} {unit} — trecho: "{cls._snippet(match, text)}"'
             )
 
+        return extracted, evidence, warnings
+
     @classmethod
     def _extract_int_patterns(
-        cls,
-        text: str,
-        haystack: str,
-        extracted: Dict[str, Any],
-        evidence: List[str],
-        warnings: List[str],
-    ) -> None:
+        cls, text: str, haystack: str
+    ) -> Tuple[Dict[str, Any], List[str], List[str]]:
+        extracted: Dict[str, Any] = {}
+        evidence: List[str] = []
+        warnings: List[str] = []
+
         for name, pattern, unit in INT_PATTERNS:
             match = re.search(pattern, haystack, re.IGNORECASE)
             if not match:
@@ -180,12 +180,16 @@ class PDFPlanParser:
                 f'{FIELD_LABELS[name]}: {value} {unit} — trecho: "{cls._snippet(match, text)}"'
             )
 
+        return extracted, evidence, warnings
+
     @classmethod
     def _finalize_extraction(
         cls, extracted: Dict[str, Any], evidence: List[str], warnings: List[str]
-    ) -> None:
-        found = sum(1 for name in EXPECTED_FIELDS if extracted[name] is not None)
-        missing = [FIELD_LABELS[n] for n in EXPECTED_FIELDS if extracted[n] is None]
+    ) -> Dict[str, Any]:
+        result = extracted.copy()
+
+        found = sum(1 for name in EXPECTED_FIELDS if result.get(name) is not None)
+        missing = [FIELD_LABELS[n] for n in EXPECTED_FIELDS if result.get(n) is None]
         if missing:
             warnings.append(
                 "Não localizados no documento (permanecem não verificáveis): "
@@ -199,7 +203,7 @@ class PDFPlanParser:
         else:
             status = "extraido"
 
-        extracted.update(
+        result.update(
             status=status,
             fields_found=found,
             fields_expected=len(EXPECTED_FIELDS),
@@ -210,12 +214,11 @@ class PDFPlanParser:
             warnings=warnings,
             raw_matches=evidence,
         )
+        return result
 
     @classmethod
     def parse_text_content(cls, text: str) -> Dict[str, Any]:
         extracted: Dict[str, Any] = {name: None for name in EXPECTED_FIELDS}
-        evidence: List[str] = []
-        warnings: List[str] = []
 
         if not text or not text.strip():
             extracted.update(
@@ -235,11 +238,16 @@ class PDFPlanParser:
         # Busca sobre o texto sem acentos; evidência recortada do original.
         haystack = fold_accents(text)
 
-        cls._extract_float_patterns(text, haystack, extracted, evidence, warnings)
-        cls._extract_int_patterns(text, haystack, extracted, evidence, warnings)
-        cls._finalize_extraction(extracted, evidence, warnings)
+        float_vals, float_ev, float_warn = cls._extract_float_patterns(text, haystack)
+        int_vals, int_ev, int_warn = cls._extract_int_patterns(text, haystack)
 
-        return extracted
+        extracted.update(float_vals)
+        extracted.update(int_vals)
+
+        evidence = float_ev + int_ev
+        warnings = float_warn + int_warn
+
+        return cls._finalize_extraction(extracted, evidence, warnings)
 
     @staticmethod
     def extract_text(file_bytes: bytes, filename: str = "") -> Tuple[str, List[str]]:
