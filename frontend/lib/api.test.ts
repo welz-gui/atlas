@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fetchProjects } from './api';
+import { fetchProjects, setToken, ApiError, request } from './api';
 
 describe('fetchProjects', () => {
+  const mockToken = 'mock-token';
   const mockProjects = [
     { id: '1', name: 'Project 1' },
     { id: '2', name: 'Project 2' }
@@ -10,10 +11,12 @@ describe('fetchProjects', () => {
   beforeEach(() => {
     // Reset fetch mock before each test
     global.fetch = vi.fn();
+    setToken(mockToken);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    setToken(null);
   });
 
   it('should fetch projects successfully', async () => {
@@ -28,42 +31,25 @@ describe('fetchProjects', () => {
     expect(global.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/projects'),
       expect.objectContaining({
+        headers: { Authorization: `Bearer ${mockToken}` },
         cache: 'no-store'
       })
     );
   });
 
-  it('should fallback to empty array on network errors', async () => {
+  it('should throw ApiError on network errors', async () => {
     (global.fetch as any).mockRejectedValueOnce(new Error('Network error'));
 
-    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const result = await fetchProjects();
-    expect(result).toEqual([]);
-    expect(consoleSpy).toHaveBeenCalledWith(
-      "FastAPI backend unreachable, fallback to initial state",
-      expect.any(Error)
-    );
-
-    consoleSpy.mockRestore();
+    await expect(fetchProjects()).rejects.toThrow(ApiError);
   });
 
-  it('should fallback to empty array on API errors', async () => {
+  it('should throw ApiError on API errors', async () => {
     (global.fetch as any).mockResolvedValueOnce({
       ok: false,
       status: 500,
       json: async () => ({ detail: 'Internal Server Error' })
     });
 
-    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const result = await fetchProjects();
-    expect(result).toEqual([]);
-    expect(consoleSpy).toHaveBeenCalledWith(
-      "FastAPI backend unreachable, fallback to initial state",
-      expect.any(Error)
-    );
-
-    consoleSpy.mockRestore();
+    await expect(fetchProjects()).rejects.toThrow(ApiError);
   });
 });
