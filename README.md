@@ -279,10 +279,29 @@ O caminho para resolver cada um está em
 
 ---
 
+## Como contribuir
+
+Nada é desenvolvido em `master`. Cada frente de trabalho nasce em uma **worktree
+própria**, com branch própria, e só chega em `master` por **Pull Request
+analisado** em [`welz-gui/atlas`](https://github.com/welz-gui/atlas) — inclusive
+documentação, inclusive correção de uma linha.
+
+```bash
+git fetch origin
+git switch master && git pull --ff-only
+git worktree add worktrees/<slug> -b feat/<slug> origin/master
+```
+
+O fluxo completo — sincronia com o remoto, o que o PR precisa carregar e o que
+barra um PR na análise — está em
+[`docs/ROADMAP.md` → *Como trabalhar*](docs/ROADMAP.md#como-trabalhar--worktrees-e-sincronia).
+
+---
+
 ## Documentação
 
 | Documento | O que traz |
 |---|---|
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Estágios 0 a 7, o que já existe, como implementar cada um, ferramentas e armadilhas |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Estágios 0 a 7, o que já existe, como implementar cada um, ferramentas e armadilhas, e o fluxo de worktrees e PRs |
 | [`docs/PLANO_DE_IMPLEMENTACAO_v2.md`](docs/PLANO_DE_IMPLEMENTACAO_v2.md) | O plano original, na íntegra |
 | [`docs/REVISAO_ADERENCIA_PLANO_v2.md`](docs/REVISAO_ADERENCIA_PLANO_v2.md) | Diagnóstico do embrião e o backlog das Fases A, B e C |

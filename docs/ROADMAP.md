@@ -5,7 +5,13 @@ Documento vivo. Consolida o **roadmap estratégico** do plano (§9 e §10 de
 real do código** e o **caminho de execução** de cada estágio.
 
 - Última atualização: **2026-08-07**
-- Base avaliada: branch `claude/projeto-embriao-revisao-ncpqry`, 199 testes
+- Base avaliada: `master` em `3c6cd60`, espelhada em
+  [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
+  estágios foi levantado em `7dc50d2`; o que mudou desde então foi o lote de
+  PRs automáticos, que acrescentou cobertura de teste sem mexer em produto.
+- Suíte: **227 casos, todos passando** (eram 199 em `7dc50d2`). Reproduz em
+  ~90 s: `backend/.venv/Scripts/python -m pytest tests/ -q`. O que não existe é
+  **CI**: a suíte só roda quando alguém lembra. Ver **D0** na Fase D.
 - Documentos irmãos: [`REVISAO_ADERENCIA_PLANO_v2.md`](REVISAO_ADERENCIA_PLANO_v2.md)
   (diagnóstico do embrião e backlog das Fases A–C)
 
@@ -26,7 +32,7 @@ foi erro de execução — foi consequência de o backlog ter nascido de uma rev
 de código, não de casos reais. Mas precisa estar escrito, porque muda o que
 significa "estar pronto".
 
-Cada estágio abaixo traz sempre a mesma estrutura:
+Cada estágio abaixo traz a mesma estrutura:
 
 1. **Objetivo** — o que o estágio entrega ao cliente
 2. **Já existe** — o que está no código hoje, com caminho de arquivo
@@ -37,11 +43,187 @@ Cada estágio abaixo traz sempre a mesma estrutura:
 7. **Portão de saída** — critério do §10 do plano
 8. **Métricas** — o que instrumentar (§11)
 
+Os estágios distantes (5 a 7) trazem as oito seções, mas com menos densidade:
+detalhar implementação a três portões de distância é ficção com aparência de
+planejamento. O que está escrito lá é o que já é decidível hoje.
+
+---
+
+## Como trabalhar — worktrees e sincronia
+
+Vale para **toda** alteração deste repositório, inclusive documentação e
+correção de uma linha.
+
+### A regra
+
+Nada é desenvolvido em `master`. Cada frente de trabalho nasce em uma **worktree
+própria**, com branch própria, e só chega em `master` por **Pull Request
+analisado e aprovado**. `master` local existe para uma coisa: ser cópia fiel de
+`origin/master`.
+
+O repositório remoto é a fonte da verdade:
+[`github.com/welz-gui/atlas`](https://github.com/welz-gui/atlas). Trabalho que
+existe só na máquina não existe.
+
+### Abrir uma frente
+
+```bash
+git fetch origin
+git switch master && git pull --ff-only
+git worktree add worktrees/<slug> -b feat/<slug> origin/master
+```
+
+O `--ff-only` é proposital: se ele falhar, é porque `master` local divergiu do
+remoto, e isso precisa ser resolvido antes — nunca contornado com merge cego.
+
+Convenção de nomes, seguindo os commits já existentes:
+`feat/<slug>`, `fix/<slug>`, `docs/<slug>`, `chore/<slug>`. O `<slug>` da
+worktree e o da branch são o mesmo, para que `git worktree list` seja legível.
+
+### Manter em dia
+
+Uma worktree que fica dias sem ver `origin/master` produz merge doloroso e, pior,
+constrói em cima de premissa vencida. Antes de cada sessão de trabalho:
+
+```bash
+git fetch origin
+git rebase origin/master        # dentro da worktree
+```
+
+Rebase, não merge, enquanto a branch não foi publicada — o histórico de `master`
+é linear e os commits são narrativos; um emaranhado de merges o inutiliza. Depois
+de a branch estar no remoto e sob revisão, pare de reescrever: aí é merge.
+
+### Toda worktree termina em PR — sem exceção
+
+`master` não recebe commit direto e não recebe merge local. **Toda** worktree
+gera um Pull Request em [`welz-gui/atlas`](https://github.com/welz-gui/atlas),
+que é onde a análise acontece e onde ela fica registrada. Inclusive
+documentação. Inclusive correção de uma linha.
+
+A razão é a mesma que sustenta os invariantes técnicos: o que não passa por
+revisão registrada entra sem que ninguém tenha dito que podia entrar. Este
+próprio repositório já provou o custo disso — o catálogo semente nasceu com duas
+citações legais conflitantes que sobreviveram até uma revisão de código
+encontrá-las.
+
+```bash
+git push -u origin feat/<slug>     # publica no primeiro commit útil, não no último
+gh pr create --base master --fill  # abra o PR cedo, ainda em rascunho se preciso
+```
+
+**Publique a branch no primeiro commit útil.** Uma worktree com trabalho não
+commitado, ou commitado e não empurrado, é um ponto único de falha que nenhum
+backup cobre — e é exatamente o estado em que `worktrees/estagio-0` se encontra
+agora.
+
+#### O que o PR precisa carregar
+
+| Item | Por quê |
+|---|---|
+| **Seção do plano** que a mudança atende (§x.y) | O plano é a referência comum; mudança sem seção é escopo não pactuado |
+| **Invariantes tocados** (I1–I14) e como continuam válidos | São a única coisa que a revisão não pode deixar passar |
+| **Testes**, com a contagem antes e depois | A suíte só cresce; ver **D0** |
+| **Divergência do plano**, se houver, com a razão | O padrão da tabela da Fase C. Divergir é permitido; divergir em silêncio, não |
+| **O que ficou de fora** e por quê | Escopo reduzido é decisão legítima; escopo reduzido não declarado é dívida oculta |
+
+#### O que barra um PR na análise
+
+1. Quebra de invariante I1–I14, ainda que o produto peça o contrário;
+2. citação legal (`source.article`) preenchida sem conferência do texto oficial;
+3. dado simulado alimentando métrica de acurácia;
+4. teste removido ou enfraquecido sem justificativa explícita;
+5. suíte vermelha, ou CI ausente para o caminho alterado (**D0**);
+6. commit direto em `master` dentro da branch — indica rebase malfeito;
+7. chamada de API no frontend feita com `fetch` cru em vez do helper
+   `request()` de `lib/api.ts` — perde o `Authorization` e engole a falha de
+   rede, que é o mecanismo do I13;
+8. arquivo de rascunho ou depuração na raiz do repositório;
+9. mudança de código de produção dentro de um PR que se apresenta como de
+   teste. Não é o tamanho que importa: três linhas em `update_project` já
+   bastaram para criar `AnalysisRun` a cada renomeação de projeto — ver o
+   registro em [#28](https://github.com/welz-gui/atlas/pull/28).
+
+> **A CI é necessária e não é suficiente.** Em 2026-08-10, os 25 PRs
+> automáticos abertos contra `master` foram revisados um a um. Todos os treze
+> que tocavam `backend/app` passavam nos 199 testes — inclusive um que
+> transformava um `404` em `200`, porque nenhum teste cobria aquele caminho. E
+> os dois mais perigosos do lote eram de frontend, onde não há teste algum:
+> reescreviam `lib/api.ts` com `fetch` cru, devolvendo `[]` e `null` no catch —
+> exatamente o defeito que a Fase A removeu. Suíte verde não é revisão; é o
+> piso a partir do qual a revisão começa.
+
+#### Na hora de mesclar
+
+**Releia o diff imediatamente antes do merge.** A branch pode ter mudado depois
+da revisão — quem abriu o PR pode ter respondido ao comentário, e o que entra é
+o que está na branch agora, não o que você leu ontem.
+
+Isso não é zelo teórico. Em **2026-08-12**, ao mesclar o lote de PRs
+automáticos, dezesseis foram mesclados por script sem releitura. **Quatro
+haviam mudado** desde a revisão: o autor tinha implementado exatamente as
+sugestões dos comentários. Os quatro melhoraram — o que é sorte, não método. A
+mesma cegueira teria mesclado um diff pior com a mesma facilidade.
+
+E um defeito passou:
+
+| Commit | O que a mensagem diz | O que o commit faz |
+|---|---|---|
+| `2691e96` | "materializa as páginas antes do join" | **Nada** — commit vazio. O PR havia sido esvaziado pelo autor, que concordou que a mudança não valia; o script mesclou assim mesmo |
+| `0237c1f` | "restringe métodos e headers em produção" | Acrescenta `expose_headers`. Não restringe nada — o assunto foi escrito a partir do diff **original** do PR, que havia sido substituído |
+
+Os dois ficam onde estão. Reescrever `master` já publicado custa mais que dois
+assuntos imprecisos, e contrariaria a própria regra de não reescrever histórico
+publicado. Ficam **registrados aqui**, que é o tratamento que este projeto dá ao
+que não pode ser desfeito: o erro não some, fica legível.
+
+Do episódio saem duas regras:
+
+1. reler o diff imediatamente antes do merge;
+2. **escrever o assunto do squash a partir do diff que está sendo mesclado**,
+   nunca a partir da leitura anterior nem do título do PR.
+
+#### Depois do merge
+
+```bash
+git switch master && git pull --ff-only
+git worktree remove worktrees/<slug>
+git branch -d feat/<slug>
+git fetch --prune
+```
+
+Worktree cuja branch já foi mesclada e continua no disco é fonte de retrabalho:
+alguém volta nela, edita, e constrói sobre código que `master` já superou.
+
+### Sincronia — o que precisa ser verdade sempre
+
+| Invariante de processo | Como verificar |
+|---|---|
+| `master` local == `origin/master` | `git status` diz *up to date*, sem commits à frente |
+| Nenhum commit nasce em `master` | `git log origin/master..master` vazio |
+| Toda worktree tem branch publicada | `git worktree list` cruzado com `git branch -vv` (sem `[gone]` nem branch sem upstream) |
+| **Toda worktree ativa tem PR aberto** | `gh pr list --state open` cobre toda branch de `git worktree list` |
+| Nenhuma worktree com trabalho solto ao fim do dia | `git -C worktrees/<slug> status --short` limpo, ou commit + push |
+| Nenhuma worktree sobrevive ao merge da sua branch | `gh pr list --state merged` sem correspondência em `git worktree list` |
+| `worktrees/` fora do versionamento | está no `.gitignore` |
+
+Essas cinco linhas são o equivalente de processo aos invariantes técnicos: se uma
+delas falhar, pare e conserte antes de continuar a construir.
+
+### Estado atual das worktrees
+
+| Worktree | Branch | PR | Situação |
+|---|---|---|---|
+| `worktrees/estagio-0` | `feat/estagio-0-concierge` | [#22](https://github.com/welz-gui/atlas/pull/22) | 🟨 Em análise. Scripts de apoio ao Estágio 0; o seed deixou de publicar regra — ver o registro no Estágio 0. |
+| `worktrees/roadmap-correcoes` | `docs/roadmap-correcoes` | [#16](https://github.com/welz-gui/atlas/pull/16) | 🟨 Em análise. É a frente que trouxe esta seção. |
+
+Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
+
 ---
 
 ## Estado atual em uma página
 
-**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 199 testes):
+**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 227 testes):
 
 ```
 app/
@@ -76,9 +258,14 @@ app/
 | 2 — Núcleo operacional | 🟨 ~60% construído | Uso em obra real; fotos e inspeções |
 | 3 — Custos e campo nativo | ⬜ Nada | Portão 2 |
 | 4 — Copiloto de IA | 🟨 ~30% construído | Portão 3 |
-| 5 — BIM | ⬜ Nada | Portão 4 |
-| 6 — Expansão regulatória | ⬜ Nada | Portão 5 |
-| 7 — Preditiva | ⬜ Nada | Portão 6 |
+| 5 — BIM | ⬜ Nada | Portão 4 → 5 |
+| 6 — Expansão regulatória | ⬜ Nada | Portão 5 → 6 |
+| 7 — Preditiva | ⬜ Nada | Portão 6 → 7 — **não existe no plano**, ver adiante |
+
+> **Os portões do plano param em 5 → 6.** O §10 define seis portões (0→1 a
+> 5→6) e nada além. Os Estágios 6 e 7 não têm critério de saída escrito. Este
+> documento propõe um para cada, marcado como **proposta** — decisão de negócio,
+> não de engenharia, e que ninguém precisa tomar hoje.
 
 ---
 
@@ -135,6 +322,75 @@ tê-la previsto (`GET /projects/{id}/prediction-accuracy`).
 Tudo o que é operação: selecionar projetos, cobrar, acompanhar protocolo,
 comparar análise contra exigências reais, estruturar as regras usadas.
 
+> ### Registro: a worktree `estagio-0` e o seed que publicava regra
+>
+> **Resolvido em [#22](https://github.com/welz-gui/atlas/pull/22)** — fica
+> registrado porque a armadilha é fácil de rearmar, e porque o padrão vale para
+> qualquer script futuro que toque o catálogo.
+>
+> O commit `a3955a0` trouxe dois scripts de apoio ao Estágio 0. O arquivo de
+> semente do catálogo ficou intacto — segue em `0.1.0-em-validacao`, com
+> `article: null`. O problema estava no código, o que é pior: um dicionário
+> dentro de um script escapa da leitura que um diff de YAML receberia.
+>
+> `backend/stage0_concierge_seed.py`, na versão original, fazia três coisas ao
+> rodar:
+>
+> 1. escrevia sete números de artigo — `Art. 45`, `Anexo II`, `Art. 48`,
+>    `Art. 32`, `Art. 50`, `Art. 88`, `Art. 56` — a partir de um dicionário
+>    fixo no código, sem que nenhum texto legal tivesse sido aberto;
+> 2. promovia as sete regras a `VIGENTE`, com `validated_by_id` preenchido e
+>    `effective_from` em `2026-01-01`;
+> 3. gravava um `RuleValidationEvent` por regra, com a nota *"Conferido com
+>    &lt;documento&gt; (&lt;artigo&gt;) durante o Estágio 0"*.
+>
+> O passo 3 era o mais grave. Os dois primeiros produzem dado errado; o terceiro
+> produz **trilha de auditoria afirmando que uma pessoa nomeada conferiu a
+> lei** — e a trilha é justamente o que o sistema oferece a quem perguntar de
+> onde veio um número. Com regra em `vigente` e validador registrado,
+> `is_publishable` viraria verdadeiro: laudo e portal do cliente sairiam com
+> aquelas citações. Seriam I7 e o §7.5 caindo juntos, por uma porta que o
+> próprio §7.5 tranca na interface.
+>
+> Aquele `Art. 45` é, ainda por cima, exatamente a citação que a Fase A apagou:
+> o protótipo divergia entre Plano Diretor Art. 45 e Código de Edificações
+> Art. 42, e **nenhum dos dois** havia sido lido no texto oficial.
+>
+> **A regra que fica.** Nenhum script publica regra — nem seed, nem migration,
+> nem fixture. Promover a `vigente` é ato humano, feito na tela `/catalog` por
+> quem conferiu o texto legal, e o `RuleValidationEvent` resultante só tem valor
+> porque registra uma pessoa que de fato conferiu. Script que grava esse evento
+> está forjando trilha de auditoria, qualquer que seja a intenção.
+>
+> **E a que vale para métrica.** O mesmo script afirmava `was_predicted` a
+> partir de um dicionário. Hoje o valor é derivado das `ValidationRecord` da
+> análise que o próprio script rodou. A diferença importa: recall afirmado mede
+> a nossa expectativa; recall derivado mede o motor. Nenhum dos dois substitui
+> exigência que o órgão de fato emitiu — os cenários seguem sendo demonstração
+> declarada.
+>
+> Com o seed corrigido, rodá-lo produz **zero laudo publicável em cinco**, e é
+> esse o resultado certo enquanto **D3** não acontecer.
+>
+> `backend/stage0_report.py` nunca teve o problema: apenas lê, e consolida as
+> métricas do §11. É aproveitável em **D5**.
+
+### Decisões que precisam de dono antes de começar
+
+O Estágio 0 é o gargalo declarado e é, hoje, o estágio menos especificado deste
+documento. As linhas abaixo não são de engenharia — mas nenhuma linha de código
+resolve a falta delas, e sem elas o Portão 0 → 1 vira conversa.
+
+| Decisão | Situação | Sugestão para confirmar ou recusar |
+|---|---|---|
+| **Quem executa a análise** | ⬜ a definir | Um responsável técnico com habilitação; é a assinatura dele que vai no laudo |
+| **Quem confere a lei** | ⬜ a definir | Conferência do texto legal e assessoria jurídica são papéis distintos do de analista — o §13 do plano prevê "especialista normativo" |
+| **Preço por análise** | ⬜ a definir | Disposição a pagar é o objetivo declarado do estágio (§9); análise gratuita não mede nada |
+| **Janela de execução** | ⬜ a definir | O ciclo é limitado pelo órgão, não por nós: da entrada do protocolo à primeira notificação |
+| **Quantos projetos** | 5 a 10 | Definido no plano; abaixo de 5, nenhuma taxa é significativa |
+| **Tipologias** | unifamiliar e geminado | As duas do catálogo semente |
+| **Município** | Lajeado/RS | §14.2 |
+
 ### Como implementar
 
 1. **Selecionar 5 a 10 projetos reais em Lajeado**, de tipologia repetitiva
@@ -169,10 +425,26 @@ backlog — e será backlog **derivado de caso real**, que é o ponto do estági
 - Não construa mais nada de produto durante este estágio. Se sobrar capacidade
   técnica, use na **Fase D** (dívidas de liberação), descrita adiante.
 
-### Portão de saída (§10)
+### Portão de saída (§10 — Portão 0 → 1)
 
-Projetos pagos, clientes recorrentes, taxa mínima de acerto, dor confirmada e
-regras repetitivas suficientes para automação.
+O plano diz: "projetos pagos, recorrência, taxa mínima de previsão e dor
+confirmada". *Mínima* precisa de número, senão o portão é atravessado por
+convicção. Os valores abaixo são **proposta**, a confirmar ou substituir por
+quem decide — mas alguma versão deles precisa existir **antes** do primeiro
+projeto, não depois, ou a régua será desenhada em volta do resultado obtido.
+
+| Critério | Proposta | Por quê |
+|---|---|---|
+| Projetos pagos concluídos | ≥ 5 | Piso do plano; abaixo disso nenhuma taxa é significativa |
+| Clientes que voltam com um segundo projeto | ≥ 2 | Recorrência é o sinal de dor real, não a satisfação declarada |
+| **Falsos negativos críticos** | **0** | Um bloqueio não detectado derruba o estágio inteiro, qualquer que seja a precisão |
+| Recall de bloqueios | ≥ 80% | Das exigências que o órgão emitiu, quantas o Atlas apontou antes |
+| Regras publicadas (`vigente`, com artigo e validador) | ≥ 15 | Sete regras não sustentam automação de duas tipologias |
+| Exigências do órgão sem regra correspondente | tendência de queda | Se cada projeto novo revela exigência inédita, o domínio ainda não está mapeado |
+
+Recall e falsos negativos saem de `GET /projects/{id}/prediction-accuracy`, que
+já existe e devolve `null` quando não há vínculo, em vez de estimar. As demais
+saem de **D5**.
 
 ### Métricas (§11 — Aprovação)
 
@@ -402,7 +674,29 @@ linha de base, EAP, workers e storage.
 
 ### Falta
 
-Módulos §8.9 a §8.11 e §8.16 a §8.21, §8.26, mais o app nativo (§6.3).
+Módulos §8.9 a §8.11, §8.16 a §8.21, §8.23, §8.26 e §8.27, mais o grafo de
+propagação de impacto (§8.7) e o app nativo (§6.3).
+
+> **Três módulos que o §9 do plano não aloca em estágio nenhum** e que este
+> roadmap traz para cá, com a razão:
+>
+> - **§8.7 — Grafo de propagação de impacto.** O §14.12 o chama de módulo
+>   central e o §9 só o cita no Estágio 5. Construí-lo lá significaria montar
+>   orçamento, cronograma e contratos sem o mecanismo que os mantém coerentes
+>   entre si, e depois costurá-lo por cima. Nasce aqui.
+> - **§8.23 — Alterações e aditivos.** É a face contratual do grafo: a mesma
+>   alteração que propaga impacto técnico vira aditivo de prazo e preço.
+>   Separá-los produz dois fluxos de aprovação para o mesmo fato.
+> - **§8.27 — Entrega e pós-obra.** Depende de inspeções (§8.15, Estágio 2) e
+>   de contratos e medições (§8.20). Entra no **fim** do Estágio 3, e é o
+>   candidato natural a ser cortado se o estágio inchar — nenhuma obra chega à
+>   entrega antes de o restante estar em uso.
+>
+> Isso torna o Estágio 3 ainda maior do que o plano já previa. É um custo
+> reconhecido, não descoberto depois: o Estágio 3 é o candidato a ser
+> subdividido em 3a (quantitativos → orçamento → cronograma → grafo) e 3b
+> (suprimentos, contratos, financeiro, incorporação, pós-obra), com portão
+> intermediário. Decidir isso ao entrar no estágio, com o Portão 2 já medido.
 
 ### Como implementar
 
@@ -412,9 +706,11 @@ Módulos §8.9 a §8.11 e §8.16 a §8.21, §8.26, mais o app nativo (§6.3).
 Quantitativos (§8.9)
     └── Orçamento (§8.10)
             ├── Cronograma (§8.11) ─── físico-financeiro
+            ├── Grafo de impacto (§8.7) ── Alterações e aditivos (§8.23)
             ├── Compras (§8.16) ── Fornecedores (§8.17) ── Estoque (§8.18)
             └── Contratos e medições (§8.20) ── Financeiro (§8.19)
-                    └── Incorporação (§8.26)
+                    ├── Incorporação (§8.26)
+                    └── Entrega e pós-obra (§8.27)
 ```
 
 **Quantitativos** — o ponto de atenção é a proveniência, e ela repete o padrão
@@ -616,6 +912,24 @@ tempo economizado.
 IFC, visualizador, quantitativos, elementos, grafo de impacto, integração com
 orçamento e cronograma, revisão automática proposta.
 
+### Já existe
+
+Nada de BIM. A base que este estágio consome, porém, é toda anterior: storage
+abstraído, workers com fila nomeada, `ProjectVersion` como âncora de
+proveniência e — se o Estágio 3 tiver sido feito como descrito — o grafo de
+impacto com o nó de elemento de projeto já previsto.
+
+### Falta
+
+| Item | Recorte |
+|---|---|
+| **Extração IFC (§3.6)** | Elementos, GUID estável, quantitativos com semântica |
+| **Visualizador** | Conversão para formato de streaming e render no cliente |
+| **Vínculo elemento ↔ quantitativo** | Origem `ifc` com validação humana obrigatória |
+| **Grafo de impacto a partir do modelo** | O nó de elemento passa a ser origem de aresta |
+| **Revisão automática proposta** | Diff entre revisões de modelo → proposta, nunca publicação |
+| **DXF (§6.9)** | Caminho aberto via `ezdxf`; DWG segue adiado |
+
 ### Como implementar
 
 **Extração IFC** — `IfcOpenShell` em worker. O IFC é o formato preferencial do
@@ -651,6 +965,13 @@ cobre DXF, que é o caminho aberto.
 
 Método regulatório validado, custo por município conhecido e rede de validação
 possível.
+
+### Métricas
+
+O §11 não tem grupo para BIM. Instrumente, no mínimo: obras com IFC disponível ·
+taxa de extração bem-sucedida · quantitativos de origem `ifc` corrigidos na
+validação humana (é a medida de confiança do modelo) · tempo e custo de
+processamento por modelo.
 
 ---
 
@@ -729,10 +1050,21 @@ o que mudou dentro de um documento.
   saídas, carga de incêndio e compartimentação que não cabe no formato de regra
   paramétrica atual. Espere estender o schema de `check`.
 
-### Portão de saída
+### Portão de saída — **proposta** (o §10 não define Portão 6 → 7)
 
-Método regulatório validado, custo por município conhecido, rede de validação
-operante.
+Os critérios "método regulatório validado, custo por município conhecido e rede
+de validação possível" são o Portão **5 → 6**, isto é, a condição de *entrar*
+neste estágio — não de sair dele. O plano termina ali. Proposta de critério de
+saída, a confirmar por quem decide:
+
+- mais de um município em operação, com clientes pagantes em cada;
+- custo de manutenção por município **decrescente** a cada novo — se cada
+  município custa o mesmo que o primeiro, não há plataforma, há serviço
+  replicado à mão;
+- monitor detectando alteração normativa antes do cliente reportar;
+- rede de validadores operante, com revisão dupla e remuneração definida (§7.9);
+- volume de obras acompanhadas suficiente para o Estágio 7 — que é o portão
+  real, já que sem dado longitudinal a preditiva não sai do lugar.
 
 ### Métricas (§11 — Regulação)
 
@@ -749,6 +1081,24 @@ detectadas · regras suspensas · cobertura por município.
 
 Previsão de atraso, custo final, produtividade, risco, visão computacional,
 tendências e benchmarking.
+
+### Já existe
+
+Nada. E, diferentemente dos outros estágios, aqui a base **também** não existe:
+o insumo é histórico longitudinal — cronograma planejado versus executado,
+orçamento versus realizado — que só passa a ser gravado nos Estágios 2 e 3.
+
+### Falta
+
+| Item | Recorte |
+|---|---|
+| **Dataset** | O pré-requisito real; ver abaixo |
+| **Benchmarking** | Comparação entre obras da mesma organização |
+| **Tendências** | Séries por obra, por tipologia, por equipe |
+| **Previsão de atraso** | Com intervalo de confiança e base amostral declarada |
+| **Previsão de custo final** | Idem, ancorada na linha de base |
+| **Produtividade e risco** | Derivam de §8.21 e das inspeções |
+| **Visão computacional** | A mais cara; último item, se algum |
 
 ### Como implementar
 
@@ -771,6 +1121,60 @@ retorno inicial).
 - **Benchmarking entre organizações é dado sensível.** Isolamento por tenant
   (I12) e LGPD (§12) valem aqui com força maior: agregado anonimizado, nunca
   comparação nominal sem consentimento explícito.
+
+### Ferramentas
+
+`pandas` e `scikit-learn` bastam para tudo até "previsão de custo final" —
+regressão sobre dado próprio, com intervalo, supera modelo sofisticado sobre
+amostra pequena. Deixe qualquer coisa mais pesada para depois de a amostra
+existir. Visão computacional, se chegar a existir, é worker dedicado e fila
+própria, como o BIM.
+
+### Portão de saída
+
+Não se aplica: é o último estágio do plano. O que existe aqui é **critério de
+entrada**, e ele é numérico por natureza — sem dezenas de obras com ciclo
+completo gravado, não há o que prever. Enquanto a amostra não existir, o Estágio
+7 não começa, ainda que haja demanda comercial por ele.
+
+### Métricas
+
+O §11 não tem grupo de predição. O mínimo: erro médio da previsão contra o
+realizado · **cobertura do intervalo de confiança** (com que frequência o
+realizado cai dentro do intervalo declarado) · tamanho da amostra por previsão ·
+taxa de previsões exibidas sem base amostral suficiente — que deveria ser zero.
+
+---
+
+# Operação e infraestrutura — o eixo transversal
+
+O §12 do plano lista quatorze itens de segurança e operação. Este documento
+tratava só de três (RLS, MFA, retenção); os demais não pertencem a estágio
+nenhum e por isso não tinham dono. Ficam registrados aqui, com o momento em que
+deixam de ser adiáveis.
+
+| Item (§12) | Situação | Quando deixa de ser adiável |
+|---|---|---|
+| RLS | Migration existe, inativa | **D1** — antes de qualquer cliente externo |
+| MFA | Inexistente | **D2** — antes de qualquer cliente externo |
+| Criptografia em repouso | Depende do provedor | Antes do primeiro dado de cliente real (Estágio 0) |
+| **Backups** | ⬜ Inexistente | **Estágio 0.** Perder o corpus do concierge é perder o estágio inteiro |
+| **Restauração testada** | ⬜ Nunca exercitada | Junto com o backup — backup não restaurado é hipótese, não cópia |
+| Logs e auditoria | Parcial: proveniência sim, log operacional não | Estágio 1 liberado |
+| Retenção | Documentos sim; IA e jobs não | **D7** |
+| LGPD | Não endereçada operacionalmente | Estágio 0 — há dado pessoal desde o primeiro cliente |
+| **Gestão de segredos** | `.env` em arquivo | Antes do primeiro deploy fora da máquina do desenvolvedor |
+| Antivírus | Feito (`services/antivirus.py`) | — |
+| Segregação | Feita em aplicação; falta RLS | D1 |
+| Limites por plano | Inexistente | Estágio 2, quando houver mais de um cliente ativo |
+| **Deploy e ambientes** | ⬜ Só `docker-compose` local | Estágio 0, se o analista não trabalhar na máquina do desenvolvedor |
+| **Observabilidade** | ⬜ Inexistente | Estágio 1 liberado — sem isso, falha em produção é relato de cliente |
+| **Custo de infraestrutura** | ⬜ Não medido | Portão 3 → 4 pede "custo operacional controlado" |
+
+Nada disso é feature, e é justamente por isso que some do roadmap. Os três em
+negrito com ⬜ — backup com restauração testada, gestão de segredos e um destino
+de deploy — são os que o **Estágio 0** exige de fato, porque o Estágio 0
+manipula projeto de cliente pagante.
 
 ---
 
@@ -810,19 +1214,40 @@ cliente. Suíte: 110 → 199.
 Recorte para rodar **em paralelo ao Estágio 0**, sem construir feature nova.
 Tudo aqui é dívida que impede liberar o que já existe.
 
-| # | Item | Esforço | Por quê agora |
+A ordem abaixo **não é por esforço, é por bloqueio**: o que trava o Estágio 0 vem
+antes do que trava a liberação externa. Cada item é uma worktree e um PR.
+
+### D-A — Bloqueia o Estágio 0 (fazer primeiro)
+
+| # | Item | Esforço | Por quê antes de tudo |
 |---|---|---|---|
-| D1 | **Ativar RLS** com `SET LOCAL` por transação + fixture Postgres real no CI | M | Segunda linha de defesa que hoje não defende nada |
-| D2 | **MFA (TOTP)** para `owner`, `admin`, `validator` | M | §8.1 e §12; quem publica regra precisa de segundo fator |
-| D3 | **Conferir e publicar o catálogo de Lajeado** | G | Operação, não código. É o que libera laudo e portal |
-| D4 | **Assinatura real do diário** ou renomear `assinado` → `fechado` | P | Hoje o estado afirma algo que não aconteceu |
-| D5 | **Instrumentar métricas §11** (aprovação e IA) em endpoint próprio | M | Sem isso o Portão 0 → 1 é opinião |
-| D6 | **Teste de integração real** de storage S3 e clamd | P | Hoje há teste de contrato, não de integração |
-| D7 | **Retenção de `ai_interactions`** e `job_records` | P | Ambas crescem sem limite |
-| D8 | **Adotar TanStack Query** no frontend | M | §6.1; antes de as telas de obra multiplicarem estado manual |
+| **D0** | **CI**: rodar a suíte a cada push e PR, com serviço Postgres | P | Nada barra hoje um PR que quebre a suíte. D1, D5 e D6 pressupõem CI que não existe. É o item mais barato e o de maior alcance |
+| **D3** | **Conferir e publicar o catálogo de Lajeado** | G | É o que libera laudo e portal, e é insumo do Estágio 0, não consequência dele. Operação, não código — precisa de quem confere a lei (ver Estágio 0) |
+| **D5** | **Instrumentar métricas §11** (aprovação e IA) em endpoint próprio | M | Sem isso o Portão 0 → 1 é opinião. Aproveitar `stage0_report.py` da worktree, apontado para dado real |
+| **D9** | **Backup com restauração testada**, gestão de segredos e destino de deploy | M | O Estágio 0 manipula projeto de cliente pagante. Ver *Operação e infraestrutura* |
+
+### D-B — Bloqueia a liberação externa do Estágio 1
+
+| # | Item | Esforço | Por quê |
+|---|---|---|---|
+| **D1** | **Ativar RLS** com `SET LOCAL` por transação + fixture Postgres real no CI | M | Segunda linha de defesa que hoje não defende nada. **Não bloqueia o Estágio 0** — analista interno, organização única — mas bloqueia o primeiro cliente com acesso próprio |
+| **D2** | **MFA (TOTP)** para `owner`, `admin`, `validator` | M | §8.1 e §12; quem publica regra precisa de segundo fator. Mesma ressalva de D1 |
+| **D4** | **Assinatura real do diário** ou renomear `assinado` → `fechado` | P | Hoje é pior do que "campo mal nomeado": o valor é `default="assinado"` em [`models/domain.py:958`](../backend/app/models/domain.py) e o frontend envia a string literal em [`daily-log/page.tsx:228`](../frontend/app/daily-log/page.tsx). Todo diário nasce afirmando uma assinatura que não houve |
+
+### D-C — Higiene, sem data (fazer quando abrir espaço)
+
+| # | Item | Esforço | Por quê |
+|---|---|---|---|
+| **D6** | **Teste de integração real** de storage S3 e clamd | P | Hoje há teste de contrato, não de integração |
+| **D7** | **Retenção de `ai_interactions`** e `job_records` | P | Ambas crescem sem limite |
+| **D8** | **Adotar TanStack Query** no frontend | M | §6.1; antes de as telas de obra multiplicarem estado manual |
 
 **Não entra na Fase D:** fotos, inspeções, quantitativos, orçamento. São
 Estágios 2 e 3 e dependem de portão.
+
+**Critério de encerramento da Fase D:** D-A completo e verificado em CI verde.
+D-B pode seguir em paralelo ao Estágio 0, mas **nenhum acesso externo é
+concedido antes de D1 e D2 estarem em `master`.**
 
 ---
 
@@ -830,6 +1255,12 @@ Estágios 2 e 3 e dependem de portão.
 
 | Dívida | Impacto | Onde |
 |---|---|---|
+| **Sem CI** | A suíte passa, mas só roda quando alguém lembra — e nada barra um PR que a quebre | `.github/workflows/` ausente |
+| **Sem teste de frontend** | Nenhum. Um PR que troque `request()` por `fetch` cru passa em tudo | `frontend/` |
+| **Sem backup nem restauração testada** | Perda do corpus do Estágio 0 seria irreversível | — |
+| **Segredos em `.env` de arquivo** | Sem cofre, sem rotação | `backend/.env` |
+| **Sem destino de deploy** | Só `docker-compose` local | `docker-compose.yml` |
+| **Sem observabilidade** | Falha em produção chega por relato de cliente | — |
 | RLS inativa | Isolamento depende só do filtro de aplicação | `alembic/.../d259cb880f7b` |
 | Sem MFA, sem refresh token | Sessão de 7 dias, fator único | `core/security.py` |
 | Sem OCR | PDF digitalizado não é extraível | `services/pdf_parser.py` |
@@ -840,8 +1271,9 @@ Estágios 2 e 3 e dependem de portão.
 | S3 e clamd sem teste de integração | Contrato testado, integração não | `tests/test_storage.py` |
 | `ai_interactions` e `job_records` sem retenção | Crescimento sem limite | — |
 | `EAPItem` sem predecessoras | EAP incompleta para §8.8 | `models/domain.py` |
-| Diário "assinado" sem assinatura | Estado afirma o que não houve | `models::DailyLog` |
+| Diário "assinado" sem assinatura | Estado afirma o que não houve, por `default` | `models/domain.py:958` e `daily-log/page.tsx:228` |
 | Sem TanStack Query/Table, sem shadcn/ui | Divergência do §6.1 | `frontend/` |
+| **Worktree `estagio-0` com commit não publicado** | `a3955a0` publica regra com citação legal não conferida e grava evento de validação afirmando conferência | `worktrees/estagio-0` |
 
 ---
 
@@ -858,6 +1290,21 @@ Registrado porque cada item já foi tentação em algum momento:
 5. **Não deixar a IA publicar nada**, em nenhuma circunstância, por nenhum
    parâmetro de configuração (I8).
 6. **Não pular o Estágio 0 de novo.**
+7. **Não preencher `source.article` sem ter aberto o texto legal publicado**, e
+   isso vale igualmente para YAML, script de seed, migration ou fixture de
+   teste. Já aconteceu duas vezes: o protótipo trazia duas citações
+   conflitantes para a mesma regra, e o commit `a3955a0` trouxe sete artigos
+   vindos de um dicionário — corrigido em
+   [#22](https://github.com/welz-gui/atlas/pull/22). Número de artigo plausível
+   é indistinguível de número correto para quem lê o laudo.
+   **Corolário:** nada além da tela `/catalog`, operada por gente, promove
+   regra a `vigente` — script que grava `RuleValidationEvent` está forjando
+   trilha de auditoria, qualquer que seja a intenção.
+8. **Não medir acurácia contra exigência simulada.** Recall calculado sobre dado
+   que nós mesmos inventamos devolve a nossa suposição com aparência de
+   evidência. Exigência do órgão entra no sistema porque o órgão a emitiu.
+9. **Não commitar em `master`, nem mesclar sem PR.** Inclusive documentação,
+   inclusive correção de uma linha, inclusive com pressa. Ver *Como trabalhar*.
 
 ---
 
