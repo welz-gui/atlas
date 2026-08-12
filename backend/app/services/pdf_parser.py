@@ -11,7 +11,7 @@ from __future__ import annotations
 import io
 import re
 import unicodedata
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 #: Campos que o extrator tenta localizar no quadro de áreas.
 EXPECTED_FIELDS = (
@@ -89,7 +89,7 @@ def fold_accents(text: str) -> str:
     return "".join(unicodedata.normalize("NFD", char)[0] for char in text)
 
 
-def parse_number(raw: str) -> Optional[float]:
+def parse_number(raw: str) -> float | None:
     """Converte um número escrito em formato brasileiro ou inglês.
 
     ``1.234,56`` → 1234.56 · ``450,00`` → 450.0 · ``450.00`` → 450.0 ·
