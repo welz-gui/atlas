@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
@@ -35,7 +35,7 @@ PARAM_FIELDS = (
 
 class RegulatoryEngine:
     @staticmethod
-    def version_params(version: ProjectVersion) -> Dict[str, Any]:
+    def version_params(version: ProjectVersion) -> dict[str, Any]:
         params = {name: getattr(version, name) for name in PARAM_FIELDS}
         # Derivado — ver ProjectVersion.occupancy_rate.
         params["occupancy_rate"] = version.occupancy_rate
@@ -45,8 +45,8 @@ class RegulatoryEngine:
     def _content_hash(
         project: Project,
         version: ProjectVersion,
-        params: Dict[str, Any],
-        results: List[Dict[str, Any]],
+        params: dict[str, Any],
+        results: list[dict[str, Any]],
         catalog_version: str,
     ) -> str:
         """SHA-256 sobre o conteúdo canônico da análise.
@@ -80,7 +80,7 @@ class RegulatoryEngine:
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     @classmethod
-    def _build_result(cls, rule: Rule, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_result(cls, rule: Rule, params: dict[str, Any]) -> dict[str, Any]:
         evaluation = rule.evaluate(params)
         return {
             "rule_id": rule.rule_id,
