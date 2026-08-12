@@ -9,7 +9,7 @@ real do código** e o **caminho de execução** de cada estágio.
   [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
   estágios foi levantado em `7dc50d2`; o que mudou desde então foi o lote de
   PRs automáticos, que acrescentou cobertura de teste sem mexer em produto.
-- Suíte: **248 casos, todos passando** (eram 199 em `7dc50d2`). Reproduz em
+- Suíte: **251 casos, todos passando** (eram 199 em `7dc50d2`). Reproduz em
   ~90 s: `backend/.venv/Scripts/python -m pytest tests/ -q`, e roda a cada push
   e a cada PR desde o **D0** (`.github/workflows/ci.yml`).
 - Documentos irmãos: [`REVISAO_ADERENCIA_PLANO_v2.md`](REVISAO_ADERENCIA_PLANO_v2.md)
@@ -223,7 +223,7 @@ Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
 ## Estado atual em uma página
 
-**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 248 testes):
+**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 251 testes):
 
 ```
 app/
@@ -1262,7 +1262,6 @@ concedido antes de D1 e D2 estarem em `master`.**
 
 | Dívida | Impacto | Onde |
 |---|---|---|
-| **Deriva entre modelos e migrations** | A suíte monta o banco com `create_all` (modelos); produção usa `alembic upgrade head`. Os índices compostos `ix_ai_interactions_org_hash` e `ix_job_records_status_queue` só existem nas migrations | `models/domain.py` |
 | **Sem teste de frontend** | Nenhum. Um PR que troque `request()` por `fetch` cru compila e passa em tudo — a CI só verifica o build | `frontend/` |
 | **Sem backup nem restauração testada** | Perda do corpus do Estágio 0 seria irreversível | — |
 | **Segredos em `.env` de arquivo** | Sem cofre, sem rotação | `backend/.env` |

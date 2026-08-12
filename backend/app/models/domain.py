@@ -21,6 +21,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -782,6 +783,13 @@ class AIInteraction(Base):
 
     __tablename__ = "ai_interactions"
 
+    #: O cache procura por (organização, hash da requisição) — ver
+    #: `ai/service.py::_lookup_cache`. Sem este índice a busca varreria todo o
+    #: histórico de interações a cada consulta.
+    __table_args__ = (
+        Index("ix_ai_interactions_org_hash", "organization_id", "request_hash"),
+    )
+
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     organization_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     project_id: Mapped[Optional[str]] = mapped_column(
@@ -795,7 +803,9 @@ class AIInteraction(Base):
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     #: SHA-256 de (pergunta + regras recuperadas + modelo). Chave do cache e
     #: prova de que a mesma pergunta, sobre o mesmo catálogo, deu a mesma volta.
-    request_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    #: Sem `index=True`: a busca do cache é sempre por (organização, hash), e
+    #: quem serve é o índice composto em `__table_args__`.
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
 
     #: Chaves das regras entregues como contexto — o RAG fica auditável.
     retrieved_rule_keys: Mapped[list] = mapped_column(JSON, default=list)
@@ -841,6 +851,11 @@ class JobRecord(Base):
 
     __tablename__ = "job_records"
 
+    #: O worker varre por (status, fila) à procura de órfãos — ver
+    #: `workers/worker.py::recover_orphans`. Sem este índice a varredura
+    #: passaria a tabela inteira a cada partida.
+    __table_args__ = (Index("ix_job_records_status_queue", "status", "queue"),)
+
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     organization_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     project_id: Mapped[Optional[str]] = mapped_column(
@@ -848,7 +863,9 @@ class JobRecord(Base):
     )
 
     job_type: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
-    status: Mapped[str] = mapped_column(String(30), default=JobStatus.ENFILEIRADO, index=True)
+    #: Sem `index=True`: a varredura do worker é sempre por (status, fila), e
+    #: quem serve é o índice composto em `__table_args__`.
+    status: Mapped[str] = mapped_column(String(30), default=JobStatus.ENFILEIRADO)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     result: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 

@@ -26,6 +26,23 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+def include_object(object_, name, type_, reflected, compare_to):
+    """Restringe o autogenerate às tabelas do Atlas.
+
+    O Postgres de produção roda a imagem do PostGIS, que traz consigo as
+    tabelas do geocoder Tiger (`addr`, `state`, `pagc_rules`…) e o
+    `spatial_ref_sys`. Sem este filtro, `alembic check` e `--autogenerate`
+    enxergam tudo isso como tabela removida e propõem apagá-la — o que seria
+    catastrófico se alguém aceitasse a sugestão.
+
+    O critério é simples: o Atlas só opina sobre o que declarou em
+    `Base.metadata`.
+    """
+    if type_ == "table" and reflected and name not in target_metadata.tables:
+        return False
+    return True
+
+
 def run_migrations_offline() -> None:
     context.configure(
         url=settings.DATABASE_URL,
@@ -33,6 +50,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_object=include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -50,6 +68,7 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             compare_type=True,
+            include_object=include_object,
             # SQLite não altera colunas no lugar; o batch mode recria a tabela.
             render_as_batch=connection.dialect.name == "sqlite",
         )

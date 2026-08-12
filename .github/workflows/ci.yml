@@ -105,6 +105,13 @@ jobs:
       - name: Construir o esquema do zero
         run: python -m alembic upgrade head
 
+      - name: Verificar que modelos e migrations não divergiram
+        # Sem isto, os dois caminhos de construção do esquema — `create_all` a
+        # partir dos modelos, que a suíte usa, e `alembic upgrade head`, que
+        # produção usa — voltam a se afastar em silêncio. Cada migration nova
+        # aumentaria a distância.
+        run: python -m alembic check
+
       - name: Verificar que as migrations são reversíveis
         # Uma migration que não desce é uma migration que não se corrige em
         # produção sem intervenção manual.
