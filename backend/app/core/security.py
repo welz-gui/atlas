@@ -73,6 +73,10 @@ PERMISSIONS: Dict[str, Set[str]] = {
     "protocol:write": _OPERATORS,
     "field:read": _ALL_ROLES,
     "field:write": _OPERATORS | {UserRole.INSPECTOR},
+    # §11 — quem lê a métrica é quem responde pelo número. Fora daqui, de
+    # propósito: `engineer`, `inspector` e `client`. Métrica de acerto do motor
+    # é instrumento de decisão do negócio, não painel de obra.
+    "metrics:read": {UserRole.OWNER, UserRole.ADMIN, UserRole.VALIDATOR},
 }
 
 

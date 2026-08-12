@@ -8,6 +8,7 @@ from app.api.v1.endpoints import (
     documents,
     health,
     jobs,
+    metrics,
     plan,
     portal,
     projects,
@@ -28,3 +29,4 @@ api_router.include_router(plan.router, tags=["Planejamento — EAP e tarefas"])
 api_router.include_router(daily_log.router, tags=["Diário de obra"])
 api_router.include_router(ai.router, tags=["Assistente normativo"])
 api_router.include_router(portal.router, tags=["Portal do cliente"])
+api_router.include_router(metrics.router, tags=["Métricas (§11)"])

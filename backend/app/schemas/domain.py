@@ -623,3 +623,101 @@ class DailyLogResponse(DailyLogBase):
     project_id: str
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+
+# --- Métricas do §11 (D5) ----------------------------------------------------
+# Todo campo opcional aqui é `None` **por ausência de base amostral**, nunca por
+# erro. Zero afirma; `None` declara que não há o que afirmar.
+
+
+class ApprovalMetrics(BaseModel):
+    """§11 — Aprovação."""
+
+    projects: int
+    protocols: int
+    permits_granted: int
+
+    #: Cada volta do órgão. `None` quando não há processo protocolado.
+    notification_cycles_total: Optional[int] = None
+    notification_cycles_per_protocol: Optional[float] = None
+
+    #: Média entre protocolo e decisão, só para processos aprovados com as
+    #: duas datas registradas.
+    days_to_permit_avg: Optional[float] = None
+
+    requirements_total: Optional[int] = None
+    requirements_linked_to_rules: Optional[int] = None
+
+    #: Das exigências vinculadas a regra, quantas o Atlas apontou antes.
+    blocking_recall_percent: Optional[float] = None
+    #: A métrica que decide o Portão 0 → 1. `None` significa "não houve
+    #: exigência vinculada", que é diferente de "nenhuma escapou".
+    critical_false_negatives: Optional[int] = None
+    #: Do que o motor apontou, quanto o órgão confirmou.
+    precision_percent: Optional[float] = None
+    #: Quanto do projeto o sistema não consegue avaliar por falta de dado.
+    unverifiable_percent: Optional[float] = None
+
+    catalog_rules: Optional[int] = None
+    catalog_publishable_rules: Optional[int] = None
+    #: Regra publicável sobre total, nas jurisdições em uso — o progresso do D3.
+    catalog_coverage_percent: Optional[float] = None
+
+
+class AIMetrics(BaseModel):
+    """§11 — IA.
+
+    Custo aparece em **tokens**, não em dinheiro: converter exigiria uma tabela
+    de preços que não existe no sistema, e preço estimado é suposição com cara
+    de medição. Quando a tabela existir, a conversão entra aqui.
+    """
+
+    interactions: int
+    grounded_percent: Optional[float] = None
+    served_from_cache_percent: Optional[float] = None
+    failed: Optional[int] = None
+
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    tokens_per_analysis: Optional[float] = None
+    tokens_per_project: Optional[float] = None
+
+    drafts_extracted: Optional[int] = None
+    drafts_accepted: Optional[int] = None
+    drafts_rejected: Optional[int] = None
+    draft_acceptance_percent: Optional[float] = None
+
+
+class GateCriterion(BaseModel):
+    """Um critério do portão, com o medido ao lado do proposto."""
+
+    name: str
+    measured: Optional[float] = None
+    threshold: float
+    comparison: str
+    met: Optional[bool] = None
+
+
+class GateStatus(BaseModel):
+    """Portão 0 → 1.
+
+    Os limiares são **proposta** do roadmap, não decisão tomada — §10 do plano
+    diz "taxa mínima de previsão" sem número. `met` é `None` quando o critério
+    não pôde ser medido, e `overall` é `None` se qualquer critério for `None`:
+    portão não se atravessa por falta de dado.
+    """
+
+    criteria: List[GateCriterion]
+    overall: Optional[bool] = None
+    note: str = (
+        "Limiares propostos em docs/ROADMAP.md, a confirmar por quem decide. "
+        "Critério não medido é `null`, nunca falso — e nunca verdadeiro."
+    )
+
+
+class MetricsResponse(BaseModel):
+    organization_id: str
+    generated_at: datetime
+    approval: ApprovalMetrics
+    ai: AIMetrics
+    gate_0_to_1: GateStatus
