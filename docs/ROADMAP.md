@@ -5,12 +5,13 @@ Documento vivo. Consolida o **roadmap estratégico** do plano (§9 e §10 de
 real do código** e o **caminho de execução** de cada estágio.
 
 - Última atualização: **2026-08-07**
-- Base avaliada: `master` em `7dc50d2`, espelhada em
-  [`welz-gui/atlas`](https://github.com/welz-gui/atlas)
-- Suíte: **199 casos, todos passando** — 187 funções em `backend/tests`, a
-  diferença vindo de parametrização. Reproduz em ~90 s:
-  `backend/.venv/Scripts/python -m pytest tests/ -q`. O que não existe é **CI**:
-  a suíte só roda quando alguém lembra. Ver **D0** na Fase D.
+- Base avaliada: `master` em `3c6cd60`, espelhada em
+  [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
+  estágios foi levantado em `7dc50d2`; o que mudou desde então foi o lote de
+  PRs automáticos, que acrescentou cobertura de teste sem mexer em produto.
+- Suíte: **227 casos, todos passando** (eram 199 em `7dc50d2`). Reproduz em
+  ~90 s: `backend/.venv/Scripts/python -m pytest tests/ -q`. O que não existe é
+  **CI**: a suíte só roda quando alguém lembra. Ver **D0** na Fase D.
 - Documentos irmãos: [`REVISAO_ADERENCIA_PLANO_v2.md`](REVISAO_ADERENCIA_PLANO_v2.md)
   (diagnóstico do embrião e backlog das Fases A–C)
 
@@ -137,7 +138,11 @@ agora.
 7. chamada de API no frontend feita com `fetch` cru em vez do helper
    `request()` de `lib/api.ts` — perde o `Authorization` e engole a falha de
    rede, que é o mecanismo do I13;
-8. arquivo de rascunho ou depuração na raiz do repositório.
+8. arquivo de rascunho ou depuração na raiz do repositório;
+9. mudança de código de produção dentro de um PR que se apresenta como de
+   teste. Não é o tamanho que importa: três linhas em `update_project` já
+   bastaram para criar `AnalysisRun` a cada renomeação de projeto — ver o
+   registro em [#28](https://github.com/welz-gui/atlas/pull/28).
 
 > **A CI é necessária e não é suficiente.** Em 2026-08-10, os 25 PRs
 > automáticos abertos contra `master` foram revisados um a um. Todos os treze
@@ -147,6 +152,36 @@ agora.
 > reescreviam `lib/api.ts` com `fetch` cru, devolvendo `[]` e `null` no catch —
 > exatamente o defeito que a Fase A removeu. Suíte verde não é revisão; é o
 > piso a partir do qual a revisão começa.
+
+#### Na hora de mesclar
+
+**Releia o diff imediatamente antes do merge.** A branch pode ter mudado depois
+da revisão — quem abriu o PR pode ter respondido ao comentário, e o que entra é
+o que está na branch agora, não o que você leu ontem.
+
+Isso não é zelo teórico. Em **2026-08-12**, ao mesclar o lote de PRs
+automáticos, dezesseis foram mesclados por script sem releitura. **Quatro
+haviam mudado** desde a revisão: o autor tinha implementado exatamente as
+sugestões dos comentários. Os quatro melhoraram — o que é sorte, não método. A
+mesma cegueira teria mesclado um diff pior com a mesma facilidade.
+
+E um defeito passou:
+
+| Commit | O que a mensagem diz | O que o commit faz |
+|---|---|---|
+| `2691e96` | "materializa as páginas antes do join" | **Nada** — commit vazio. O PR havia sido esvaziado pelo autor, que concordou que a mudança não valia; o script mesclou assim mesmo |
+| `0237c1f` | "restringe métodos e headers em produção" | Acrescenta `expose_headers`. Não restringe nada — o assunto foi escrito a partir do diff **original** do PR, que havia sido substituído |
+
+Os dois ficam onde estão. Reescrever `master` já publicado custa mais que dois
+assuntos imprecisos, e contrariaria a própria regra de não reescrever histórico
+publicado. Ficam **registrados aqui**, que é o tratamento que este projeto dá ao
+que não pode ser desfeito: o erro não some, fica legível.
+
+Do episódio saem duas regras:
+
+1. reler o diff imediatamente antes do merge;
+2. **escrever o assunto do squash a partir do diff que está sendo mesclado**,
+   nunca a partir da leitura anterior nem do título do PR.
 
 #### Depois do merge
 
@@ -188,7 +223,7 @@ Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
 ## Estado atual em uma página
 
-**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 199 testes):
+**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 227 testes):
 
 ```
 app/
