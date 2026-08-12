@@ -25,6 +25,14 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=[
+        "X-Atlas-Publishable",
+        "X-Atlas-Content-Hash",
+        "X-Atlas-Analysis-Run",
+        "X-Atlas-Pdf-Sha256",
+        "X-Atlas-Document-Status",
+        "X-Atlas-Antivirus-Status",
+    ],
 )
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
