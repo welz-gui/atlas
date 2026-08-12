@@ -10,8 +10,8 @@ real do código** e o **caminho de execução** de cada estágio.
   estágios foi levantado em `7dc50d2`; o que mudou desde então foi o lote de
   PRs automáticos, que acrescentou cobertura de teste sem mexer em produto.
 - Suíte: **227 casos, todos passando** (eram 199 em `7dc50d2`). Reproduz em
-  ~90 s: `backend/.venv/Scripts/python -m pytest tests/ -q`. O que não existe é
-  **CI**: a suíte só roda quando alguém lembra. Ver **D0** na Fase D.
+  ~90 s: `backend/.venv/Scripts/python -m pytest tests/ -q`, e roda a cada push
+  e a cada PR desde o **D0** (`.github/workflows/ci.yml`).
 - Documentos irmãos: [`REVISAO_ADERENCIA_PLANO_v2.md`](REVISAO_ADERENCIA_PLANO_v2.md)
   (diagnóstico do embrião e backlog das Fases A–C)
 
@@ -133,7 +133,7 @@ agora.
 2. citação legal (`source.article`) preenchida sem conferência do texto oficial;
 3. dado simulado alimentando métrica de acurácia;
 4. teste removido ou enfraquecido sem justificativa explícita;
-5. suíte vermelha, ou CI ausente para o caminho alterado (**D0**);
+5. CI vermelha — qualquer um dos três jobs;
 6. commit direto em `master` dentro da branch — indica rebase malfeito;
 7. chamada de API no frontend feita com `fetch` cru em vez do helper
    `request()` de `lib/api.ts` — perde o `Authorization` e engole a falha de
@@ -1221,7 +1221,7 @@ antes do que trava a liberação externa. Cada item é uma worktree e um PR.
 
 | # | Item | Esforço | Por quê antes de tudo |
 |---|---|---|---|
-| **D0** | **CI**: rodar a suíte a cada push e PR, com serviço Postgres | P | Nada barra hoje um PR que quebre a suíte. D1, D5 e D6 pressupõem CI que não existe. É o item mais barato e o de maior alcance |
+| ~~**D0**~~ | ~~**CI**: rodar a suíte a cada push e PR, com serviço Postgres~~ | ✅ | Feito em `.github/workflows/ci.yml`. Três jobs: suíte de backend, migrations construídas e revertidas em Postgres, build do frontend. D1 já tem onde rodar os testes de RLS |
 | **D3** | **Conferir e publicar o catálogo de Lajeado** | G | É o que libera laudo e portal, e é insumo do Estágio 0, não consequência dele. Operação, não código — precisa de quem confere a lei (ver Estágio 0) |
 | **D5** | **Instrumentar métricas §11** (aprovação e IA) em endpoint próprio | M | Sem isso o Portão 0 → 1 é opinião. Aproveitar `stage0_report.py` da worktree, apontado para dado real |
 | **D9** | **Backup com restauração testada**, gestão de segredos e destino de deploy | M | O Estágio 0 manipula projeto de cliente pagante. Ver *Operação e infraestrutura* |
@@ -1255,8 +1255,8 @@ concedido antes de D1 e D2 estarem em `master`.**
 
 | Dívida | Impacto | Onde |
 |---|---|---|
-| **Sem CI** | A suíte passa, mas só roda quando alguém lembra — e nada barra um PR que a quebre | `.github/workflows/` ausente |
-| **Sem teste de frontend** | Nenhum. Um PR que troque `request()` por `fetch` cru passa em tudo | `frontend/` |
+| **Deriva entre modelos e migrations** | A suíte monta o banco com `create_all` (modelos); produção usa `alembic upgrade head`. Os índices compostos `ix_ai_interactions_org_hash` e `ix_job_records_status_queue` só existem nas migrations | `models/domain.py` |
+| **Sem teste de frontend** | Nenhum. Um PR que troque `request()` por `fetch` cru compila e passa em tudo — a CI só verifica o build | `frontend/` |
 | **Sem backup nem restauração testada** | Perda do corpus do Estágio 0 seria irreversível | — |
 | **Segredos em `.env` de arquivo** | Sem cofre, sem rotação | `backend/.env` |
 | **Sem destino de deploy** | Só `docker-compose` local | `docker-compose.yml` |
