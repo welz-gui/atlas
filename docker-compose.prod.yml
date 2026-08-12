@@ -1,0 +1,110 @@
+# Composição de produção (§12, item D9).
+#
+# Não substitui a escolha de um provedor — descreve o que precisa rodar, de modo
+# que a escolha seja de hospedagem e não de arquitetura. Serve como está para um
+# VPS, e é o mapa para traduzir a plataformas gerenciadas.
+#
+# Três decisões de desenho ficam explícitas aqui:
+#
+#   1. `migrate` é serviço próprio, roda `alembic upgrade head` e termina. A API
+#      só sobe depois que ele completa. O esquema nunca é criado por
+#      `create_all` em tempo de import;
+#   2. `worker` roda de verdade. Sem ele o backend cai para o modo `inline`, que
+#      é legítimo — mas passa a ser decisão consciente, e o registro do trabalho
+#      declara isso (`executed_inline`);
+#   3. nenhum segredo está neste arquivo. Todos vêm do ambiente, sem valor
+#      padrão: `${SECRET_KEY:?...}` faz o compose recusar subir se faltar.
+#
+# Uso:
+#   docker compose -f docker-compose.prod.yml up -d
+
+version: "3.8"
+
+x-backend-env: &backend-env
+  ENVIRONMENT: production
+  SECRET_KEY: ${SECRET_KEY:?defina SECRET_KEY no ambiente}
+  DATABASE_URL: ${DATABASE_URL:?defina DATABASE_URL no ambiente}
+  QUEUE_BACKEND: ${QUEUE_BACKEND:-redis}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+  UPLOAD_DIR: /app/backend/uploads
+  BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:?defina as origens permitidas}
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?defina a URL pública}
+  S3_BUCKET: ${S3_BUCKET:-}
+  S3_REGION: ${S3_REGION:-}
+  S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+  ANTIVIRUS_SOCKET: ${ANTIVIRUS_SOCKET:-}
+  ANTIVIRUS_REQUIRED: ${ANTIVIRUS_REQUIRED:-true}
+  OBSOLETE_RETENTION_DAYS: ${OBSOLETE_RETENTION_DAYS:-0}
+
+services:
+  postgres:
+    image: postgis/postgis:15-3.3
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:?}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    volumes:
+      - redisdata:/data
+
+  # Passo de migração. Termina; não fica de pé.
+  migrate:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment: *backend-env
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: always
+    environment: *backend-env
+    volumes:
+      - uploads:/app/backend/uploads
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: always
+    environment: *backend-env
+    volumes:
+      - uploads:/app/backend/uploads
+    # `--recover` reenfileira o que ficou pendurado quando o processo caiu: o
+    # estado do trabalho vive no Postgres, não no broker (§6.7).
+    command: ["python", "-m", "app.workers.worker", "--recover"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:

@@ -2,7 +2,7 @@ import os
 import secrets
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List
+from typing import ClassVar, List
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -89,6 +89,15 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    #: Campos que nunca aparecem em texto — ver `__repr__`. `ClassVar` porque
+    #: isto é configuração da classe, não campo de configuração.
+    SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
+        "SECRET_KEY",
+        "DATABASE_URL",
+        "S3_ACCESS_KEY",
+        "S3_SECRET_KEY",
+    )
+
     def model_post_init(self, __context) -> None:
         if not self.SECRET_KEY:
             if self.ENVIRONMENT == "production":
@@ -96,6 +105,31 @@ class Settings(BaseSettings):
                     "SECRET_KEY é obrigatória quando ENVIRONMENT=production."
                 )
             object.__setattr__(self, "SECRET_KEY", secrets.token_urlsafe(48))
+
+        # SQLite não sustenta produção: sem concorrência de escrita, sem RLS
+        # (§12, D1) e sem o caminho de backup do `ops/backup.py`. Falhar aqui é
+        # melhor que descobrir na primeira restauração.
+        if self.ENVIRONMENT == "production" and self.DATABASE_URL.startswith("sqlite"):
+            raise RuntimeError(
+                "SQLite não é suportado em ENVIRONMENT=production. "
+                "Aponte DATABASE_URL para o Postgres."
+            )
+
+    def __repr__(self) -> str:
+        """Configuração legível **sem** os segredos.
+
+        O padrão do Pydantic imprime todos os campos, o que faz qualquer
+        traceback que inclua as configurações — ou um `print` de depuração —
+        vazar a chave de assinatura para o log. Segredo redigido aqui é segredo
+        que não escapa por acidente (§12).
+        """
+        redacted = []
+        for name in type(self).model_fields:
+            value = "***" if name in self.SECRET_FIELDS else getattr(self, name)
+            redacted.append(f"{name}={value!r}")
+        return f"{type(self).__name__}({', '.join(redacted)})"
+
+    __str__ = __repr__
 
 
 settings = Settings()

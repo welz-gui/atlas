@@ -9,7 +9,7 @@ real do código** e o **caminho de execução** de cada estágio.
   [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
   estágios foi levantado em `7dc50d2`; o que mudou desde então foi o lote de
   PRs automáticos, que acrescentou cobertura de teste sem mexer em produto.
-- Suíte: **240 casos, todos passando** (eram 199 em `7dc50d2`). Reproduz em
+- Suíte: **248 casos, todos passando** (eram 199 em `7dc50d2`). Reproduz em
   ~90 s: `backend/.venv/Scripts/python -m pytest tests/ -q`, e roda a cada push
   e a cada PR desde o **D0** (`.github/workflows/ci.yml`).
 - Documentos irmãos: [`REVISAO_ADERENCIA_PLANO_v2.md`](REVISAO_ADERENCIA_PLANO_v2.md)
@@ -223,7 +223,7 @@ Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
 ## Estado atual em uma página
 
-**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 240 testes):
+**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 248 testes):
 
 ```
 app/
@@ -1165,16 +1165,16 @@ deixam de ser adiáveis.
 | RLS | Migration existe, inativa | **D1** — antes de qualquer cliente externo |
 | MFA | Inexistente | **D2** — antes de qualquer cliente externo |
 | Criptografia em repouso | Depende do provedor | Antes do primeiro dado de cliente real (Estágio 0) |
-| **Backups** | ⬜ Inexistente | **Estágio 0.** Perder o corpus do concierge é perder o estágio inteiro |
-| **Restauração testada** | ⬜ Nunca exercitada | Junto com o backup — backup não restaurado é hipótese, não cópia |
+| Backups | ✅ `ops/backup.py` — banco e documentos, com manifesto | — |
+| Restauração testada | ✅ Exercitada **a cada push** pelo job `backup` da CI | — |
 | Logs e auditoria | Parcial: proveniência sim, log operacional não | Estágio 1 liberado |
 | Retenção | Documentos sim; IA e jobs não | **D7** |
 | LGPD | Não endereçada operacionalmente | Estágio 0 — há dado pessoal desde o primeiro cliente |
-| **Gestão de segredos** | `.env` em arquivo | Antes do primeiro deploy fora da máquina do desenvolvedor |
+| Gestão de segredos | 🟨 Tudo por variável de ambiente, `repr` redigido, `.env` fora da imagem. Falta cofre com rotação | Acompanha a escolha do provedor |
 | Antivírus | Feito (`services/antivirus.py`) | — |
 | Segregação | Feita em aplicação; falta RLS | D1 |
 | Limites por plano | Inexistente | Estágio 2, quando houver mais de um cliente ativo |
-| **Deploy e ambientes** | ⬜ Só `docker-compose` local | Estágio 0, se o analista não trabalhar na máquina do desenvolvedor |
+| Deploy e ambientes | 🟨 Imagem e composição de produção prontas, com `migrate` e `worker` separados. Falta **escolher o provedor** | Estágio 0, se o analista não trabalhar na máquina do desenvolvedor |
 | **Observabilidade** | ⬜ Inexistente | Estágio 1 liberado — sem isso, falha em produção é relato de cliente |
 | **Custo de infraestrutura** | ⬜ Não medido | Portão 3 → 4 pede "custo operacional controlado" |
 
@@ -1231,7 +1231,7 @@ antes do que trava a liberação externa. Cada item é uma worktree e um PR.
 | ~~**D0**~~ | ~~**CI**: rodar a suíte a cada push e PR, com serviço Postgres~~ | ✅ | Feito em `.github/workflows/ci.yml`. Três jobs: suíte de backend, migrations construídas e revertidas em Postgres, build do frontend. D1 já tem onde rodar os testes de RLS |
 | **D3** | **Conferir e publicar o catálogo de Lajeado** | G | É o que libera laudo e portal, e é insumo do Estágio 0, não consequência dele. Operação, não código — precisa de quem confere a lei (ver Estágio 0) |
 | ~~**D5**~~ | ~~**Instrumentar métricas §11** em endpoint próprio~~ | ✅ | Feito em `GET /api/v1/metrics`, com `services/metrics.py` e a seção `gate_0_to_1`. Custo sai em **tokens**, não em dinheiro: converter exigiria tabela de preços que não existe |
-| **D9** | **Backup com restauração testada**, gestão de segredos e destino de deploy | M | O Estágio 0 manipula projeto de cliente pagante. Ver *Operação e infraestrutura* |
+| ~~**D9**~~ | ~~**Backup com restauração testada**, gestão de segredos e destino de deploy~~ | ✅ | Feito em `ops/`, `backend/Dockerfile`, `docker-compose.prod.yml` e [`OPERACAO.md`](OPERACAO.md). O ciclo de restauração roda na CI a cada push. **Escolher o provedor segue pendente** — é decisão de negócio |
 
 ### D-B — Bloqueia a liberação externa do Estágio 1
 
