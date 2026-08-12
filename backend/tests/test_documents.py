@@ -222,6 +222,27 @@ def test_qrcode_de_outro_tenant_responde_404(
 
 # --- Extração ----------------------------------------------------------------
 
+def test_extracao_de_documento_inexistente_responde_404(
+    client, engineer_headers, project
+):
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/documents/doc-nao-existe/extract",
+        headers=engineer_headers,
+    )
+    assert response.status_code == 404
+    assert "não encontrado" in response.json()["detail"].lower()
+
+
+def test_extracao_de_documento_projeto_inexistente_responde_404(
+    client, engineer_headers
+):
+    response = client.post(
+        "/api/v1/projects/proj-nao-existe/documents/doc-id/extract",
+        headers=engineer_headers,
+    )
+    assert response.status_code == 404
+
+
 def test_extracao_de_documento_sem_texto_nao_inventa_valores(
     client, engineer_headers, project, upload_dir
 ):
