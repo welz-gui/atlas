@@ -1,0 +1,20 @@
+# Segredo nenhum entra no contexto de build (§12, item D9).
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Estado local que não pertence à imagem
+backend/.venv/
+backend/uploads/
+backend/*.db
+backend/backups/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+
+frontend/node_modules/
+frontend/.next/
+
+worktrees/
+.git/
