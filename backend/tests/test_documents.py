@@ -1,7 +1,6 @@
 """Gestão documental: upload seguro, versionamento e QR Code (§8.3, §6.6)."""
 
 import hashlib
-import io
 import os
 
 import pytest
@@ -17,7 +16,7 @@ def _upload(client, headers, project_id, filename, content=b"%PDF-1.4 conteudo",
         f"/api/v1/projects/{project_id}/documents/upload",
         headers=headers,
         data=data,
-        files={"file": (filename, io.BytesIO(content), "application/pdf")},
+        files={"file": (filename, content, "application/pdf")},
     )
 
 
