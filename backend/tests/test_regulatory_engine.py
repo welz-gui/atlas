@@ -1,3 +1,4 @@
+import uuid
 """Motor de regras: aplicabilidade, veredictos e append-only (§3.4, §3.5)."""
 
 import pytest
@@ -216,3 +217,13 @@ def test_ressalvas_do_laudo_estao_completas():
     assert "não possui validade perante a administração municipal" in texto
     # Regressão: o protótipo afirmava validade para protocolo municipal.
     assert "possui validade técnica para protocolo" not in texto
+
+def test_evaluate_nonexistent_project_returns_404(client, engineer_headers):
+    """Garante que a avaliação de um projeto inexistente retorna erro 404."""
+    non_existent_id = str(uuid.uuid4())
+    response = client.post(
+        f"/api/v1/projects/{non_existent_id}/evaluate",
+        headers=engineer_headers
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Empreendimento não encontrado."
