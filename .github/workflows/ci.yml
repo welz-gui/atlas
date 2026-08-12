@@ -1,0 +1,139 @@
+# Portão automático do repositório (item D0 da Fase D — ver docs/ROADMAP.md).
+#
+# Antes disto, a suíte passava mas só rodava quando alguém lembrava, e nada
+# barrava um PR que a quebrasse. Três jobs, três perguntas distintas:
+#
+#   backend     — o comportamento continua correto?
+#   migrations  — o esquema de produção ainda pode ser construído do zero?
+#   frontend    — o que vai ao navegador ainda compila?
+#
+# O job `migrations` existe porque a suíte NÃO exercita as migrations: o
+# conftest monta o banco com `Base.metadata.create_all` sobre SQLite em
+# memória. Produção é construída por `alembic upgrade head` sobre Postgres.
+# São dois caminhos diferentes, e só um tinha verificação.
+
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# Um push novo na mesma branch cancela a execução anterior — o que interessa
+# é o veredicto sobre o commit mais recente.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend — suíte
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Rodar a suíte
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pytest tests/ -q | tee pytest-output.txt
+
+      - name: Registrar a contagem
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Suíte de backend"
+            echo ""
+            echo '```'
+            tail -1 pytest-output.txt 2>/dev/null || echo "sem saída — a suíte não chegou a rodar"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  migrations:
+    name: Migrations — construção e reversão em Postgres
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        # Mesma imagem do docker-compose.yml, para que a CI verifique o que
+        # o desenvolvimento usa. PostGIS ainda não é exigido por nenhuma
+        # migration, mas o §3.6 vai pedir geometria e a paridade sai de graça.
+        image: postgis/postgis:15-3.3
+        env:
+          POSTGRES_USER: atlas_user
+          POSTGRES_PASSWORD: atlas_password
+          POSTGRES_DB: atlas_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U atlas_user -d atlas_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+psycopg2://atlas_user:atlas_password@localhost:5432/atlas_ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Construir o esquema do zero
+        run: python -m alembic upgrade head
+
+      - name: Verificar que as migrations são reversíveis
+        # Uma migration que não desce é uma migration que não se corrige em
+        # produção sem intervenção manual.
+        run: python -m alembic downgrade base
+
+      - name: Reconstruir, para provar que o ciclo fecha
+        run: python -m alembic upgrade head
+
+  frontend:
+    name: Frontend — build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Build
+        # Não há suíte de frontend — ver a dívida registrada em
+        # docs/ROADMAP.md. O build é o único portão disponível hoje: pega erro
+        # de TypeScript e de importação, e não pega regressão de comportamento.
+        # Quando existir `npm test`, ele entra aqui.
+        run: npm run build
