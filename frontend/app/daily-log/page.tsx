@@ -32,6 +32,7 @@ const WEATHER = {
 export default function DailyLogPage() {
   const {
     projects,
+    selectedProject,
     selectedProjectId,
     setSelectedProjectId,
     isLoading: isLoadingProjects,
@@ -176,9 +177,7 @@ export default function DailyLogPage() {
       {isModalOpen && selectedProjectId && (
         <NewLogModal
           projectId={selectedProjectId}
-          projectName={
-            projects.find((p) => p.id === selectedProjectId)?.name ?? undefined
-          }
+          projectName={selectedProject?.name}
           onClose={() => setIsModalOpen(false)}
           onCreated={(log) => {
             setLogs((prev) => [log, ...prev]);
