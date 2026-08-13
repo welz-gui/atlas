@@ -721,3 +721,40 @@ class MetricsResponse(BaseModel):
     approval: ApprovalMetrics
     ai: AIMetrics
     gate_0_to_1: GateStatus
+
+
+# --- Privacidade e retenção de conteúdo (LGPD) -------------------------------
+
+
+class ContentPurgeReportResponse(BaseModel):
+    """Resultado do expurgo de conteúdo de IA ou de trabalhos.
+
+    O que sai é o conteúdo; a linha e a proveniência permanecem (§3.5).
+    """
+
+    dry_run: bool
+    retention_enabled: bool
+    retention_days: int
+    examined: int
+    purged: int
+    record_ids: List[str] = Field(default_factory=list)
+
+
+class AnonymizationRequest(BaseModel):
+    #: Por que o pedido está sendo atendido. Fica no registro: a própria
+    #: anonimização é um ato que precisa de trilha.
+    reason: str = Field(min_length=10, max_length=1000)
+    dry_run: bool = True
+
+
+class AnonymizationResponse(BaseModel):
+    project_id: str
+    dry_run: bool
+    already_anonymized: bool
+    fields_cleared: List[str] = Field(default_factory=list)
+    anonymized_at: Optional[datetime] = None
+    note: str = (
+        "Análises, versões e tramitação permanecem íntegras e auditáveis. "
+        "O que foi removido é o dado pessoal de terceiros, não o registro do "
+        "ato técnico."
+    )

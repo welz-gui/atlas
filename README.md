@@ -303,5 +303,7 @@ barra um PR na análise — está em
 | Documento | O que traz |
 |---|---|
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Estágios 0 a 7, o que já existe, como implementar cada um, ferramentas e armadilhas, e o fluxo de worktrees e PRs |
+| [`docs/LGPD.md`](docs/LGPD.md) | Inventário de dado pessoal, o que o código faz e o que depende de decisão humana |
+| [`docs/OPERACAO.md`](docs/OPERACAO.md) | Backup, restauração, segredos e deploy |
 | [`docs/PLANO_DE_IMPLEMENTACAO_v2.md`](docs/PLANO_DE_IMPLEMENTACAO_v2.md) | O plano original, na íntegra |
 | [`docs/REVISAO_ADERENCIA_PLANO_v2.md`](docs/REVISAO_ADERENCIA_PLANO_v2.md) | Diagnóstico do embrião e o backlog das Fases A, B e C |

@@ -9,7 +9,7 @@ real do código** e o **caminho de execução** de cada estágio.
   [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
   estágios foi levantado em `7dc50d2`; o que mudou desde então foi o lote de
   PRs automáticos, que acrescentou cobertura de teste sem mexer em produto.
-- Suíte: **251 casos, todos passando** (eram 199 em `7dc50d2`). Reproduz em
+- Suíte: **262 casos, todos passando** (eram 199 em `7dc50d2`). Reproduz em
   ~90 s: `backend/.venv/Scripts/python -m pytest tests/ -q`, e roda a cada push
   e a cada PR desde o **D0** (`.github/workflows/ci.yml`).
 - Documentos irmãos: [`REVISAO_ADERENCIA_PLANO_v2.md`](REVISAO_ADERENCIA_PLANO_v2.md)
@@ -223,7 +223,7 @@ Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
 ## Estado atual em uma página
 
-**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 251 testes):
+**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 262 testes):
 
 ```
 app/
@@ -1168,8 +1168,8 @@ deixam de ser adiáveis.
 | Backups | ✅ `ops/backup.py` — banco e documentos, com manifesto | — |
 | Restauração testada | ✅ Exercitada **a cada push** pelo job `backup` da CI | — |
 | Logs e auditoria | Parcial: proveniência sim, log operacional não | Estágio 1 liberado |
-| Retenção | Documentos sim; IA e jobs não | **D7** |
-| LGPD | Não endereçada operacionalmente | Estágio 0 — há dado pessoal desde o primeiro cliente |
+| Retenção | ✅ Documentos, IA e trabalhos — todas desligadas por padrão, e o prazo é decisão pendente | — |
+| LGPD | 🟨 Inventário, retenção e anonimização feitos ([`LGPD.md`](LGPD.md)). Faltam papel, base legal, contrato e política | Estágio 0 |
 | Gestão de segredos | 🟨 Tudo por variável de ambiente, `repr` redigido, `.env` fora da imagem. Falta cofre com rotação | Acompanha a escolha do provedor |
 | Antivírus | Feito (`services/antivirus.py`) | — |
 | Segregação | Feita em aplicação; falta RLS | D1 |
@@ -1246,7 +1246,7 @@ antes do que trava a liberação externa. Cada item é uma worktree e um PR.
 | # | Item | Esforço | Por quê |
 |---|---|---|---|
 | **D6** | **Teste de integração real** de storage S3 e clamd | P | Hoje há teste de contrato, não de integração |
-| **D7** | **Retenção de `ai_interactions`** e `job_records` | P | Ambas crescem sem limite |
+| ~~**D7**~~ | ~~**Retenção de `ai_interactions`** e `job_records`~~ | ✅ | Feito com a LGPD, em `POST /privacy/purge-*`. Expurga o conteúdo, preserva a proveniência |
 | **D8** | **Adotar TanStack Query** no frontend | M | §6.1; antes de as telas de obra multiplicarem estado manual |
 
 **Não entra na Fase D:** fotos, inspeções, quantitativos, orçamento. São
@@ -1275,7 +1275,6 @@ concedido antes de D1 e D2 estarem em `master`.**
 | RAG lexical | Degrada com catálogo grande | `ai/retrieval.py` |
 | Fila offline sem mídia | Fotos não sincronizam | `lib/offline.ts` |
 | S3 e clamd sem teste de integração | Contrato testado, integração não | `tests/test_storage.py` |
-| `ai_interactions` e `job_records` sem retenção | Crescimento sem limite | — |
 | `EAPItem` sem predecessoras | EAP incompleta para §8.8 | `models/domain.py` |
 | Diário "assinado" sem assinatura | Estado afirma o que não houve, por `default` | `models/domain.py:958` e `daily-log/page.tsx:228` |
 | Sem TanStack Query/Table, sem shadcn/ui | Divergência do §6.1 | `frontend/` |

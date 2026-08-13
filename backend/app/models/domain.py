@@ -240,6 +240,12 @@ class Project(Base):
     municipal_registration: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)  # inscrição
 
     # -- Partes envolvidas -------------------------------------------------
+    #: Quando os dados pessoais de terceiros deste empreendimento foram
+    #: redigidos a pedido do titular. A linha permanece — análises, versões e
+    #: tramitação são append-only (I5, I6) e continuam auditáveis sem o nome.
+    anonymized_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    anonymization_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     owner_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     owner_document: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     contractor_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -827,6 +833,13 @@ class AIInteraction(Base):
     served_from_cache: Mapped[bool] = mapped_column(Boolean, default=False)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    #: Quando o conteúdo (pergunta, resposta) foi descartado pela retenção.
+    #: A linha permanece: proveniência, tokens e vínculo com o catálogo são o
+    #: que responde "de onde veio esta resposta", e isso não se apaga (§3.5).
+    content_purged_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
+
     created_by_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -883,6 +896,11 @@ class JobRecord(Base):
     queued_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    #: Ver `AIInteraction.content_purged_at` — mesmo contrato.
+    content_purged_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
 
     requested_by_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("users.id"), nullable=True
