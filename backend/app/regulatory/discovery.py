@@ -42,6 +42,11 @@ class DiscoveredDocument:
 
 #: Hosts em que um candidato de Lajeado pode estar hospedado.
 #:
+#: **A lista é por fonte, não global.** Cada município novo traz a sua, e nada
+#: aqui restringe outra jurisdição. Como montá-la está em `docs/OPERACAO.md`,
+#: seção "Allowlist de um município novo" — o resumo é que cada host se
+#: justifica por evidência, e não por convenção de nome.
+#:
 #: `lajeado.rs.gov.br` **sem `www`** ficou de fora de propósito: em 2026-08-13
 #: ele responde com **certificado autoassinado**, e nenhum dos 183 links dos
 #: dois índices oficiais aponta para lá — todos usam `www.`. Mantê-lo na lista

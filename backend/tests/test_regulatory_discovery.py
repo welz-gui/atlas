@@ -107,8 +107,10 @@ HTML_HOST_SEM_WWW = """
 """
 
 
-def test_host_sem_www_fica_fora_da_allowlist():
-    """`lajeado.rs.gov.br` sem `www` responde com certificado autoassinado.
+def test_lajeado_sem_www_fica_fora_por_certificado_invalido():
+    """Decisão sobre **este** host, não política sobre hosts sem `www`.
+
+    `lajeado.rs.gov.br` sem `www` responde com certificado autoassinado.
 
     Verificado em 2026-08-13. Nenhum dos 183 links dos índices oficiais aponta
     para lá — todos usam `www.`. Mantê-lo na lista só abriria caminho para uma
@@ -127,9 +129,11 @@ def test_host_sem_www_fica_fora_da_allowlist():
 
 
 def test_leismunicipais_entra_sem_www():
-    """O oposto de Lajeado: os índices referenciam este host **sem** `www`.
+    """O contraexemplo, e é por isso que ele tem teste próprio.
 
-    É o motivo de a allowlist ser conferida contra o HTML real, e não suposta.
+    Os índices referenciam este host **sem** `www` — 21 links no primeiro. Uma
+    "padronização" que removesse as versões sem `www` quebraria a descoberta
+    de 21 normas. Não há regra sobre `www`; há verificação por host.
     """
     source = SOURCES["BR-RS-4311403"][0]
     assert "leismunicipais.com.br" in source.allowed_hosts

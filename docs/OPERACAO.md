@@ -183,6 +183,39 @@ Fonte recusada **não** interrompe a execução: aparece em `sources_skipped` no
 resultado do trabalho, com o motivo, para que a recusa fique no registro em vez
 de sumir em log.
 
+### Allowlist de um município novo
+
+Cada fonte em `SOURCES` carrega a própria `allowed_hosts`, e ela faz duas
+coisas: decide de onde um candidato pode vir e valida o host final depois de
+redirecionamento. Lista curta demais perde normas; longa demais aceita link de
+qualquer lugar.
+
+**Não existe regra sobre `www`.** Em Lajeado o portal usa `www.` e o host sem
+`www` tem certificado autoassinado; no `leismunicipais.com.br`, que serve
+dezenas de municípios, os índices referenciam a versão **sem** `www`. Os dois
+casos coexistem no mesmo município. Padronizar por aparência erraria um deles.
+
+O procedimento, para cada município novo:
+
+1. **conte os hosts do índice real**, em vez de supor —
+
+   ```python
+   from app.regulatory.discovery import fetch_source, _LinkParser
+   html = fetch_source("<url do índice>")
+   p = _LinkParser(); p.feed(html)
+   # agrupe urlparse(urljoin(indice, href)).hostname e veja quem aparece
+   ```
+
+2. **inclua o que os links de tema regulatório usam**, exatamente na forma em
+   que aparecem — com ou sem `www`, conforme o site;
+3. **confira o TLS de cada host** antes de incluir. Certificado inválido é
+   motivo de exclusão: se a busca cair ali, a correção tentadora é desligar a
+   verificação, que é pior que a lacuna;
+4. **exclua o que é navegação e não norma** — redes sociais, portal da
+   transparência, sistemas administrativos;
+5. **meça o antes e o depois**: a contagem de candidatos não pode cair sem que
+   você saiba qual link deixou de entrar.
+
 ---
 
 ## O que falta, e é decisão humana
