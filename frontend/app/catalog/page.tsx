@@ -5,7 +5,9 @@ import {
   BookOpen,
   CheckCircle2,
   History,
+  ExternalLink,
   Plus,
+  RefreshCw,
   ScrollText,
   ShieldAlert,
   X,
@@ -16,6 +18,7 @@ import {
   RegulatoryRule,
   RuleValidationEvent,
   createRegulatoryDocument,
+  discoverRegulatoryDocuments,
   fetchCatalogRules,
   fetchRegulatoryDocuments,
   fetchRuleEvents,
@@ -73,6 +76,8 @@ export default function CatalogPage() {
   const [filter, setFilter] = useState<"pendentes" | "todas">("pendentes");
   const [selected, setSelected] = useState<RegulatoryRule | null>(null);
   const [isDocumentModalOpen, setIsDocumentModalOpen] = useState(false);
+  const [isDiscovering, setIsDiscovering] = useState(false);
+  const [discoveryMessage, setDiscoveryMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -103,6 +108,34 @@ export default function CatalogPage() {
       : rules.filter((r) => !r.is_publishable && r.state !== "revogada");
 
   const publishable = rules.filter((r) => r.is_publishable).length;
+  const discoveredDocuments = documents.filter((document) => document.state === "descoberto");
+
+  const handleDiscovery = async () => {
+    setIsDiscovering(true);
+    setError(null);
+    setDiscoveryMessage(null);
+    try {
+      const submission = await discoverRegulatoryDocuments();
+      if (submission.job.status === "falhou") {
+        throw new Error(submission.job.error || "A busca automática falhou.");
+      }
+      if (submission.job.result) {
+        const result = submission.job.result;
+        setDiscoveryMessage(
+          `${result.candidates_found} candidato(s) localizado(s): ${result.created} novo(s), ${result.updated} atualizado(s). Todos aguardam conferência humana.`
+        );
+        await load();
+      } else {
+        setDiscoveryMessage(
+          "Busca enfileirada. O resultado aparecerá no catálogo após a conclusão do worker."
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)));
+    } finally {
+      setIsDiscovering(false);
+    }
+  };
 
   return (
     <div className="space-y-8">
@@ -122,17 +155,32 @@ export default function CatalogPage() {
         </div>
 
         {canValidate && (
-          <button
-            onClick={() => setIsDocumentModalOpen(true)}
-            className="px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-cyan-500/40 text-slate-200 font-semibold text-xs flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" /> Cadastrar norma
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={handleDiscovery}
+              disabled={isDiscovering}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-semibold text-xs flex items-center gap-2 disabled:opacity-50"
+            >
+              <RefreshCw className={`w-4 h-4 ${isDiscovering ? "animate-spin" : ""}`} />
+              {isDiscovering ? "Buscando..." : "Buscar normas oficiais"}
+            </button>
+            <button
+              onClick={() => setIsDocumentModalOpen(true)}
+              className="px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-cyan-500/40 text-slate-200 font-semibold text-xs flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" /> Cadastrar norma
+            </button>
+          </div>
         )}
       </div>
 
       <OnlineOnlyNotice feature="A validação do catálogo" />
       {error && <ErrorBanner error={error} onRetry={load} />}
+      {discoveryMessage && (
+        <div className="p-4 rounded-xl border border-cyan-500/30 bg-cyan-950/20 text-xs text-cyan-100">
+          {discoveryMessage}
+        </div>
+      )}
       {isLoading && <LoadingState label="Carregando catálogo..." />}
 
       {!isLoading && !error && (
@@ -169,6 +217,36 @@ export default function CatalogPage() {
                 Enquanto o catálogo não for validado, todo laudo sai marcado como uso
                 interno e não deve ser entregue ao cliente.
               </p>
+            </div>
+          )}
+
+          {discoveredDocuments.length > 0 && (
+            <div className="glass-panel rounded-2xl p-5 space-y-3">
+              <div>
+                <h2 className="text-sm font-bold text-white">Normas descobertas</h2>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Candidatos vindos de índices oficiais. Nenhum deles alimenta o copiloto até ser conferido.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {discoveredDocuments.map((document) => (
+                  <a
+                    key={document.id}
+                    href={document.url ?? "#"}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-cyan-500/30 flex items-start justify-between gap-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-slate-200">{document.title}</p>
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        {document.theme || humanize(document.doc_type)} · aguardando conferência
+                      </p>
+                    </div>
+                    <ExternalLink className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  </a>
+                ))}
+              </div>
             </div>
           )}
 

@@ -145,6 +145,27 @@ intermediário, e o backup é o caminho de volta.
 
 ---
 
+## Descoberta de normas
+
+Usuários com permissão de validação podem iniciar a busca em **Catálogo →
+Buscar normas oficiais** ou chamar:
+
+```http
+POST /api/v1/catalog/jobs/discovery?jurisdiction=BR-RS-4311403
+```
+
+A operação consulta os índices oficiais configurados em
+`app/regulatory/discovery.py`, registra o trabalho e cria documentos no estado
+`descoberto`. Ela não extrai artigos, não cria regras executáveis e não publica
+conteúdo. Um validador técnico ainda precisa conferir a versão consolidada, a
+vigência e os artigos antes de qualquer regra alimentar um laudo de cliente.
+
+Para execução periódica, o agendador da infraestrutura deve chamar esse endpoint
+com uma credencial de serviço que possua `catalog:validate`; frequência sugerida:
+diária. Falhas e resultados ficam em `job_records`.
+
+---
+
 ## O que falta, e é decisão humana
 
 | Item | Bloqueado por |

@@ -317,6 +317,29 @@ export interface RegulatoryDocument {
   created_at: string;
 }
 
+export interface RegulatoryDiscoveryResult {
+  jurisdiction: string;
+  sources_checked: string[];
+  candidates_found: number;
+  created: number;
+  updated: number;
+  unchanged: number;
+  document_ids: string[];
+  requires_human_validation: boolean;
+}
+
+export interface RegulatoryDiscoveryJob {
+  job: {
+    id: string;
+    job_type: "descoberta_regulatoria";
+    status: "enfileirado" | "executando" | "concluido" | "falhou" | "cancelado";
+    result?: RegulatoryDiscoveryResult;
+    error?: string;
+    executed_inline: boolean;
+  };
+  queue_backend: string;
+}
+
 export interface RuleValidationEvent {
   id: string;
   rule_id: string;
@@ -697,6 +720,15 @@ export function createRegulatoryDocument(payload: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+  });
+}
+
+export function discoverRegulatoryDocuments(
+  jurisdiction = "BR-RS-4311403"
+): Promise<RegulatoryDiscoveryJob> {
+  const query = new URLSearchParams({ jurisdiction });
+  return request<RegulatoryDiscoveryJob>(`/catalog/jobs/discovery?${query}`, {
+    method: "POST",
   });
 }
 

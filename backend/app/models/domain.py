@@ -142,8 +142,15 @@ class JobType:
     ANALISE_REGULATORIA = "analise_regulatoria"
     GERACAO_LAUDO = "geracao_laudo"
     EXPURGO_RETENCAO = "expurgo_retencao"
+    DESCOBERTA_REGULATORIA = "descoberta_regulatoria"
 
-    ALL = {EXTRACAO_DOCUMENTO, ANALISE_REGULATORIA, GERACAO_LAUDO, EXPURGO_RETENCAO}
+    ALL = {
+        EXTRACAO_DOCUMENTO,
+        ANALISE_REGULATORIA,
+        GERACAO_LAUDO,
+        EXPURGO_RETENCAO,
+        DESCOBERTA_REGULATORIA,
+    }
 
 
 class RequirementStatus:

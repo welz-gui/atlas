@@ -119,6 +119,30 @@ def enqueue_retention_purge(
     return _submit(db, response, record)
 
 
+@router.post("/catalog/jobs/discovery", response_model=JobSubmitResponse)
+def enqueue_regulatory_discovery(
+    response: Response,
+    jurisdiction: str = "BR-RS-4311403",
+    user: User = Depends(require_permission("catalog:validate")),
+    db: Session = Depends(get_db),
+):
+    """Busca normas em fontes oficiais, sem criar ou publicar regras."""
+    from app.regulatory.discovery import SOURCES
+
+    if jurisdiction not in SOURCES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Não há fontes oficiais configuradas para {jurisdiction}.",
+        )
+    record = enqueue(
+        db,
+        JobType.DESCOBERTA_REGULATORIA,
+        payload={"jurisdiction": jurisdiction},
+        user=user,
+    )
+    return _submit(db, response, record)
+
+
 @router.get("/jobs", response_model=List[JobRecordResponse])
 def list_jobs(
     project_id: Optional[str] = None,
