@@ -97,3 +97,43 @@ def test_endpoint_recusa_jurisdicao_sem_fontes(client, validator_headers):
     )
     assert response.status_code == 422
     assert "fontes oficiais" in response.json()["detail"]
+
+
+HTML_HOST_SEM_WWW = """
+<html><body>
+  <a href="https://lajeado.rs.gov.br/leis/plano-diretor">Lei 11.052/2020 - Plano Diretor</a>
+  <a href="https://www.lajeado.rs.gov.br/leis/codigo">Lei 5.848/1996 - Código de Obras</a>
+</body></html>
+"""
+
+
+def test_lajeado_sem_www_fica_fora_por_certificado_invalido():
+    """Decisão sobre **este** host, não política sobre hosts sem `www`.
+
+    `lajeado.rs.gov.br` sem `www` responde com certificado autoassinado.
+
+    Verificado em 2026-08-13. Nenhum dos 183 links dos índices oficiais aponta
+    para lá — todos usam `www.`. Mantê-lo na lista só abriria caminho para uma
+    busca falhar por certificado, e a correção tentadora nessa hora é desligar
+    a verificação, que é pior que o problema original.
+    """
+    source = SOURCES["BR-RS-4311403"][0]
+
+    assert "lajeado.rs.gov.br" not in source.allowed_hosts
+    assert "www.lajeado.rs.gov.br" in source.allowed_hosts
+
+    found = extract_candidates(HTML_HOST_SEM_WWW, source)
+    urls = {item.url for item in found}
+
+    assert urls == {"https://www.lajeado.rs.gov.br/leis/codigo"}
+
+
+def test_leismunicipais_entra_sem_www():
+    """O contraexemplo, e é por isso que ele tem teste próprio.
+
+    Os índices referenciam este host **sem** `www` — 21 links no primeiro. Uma
+    "padronização" que removesse as versões sem `www` quebraria a descoberta
+    de 21 normas. Não há regra sobre `www`; há verificação por host.
+    """
+    source = SOURCES["BR-RS-4311403"][0]
+    assert "leismunicipais.com.br" in source.allowed_hosts
