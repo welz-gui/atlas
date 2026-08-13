@@ -42,6 +42,11 @@ const IDENTITY_FIELDS = [
   { key: "technical_responsible_registry", label: "CREA / CAU" },
 ];
 
+const MUNICIPALITIES = [
+  { city_ibge: "BR-RS-4311403", city_name: "Lajeado", state: "RS" },
+  { city_ibge: "BR-RS-4301008", city_name: "Arroio do Meio", state: "RS" },
+];
+
 export default function ProjectsPage() {
   const { can } = useAuth();
   const { projects, isLoading, error, reload } = useProjects();
@@ -221,6 +226,7 @@ function NewProjectModal({
 }) {
   const [name, setName] = useState("");
   const [zone, setZone] = useState("Z2");
+  const [municipalityCode, setMunicipalityCode] = useState("BR-RS-4311403");
   const [values, setValues] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<ApiError | Error | null>(null);
@@ -242,7 +248,10 @@ function NewProjectModal({
       const identity = Object.fromEntries(
         IDENTITY_FIELDS.map(({ key }) => [key, values[key]?.trim() || undefined])
       );
-      await createProject({ name, zone, ...identity, ...numeric });
+      const municipality = MUNICIPALITIES.find(
+        (item) => item.city_ibge === municipalityCode
+      )!;
+      await createProject({ name, zone, ...municipality, ...identity, ...numeric });
       onCreated();
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
@@ -301,6 +310,26 @@ function NewProjectModal({
               />
             </label>
           </div>
+
+          <label className="block max-w-md">
+            <span className="text-[11px] font-semibold text-slate-400 block mb-1.5">
+              Município do empreendimento
+            </span>
+            <select
+              value={municipalityCode}
+              onChange={(event) => setMunicipalityCode(event.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-sm text-white focus:border-cyan-500 outline-none"
+            >
+              {MUNICIPALITIES.map((municipality) => (
+                <option key={municipality.city_ibge} value={municipality.city_ibge}>
+                  {municipality.city_name}/{municipality.state}
+                </option>
+              ))}
+            </select>
+            <span className="text-[10px] text-slate-500 mt-1 block">
+              Define quais normas municipais serão aplicadas ao projeto.
+            </span>
+          </label>
 
           <div>
             <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-3">

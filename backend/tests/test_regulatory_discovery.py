@@ -1,7 +1,12 @@
 """Descoberta automática encontra normas; pessoas continuam publicando regras."""
 
 from app.models.domain import JobType, RegulatoryDocument, RegulatoryDocumentState
-from app.regulatory.discovery import SOURCES, discover_regulations, extract_candidates
+from app.regulatory.discovery import (
+    SOURCES,
+    discover_applicable_regulations,
+    discover_regulations,
+    extract_candidates,
+)
 from app.workers.queue import HANDLERS
 
 
@@ -137,3 +142,50 @@ def test_leismunicipais_entra_sem_www():
     """
     source = SOURCES["BR-RS-4311403"][0]
     assert "leismunicipais.com.br" in source.allowed_hosts
+
+
+def test_descoberta_de_arroio_inclui_fontes_nacionais_e_municipais(db_session):
+    result = discover_applicable_regulations(
+        db_session,
+        "BR-RS-4301008",
+        fetcher=lambda _url: "<html></html>",
+    )
+
+    assert result["jurisdictions_checked"] == ["BR", "BR-RS-4301008"]
+    assert result["created"] == 6
+    assert {
+        row.jurisdiction for row in db_session.query(RegulatoryDocument).all()
+    } == {"BR", "BR-RS-4301008"}
+
+
+def test_endpoint_usa_municipio_do_projeto(
+    client, engineer_headers, validator_headers
+):
+    project = client.post(
+        "/api/v1/projects",
+        headers=engineer_headers,
+        json={
+            "name": "Projeto Arroio",
+            "city_ibge": "BR-RS-4301008",
+            "city_name": "Arroio do Meio",
+            "state": "RS",
+        },
+    ).json()
+
+    original = HANDLERS[JobType.DESCOBERTA_REGULATORIA]
+    HANDLERS[JobType.DESCOBERTA_REGULATORIA] = lambda _db, record: {
+        "jurisdiction": record.payload["jurisdiction"],
+        "created": 0,
+        "requires_human_validation": True,
+    }
+    try:
+        response = client.post(
+            f"/api/v1/catalog/jobs/discovery?project_id={project['id']}",
+            headers=validator_headers,
+        )
+    finally:
+        HANDLERS[JobType.DESCOBERTA_REGULATORIA] = original
+
+    assert response.status_code == 200
+    assert response.json()["job"]["project_id"] == project["id"]
+    assert response.json()["job"]["result"]["jurisdiction"] == "BR-RS-4301008"

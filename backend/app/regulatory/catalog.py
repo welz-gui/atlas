@@ -19,6 +19,8 @@ from typing import Any, Dict, List, Optional
 import yaml
 from sqlalchemy.orm import Session
 
+from app.regulatory.jurisdiction import jurisdiction_chain
+
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 
@@ -174,7 +176,7 @@ class Rule:
 
     # -- aplicabilidade ----------------------------------------------------
     def applies_to_project(self, params: Dict[str, Any], jurisdiction: str) -> bool:
-        if jurisdiction != self.jurisdiction:
+        if self.jurisdiction not in jurisdiction_chain(jurisdiction):
             return False
         for key, allowed in (self.applies_to or {}).items():
             if key == "conditions" or not allowed:
@@ -297,7 +299,9 @@ class RegulatoryCatalog:
 
         query = db.query(RegulatoryRule).filter(RegulatoryRule.superseded_by_id.is_(None))
         if jurisdiction:
-            query = query.filter(RegulatoryRule.jurisdiction == jurisdiction)
+            query = query.filter(
+                RegulatoryRule.jurisdiction.in_(jurisdiction_chain(jurisdiction))
+            )
 
         rows = query.all()
         rules = [Rule.from_orm(row) for row in rows]
@@ -346,7 +350,8 @@ class RegulatoryCatalog:
         return next((r for r in self._rules if r.rule_id == rule_id), None)
 
     def for_jurisdiction(self, jurisdiction: str) -> List[Rule]:
-        return [r for r in self._rules if r.jurisdiction == jurisdiction]
+        scopes = jurisdiction_chain(jurisdiction)
+        return [r for r in self._rules if r.jurisdiction in scopes]
 
     def executable_for(
         self, jurisdiction: str, reference: Optional[date] = None
@@ -359,7 +364,12 @@ class RegulatoryCatalog:
         ]
 
     def version_for(self, jurisdiction: str) -> str:
-        return self.versions.get(jurisdiction, "desconhecida")
+        versions = [
+            f"{scope}:{self.versions[scope]}"
+            for scope in jurisdiction_chain(jurisdiction)
+            if scope in self.versions
+        ]
+        return "|".join(versions) or "desconhecida"
 
 
 def _validate_seed_rule(raw: Dict[str, Any], filename: str) -> None:

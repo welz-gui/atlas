@@ -123,22 +123,32 @@ def enqueue_retention_purge(
 def enqueue_regulatory_discovery(
     response: Response,
     jurisdiction: str = "BR-RS-4311403",
+    project_id: Optional[str] = None,
     user: User = Depends(require_permission("catalog:validate")),
     db: Session = Depends(get_db),
 ):
     """Busca normas em fontes oficiais, sem criar ou publicar regras."""
     from app.regulatory.discovery import SOURCES
+    from app.regulatory.jurisdiction import jurisdiction_chain
 
-    if jurisdiction not in SOURCES:
+    project = get_project_or_404(db, project_id, user) if project_id else None
+    target_jurisdiction = project.city_ibge if project else jurisdiction
+    scopes = jurisdiction_chain(target_jurisdiction)
+    municipal_scope_missing = len(scopes) == 3 and target_jurisdiction not in SOURCES
+    if municipal_scope_missing or not any(scope in SOURCES for scope in scopes):
         raise HTTPException(
             status_code=422,
-            detail=f"Não há fontes oficiais configuradas para {jurisdiction}.",
+            detail=(
+                "Não há fontes oficiais configuradas para "
+                f"{target_jurisdiction} ou seus escopos superiores."
+            ),
         )
     record = enqueue(
         db,
         JobType.DESCOBERTA_REGULATORIA,
-        payload={"jurisdiction": jurisdiction},
+        payload={"jurisdiction": target_jurisdiction},
         user=user,
+        project_id=project.id if project else None,
     )
     return _submit(db, response, record)
 

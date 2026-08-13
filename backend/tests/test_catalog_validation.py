@@ -38,6 +38,11 @@ def test_importacao_traz_as_regras_de_semente(seeded_catalog):
     assert len(rules) == 7
     assert all(r.state == RuleState.EM_VALIDACAO for r in rules)
     assert all(r.validated_by_id is None for r in rules)
+    assert (
+        seeded_catalog.query(RegulatoryRule)
+        .filter_by(rule_key="brasil_acessibilidade_edificacoes", jurisdiction="BR")
+        .one()
+    )
 
 
 def test_importacao_e_idempotente(db_session):
@@ -50,6 +55,15 @@ def test_importacao_e_idempotente(db_session):
     assert second["created"] == 0
     assert second["updated"] == 7
     assert db_session.query(RegulatoryRule).count() == 7
+
+
+def test_catalogo_municipal_inclui_regra_nacional_e_exclui_outro_municipio(
+    db_session, seeded_catalog
+):
+    arroio = RegulatoryCatalog.from_db(db_session, "BR-RS-4301008")
+    keys = {rule.rule_id for rule in arroio.for_jurisdiction("BR-RS-4301008")}
+
+    assert keys == {"brasil_acessibilidade_edificacoes"}
 
 
 def test_importacao_nao_sobrescreve_regra_publicada(db_session, seeded_catalog):
@@ -232,7 +246,9 @@ def test_catalogo_do_banco_alimenta_o_motor(db_session, seeded_catalog):
     catalog = RegulatoryCatalog.from_db(db_session, "BR-RS-4311403")
     assert len(catalog.all_rules) == 7
     assert len(catalog.executable_for("BR-RS-4311403")) == 7
-    assert catalog.for_jurisdiction("BR-SP-3550308") == []
+    assert {
+        rule.rule_id for rule in catalog.for_jurisdiction("BR-SP-3550308")
+    } == {"brasil_acessibilidade_edificacoes"}
 
 
 def test_transicoes_terminais_nao_tem_saida():

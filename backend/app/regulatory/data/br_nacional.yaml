@@ -1,0 +1,31 @@
+catalog_version: "0.1.0"
+jurisdiction:
+  code: BR
+  name: Brasil
+
+rules:
+  - rule_id: brasil_acessibilidade_edificacoes
+    title: Acessibilidade em edificações e rota acessível
+    state: em_validacao
+    severity: bloqueio
+    applies_to: {}
+    check: null
+    requires_manual_review: true
+    manual_review_reason: >-
+      A conformidade exige análise gráfica das pranchas e conferência das
+      normas técnicas de acessibilidade vigentes. Não é derivável somente dos
+      parâmetros numéricos do cadastro.
+    evidence_required: [projeto_arquitetonico, laudo_acessibilidade]
+    source:
+      document: Lei Federal nº 10.098/2000
+      article: null
+      url: https://www.planalto.gov.br/ccivil_03/leis/l10098.htm
+      consulted_at: null
+    effective_from: "2000-12-19"
+    effective_until: null
+    validated_by: null
+    validated_at: null
+    notes: >-
+      Regra nacional. A Lei 10.098/2000 determina a observância dos parâmetros
+      das normas técnicas de acessibilidade da ABNT; a versão aplicável dessas
+      normas deve ser confirmada pelo validador antes da publicação.

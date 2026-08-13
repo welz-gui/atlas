@@ -704,8 +704,13 @@ export function fetchRuleEvents(ruleId: string): Promise<RuleValidationEvent[]> 
   return request<RuleValidationEvent[]>(`/catalog/rules/${ruleId}/events`);
 }
 
-export function fetchRegulatoryDocuments(): Promise<RegulatoryDocument[]> {
-  return request<RegulatoryDocument[]>("/catalog/documents");
+export function fetchRegulatoryDocuments(
+  jurisdiction?: string
+): Promise<RegulatoryDocument[]> {
+  const query = jurisdiction
+    ? `?${new URLSearchParams({ jurisdiction })}`
+    : "";
+  return request<RegulatoryDocument[]>(`/catalog/documents${query}`);
 }
 
 export function createRegulatoryDocument(payload: {
@@ -724,9 +729,11 @@ export function createRegulatoryDocument(payload: {
 }
 
 export function discoverRegulatoryDocuments(
-  jurisdiction = "BR-RS-4311403"
+  jurisdiction: string,
+  projectId?: string
 ): Promise<RegulatoryDiscoveryJob> {
   const query = new URLSearchParams({ jurisdiction });
+  if (projectId) query.set("project_id", projectId);
   return request<RegulatoryDiscoveryJob>(`/catalog/jobs/discovery?${query}`, {
     method: "POST",
   });
