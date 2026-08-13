@@ -8,6 +8,7 @@ dependendo da conferência de um validador técnico.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import inspect
 from datetime import datetime
 from html.parser import HTMLParser
 import re
@@ -19,6 +20,7 @@ from urllib.request import Request, urlopen
 from sqlalchemy.orm import Session
 
 from app.models.domain import RegulatoryDocument, RegulatoryDocumentState
+from app.regulatory.robots import RobotsDenied, RobotsGate
 
 
 @dataclass(frozen=True)
@@ -181,7 +183,22 @@ def extract_candidates(html: str, source: DiscoverySource) -> list[DiscoveredDoc
     return sorted(found.values(), key=lambda item: item.title.casefold())
 
 
-def fetch_source(url: str, timeout: int = 30, max_bytes: int = 5_000_000) -> str:
+def fetch_source(
+    url: str,
+    timeout: int = 30,
+    max_bytes: int = 5_000_000,
+    gate: RobotsGate | None = None,
+) -> str:
+    """Busca um índice oficial, depois de consultar o `robots.txt` da origem.
+
+    O `gate` guarda a política por origem e impõe o intervalo entre buscas —
+    ver `app.regulatory.robots`. Sem ele, cada chamada relê o arquivo, o que só
+    faz sentido em uso avulso.
+    """
+    portao = gate or RobotsGate()
+    policy = portao.check(url)
+    portao.wait(url, policy)
+
     # O portal de Lajeado escolhe o template por um cookie de mídia e, na
     # primeira resposta sem ele, devolve apenas JavaScript para recarregar a
     # página. Declarar o layout desktop é equivalente ao que o navegador faz.
@@ -225,6 +242,8 @@ def discover_regulations(
     Documento já validado nunca é rebaixado. Uma mudança de metadados apenas
     atualiza a data de consulta; cabe ao validador decidir se há nova versão.
     """
+    uses_gate = "gate" in inspect.signature(fetcher).parameters
+
     sources = SOURCES.get(jurisdiction)
     if not sources:
         raise ValueError(f"Não há fontes oficiais configuradas para {jurisdiction}.")
@@ -232,8 +251,20 @@ def discover_regulations(
     now = datetime.utcnow()
     candidates: dict[str, tuple[DiscoveredDocument, DiscoverySource]] = {}
     checked_sources: list[str] = []
+    skipped_sources: list[dict] = []
+
+    # Um portão por execução: duas fontes do mesmo município compartilham a
+    # leitura do robots.txt, e o intervalo de cortesia vale entre elas.
+    gate = RobotsGate()
+
     for source in sources:
-        html = fetcher(source.url)
+        try:
+            html = fetcher(source.url, gate=gate) if uses_gate else fetcher(source.url)
+        except RobotsDenied as recusa:
+            # Fonte recusada não é erro de execução: é resultado, e precisa
+            # aparecer no registro do trabalho em vez de sumir em log.
+            skipped_sources.append({"url": source.url, "reason": str(recusa)})
+            continue
         checked_sources.append(source.url)
         for candidate in extract_candidates(html, source):
             candidates[candidate.url] = (candidate, source)
@@ -294,6 +325,7 @@ def discover_regulations(
     return {
         "jurisdiction": jurisdiction,
         "sources_checked": checked_sources,
+        "sources_skipped": skipped_sources,
         "candidates_found": len(candidates),
         "created": created,
         "updated": updated,
