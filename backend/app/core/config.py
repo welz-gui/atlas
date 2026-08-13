@@ -44,6 +44,17 @@ class Settings(BaseSettings):
     # apagado: o que sai é o blob, e a linha passa a constar como expurgada.
     OBSOLETE_RETENTION_DAYS: int = 0
 
+    # Retenção de conteúdo de IA e de trabalhos (§6.6, LGPD).
+    # Mesmo princípio do documento: o que sai é o **conteúdo** — pergunta,
+    # resposta, payload —, e a linha permanece com a proveniência. Zero, o
+    # padrão, desliga o expurgo.
+    #
+    # A pergunta feita ao assistente pode conter dado pessoal, e o payload de
+    # um trabalho carrega o que quer que a chamada tenha passado. Guardá-los
+    # para sempre é decisão, não inércia.
+    AI_INTERACTION_RETENTION_DAYS: int = 0
+    JOB_RECORD_RETENTION_DAYS: int = 0
+
     # Camada de IA (§3.3, §6.8)
     # `none` é o padrão: sem provedor, o assistente responde por busca
     # determinística no catálogo e diz que é isso que está fazendo.
