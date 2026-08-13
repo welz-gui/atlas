@@ -40,6 +40,25 @@ class DiscoveredDocument:
     theme: str | None
 
 
+#: Hosts em que um candidato de Lajeado pode estar hospedado.
+#:
+#: `lajeado.rs.gov.br` **sem `www`** ficou de fora de propósito: em 2026-08-13
+#: ele responde com **certificado autoassinado**, e nenhum dos 183 links dos
+#: dois índices oficiais aponta para lá — todos usam `www.`. Mantê-lo na lista
+#: só criaria o caminho para uma busca falhar por certificado, e a correção
+#: tentadora nessa hora é desligar a verificação, que é bem pior que o problema
+#: original.
+#:
+#: `leismunicipais.com.br` entra **sem `www`** porque é assim que os índices o
+#: referenciam — 21 links no primeiro índice. O oposto de Lajeado, e o motivo
+#: de a lista ser conferida contra o HTML real em vez de suposta.
+ALLOWED_HOSTS_LAJEADO = (
+    "www.lajeado.rs.gov.br",
+    "leismunicipais.com.br",
+    "www.leismunicipais.com.br",
+    "api.leismunicipais.com.br",
+)
+
 SOURCES: dict[str, tuple[DiscoverySource, ...]] = {
     "BR-RS-4311403": (
         DiscoverySource(
@@ -49,13 +68,7 @@ SOURCES: dict[str, tuple[DiscoverySource, ...]] = {
                 "?titulo=Legisla%C3%A7%C3%A3o"
             ),
             issuing_body="Prefeitura Municipal de Lajeado",
-            allowed_hosts=(
-                "lajeado.rs.gov.br",
-                "www.lajeado.rs.gov.br",
-                "leismunicipais.com.br",
-                "www.leismunicipais.com.br",
-                "api.leismunicipais.com.br",
-            ),
+            allowed_hosts=ALLOWED_HOSTS_LAJEADO,
         ),
         DiscoverySource(
             jurisdiction="BR-RS-4311403",
@@ -64,13 +77,7 @@ SOURCES: dict[str, tuple[DiscoverySource, ...]] = {
                 "?titulo=Plano+Diretor"
             ),
             issuing_body="Prefeitura Municipal de Lajeado",
-            allowed_hosts=(
-                "lajeado.rs.gov.br",
-                "www.lajeado.rs.gov.br",
-                "leismunicipais.com.br",
-                "www.leismunicipais.com.br",
-                "api.leismunicipais.com.br",
-            ),
+            allowed_hosts=ALLOWED_HOSTS_LAJEADO,
         ),
     ),
 }
