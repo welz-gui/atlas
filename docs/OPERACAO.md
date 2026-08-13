@@ -164,6 +164,25 @@ Para execução periódica, o agendador da infraestrutura deve chamar esse endpo
 com uma credencial de serviço que possua `catalog:validate`; frequência sugerida:
 diária. Falhas e resultados ficam em `job_records`.
 
+### Conformidade com `robots.txt`
+
+Antes de buscar qualquer índice, o coletor lê o `robots.txt` da origem
+(`app/regulatory/robots.py`) e respeita o grupo do agente
+`Atlas-Regulatory-Discovery/1.0`. Três comportamentos que valem conhecer:
+
+- **arquivo ausente libera; falha de servidor suspende.** 4xx significa "não há
+  arquivo de regras"; 5xx e 429 significam "não deu para perguntar", e aí a
+  fonte não é buscada. Ausência de verificação não é aprovação (I10);
+- **200 com HTML não é `robots.txt`.** O portal de Lajeado devolve o shell da
+  própria página nesse caminho. Sem exigir `text/plain`, um parser leria HTML
+  como diretiva e liberaria tudo por acidente;
+- **intervalo mínimo de 2 s entre buscas ao mesmo host**, com `Crawl-delay`
+  prevalecendo quando for maior.
+
+Fonte recusada **não** interrompe a execução: aparece em `sources_skipped` no
+resultado do trabalho, com o motivo, para que a recusa fique no registro em vez
+de sumir em log.
+
 ---
 
 ## O que falta, e é decisão humana
