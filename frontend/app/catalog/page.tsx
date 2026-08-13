@@ -26,6 +26,7 @@ import {
   validateRule,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { projectShortLabel, useProjects } from "@/lib/useProjects";
 import {
   EmptyState,
   ErrorBanner,
@@ -68,6 +69,7 @@ const ACTIONS_BY_STATE: Record<string, { action: string; label: string }[]> = {
 export default function CatalogPage() {
   const { can } = useAuth();
   const canValidate = can("catalog:validate");
+  const { projects, selectedProject, selectedProjectId, setSelectedProjectId, isLoading: projectsLoading } = useProjects();
 
   const [rules, setRules] = useState<RegulatoryRule[]>([]);
   const [documents, setDocuments] = useState<RegulatoryDocument[]>([]);
@@ -84,8 +86,8 @@ export default function CatalogPage() {
     setError(null);
     try {
       const [allRules, docs] = await Promise.all([
-        fetchCatalogRules(),
-        fetchRegulatoryDocuments(),
+        fetchCatalogRules(selectedProject ? { jurisdiction: selectedProject.city_ibge } : undefined),
+        fetchRegulatoryDocuments(selectedProject?.city_ibge),
       ]);
       setRules(allRules);
       setDocuments(docs);
@@ -96,7 +98,7 @@ export default function CatalogPage() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [selectedProject]);
 
   useEffect(() => {
     load();
@@ -111,11 +113,15 @@ export default function CatalogPage() {
   const discoveredDocuments = documents.filter((document) => document.state === "descoberto");
 
   const handleDiscovery = async () => {
+    if (!selectedProject) {
+      setError(new Error("Selecione um empreendimento para definir o município."));
+      return;
+    }
     setIsDiscovering(true);
     setError(null);
     setDiscoveryMessage(null);
     try {
-      const submission = await discoverRegulatoryDocuments();
+      const submission = await discoverRegulatoryDocuments(selectedProject.city_ibge, selectedProject.id);
       if (submission.job.status === "falhou") {
         throw new Error(submission.job.error || "A busca automática falhou.");
       }
@@ -175,6 +181,20 @@ export default function CatalogPage() {
       </div>
 
       <OnlineOnlyNotice feature="A validação do catálogo" />
+      <div className="glass-panel rounded-2xl p-4 flex flex-col md:flex-row md:items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-bold text-white">Escopo do empreendimento</p>
+          <p className="text-[11px] text-slate-400 mt-1">
+            O Atlas considera Brasil, estado e o município deste projeto. Normas de outro município ficam fora da análise.
+          </p>
+        </div>
+        <select value={selectedProjectId} onChange={(event) => setSelectedProjectId(event.target.value)} disabled={projectsLoading || projects.length === 0} className="min-w-64 px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white focus:border-cyan-500 outline-none disabled:opacity-50">
+          {projects.length === 0 && <option value="">Nenhum empreendimento</option>}
+          {projects.map((project) => (
+            <option key={project.id} value={project.id}>{projectShortLabel(project)} — {project.city_name}/{project.state}</option>
+          ))}
+        </select>
+      </div>
       {error && <ErrorBanner error={error} onRetry={load} />}
       {discoveryMessage && (
         <div className="p-4 rounded-xl border border-cyan-500/30 bg-cyan-950/20 text-xs text-cyan-100">

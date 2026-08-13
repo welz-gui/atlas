@@ -21,6 +21,7 @@ from app.models.domain import (
     User,
 )
 from app.regulatory.catalog import ALLOWED_TRANSITIONS, Rule, RuleState
+from app.regulatory.jurisdiction import jurisdiction_chain
 from app.regulatory.importer import import_seed_catalog
 from app.schemas.domain import (
     CatalogImportResponse,
@@ -62,7 +63,7 @@ def list_rules(
 ):
     query = db.query(RegulatoryRule)
     if jurisdiction:
-        query = query.filter(RegulatoryRule.jurisdiction == jurisdiction)
+        query = query.filter(RegulatoryRule.jurisdiction.in_(jurisdiction_chain(jurisdiction)))
     if state:
         query = query.filter(RegulatoryRule.state == state)
     return [_to_response(row) for row in query.order_by(RegulatoryRule.rule_key).all()]
@@ -79,7 +80,7 @@ def validation_queue(
         RegulatoryRule.state.in_([RuleState.EM_VALIDACAO, RuleState.RASCUNHO_EXTRAIDO_POR_IA])
     )
     if jurisdiction:
-        query = query.filter(RegulatoryRule.jurisdiction == jurisdiction)
+        query = query.filter(RegulatoryRule.jurisdiction.in_(jurisdiction_chain(jurisdiction)))
     return [_to_response(row) for row in query.order_by(RegulatoryRule.rule_key).all()]
 
 
@@ -223,7 +224,7 @@ def list_regulatory_documents(
 ):
     query = db.query(RegulatoryDocument)
     if jurisdiction:
-        query = query.filter(RegulatoryDocument.jurisdiction == jurisdiction)
+        query = query.filter(RegulatoryDocument.jurisdiction.in_(jurisdiction_chain(jurisdiction)))
     return query.order_by(RegulatoryDocument.title).all()
 
 

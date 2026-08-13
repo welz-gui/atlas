@@ -33,6 +33,7 @@ from app.models.domain import (
     ValidationRecord,
 )
 from app.regulatory.catalog import CheckOutcome, RuleState
+from app.regulatory.jurisdiction import applicable_jurisdictions
 
 #: Veredictos que contam como "o motor apontou isto".
 FLAGGED = (CheckOutcome.NAO_CONFORME, CheckOutcome.ATENCAO)
@@ -177,7 +178,9 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
     # Regra publicável sobre total, nas jurisdições em que a organização tem
     # projeto. É a medida do progresso do D3, e é o que decide se um laudo
     # pode ser entregue.
-    jurisdictions = {p.city_ibge for p in projects if p.city_ibge}
+    jurisdictions = applicable_jurisdictions(
+        {p.city_ibge for p in projects if p.city_ibge}
+    )
     rules = (
         db.query(RegulatoryRule)
         .filter(RegulatoryRule.jurisdiction.in_(jurisdictions))
@@ -249,13 +252,13 @@ def ai_metrics(db: Session, organization_id: str) -> dict[str, Any]:
     # a organização tem projeto, e podem incluir trabalho de validação feito
     # por outra organização sobre o mesmo município. É o desenho do catálogo,
     # não um vazamento de tenant: regra não é dado de cliente.
-    jurisdictions = {
+    jurisdictions = applicable_jurisdictions({
         p.city_ibge
         for p in db.query(Project)
         .filter(Project.organization_id == organization_id)
         .all()
         if p.city_ibge
-    }
+    })
 
     rules = (
         db.query(RegulatoryRule)

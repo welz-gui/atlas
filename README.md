@@ -22,6 +22,7 @@ Estes não são aspirações — são invariantes cobertos por teste:
 | O sistema não inventa medidas | Extração sem evidência devolve `null` e um aviso |
 | Regras são dado, não código | Tabela `regulatory_rules`, com estado, vigência e validador |
 | Fonte legal única | Motor, assistente e IA leem o mesmo catálogo |
+| Escopo territorial composto | Cada projeto usa normas de `BR`, da UF e somente do seu município |
 | Nenhuma alteração silenciosa | Parâmetro alterado cria versão nova; a anterior fica intacta |
 | Análises são append-only | Cada avaliação cria um `AnalysisRun`; nada é sobrescrito |
 | Regra não validada não vai para o cliente | Publicar exige documento **e** artigo conferidos (§7.5) |
@@ -78,6 +79,14 @@ python -m app.workers.worker --recover
 
 Sem worker, os trabalhos executam no próprio processo da API — e o registro do
 trabalho diz isso (`executed_inline`).
+
+### Descoberta de normas por empreendimento
+
+Na tela do catálogo, selecione um empreendimento antes de buscar normas. A
+localização cadastrada define a cadeia aplicável: Brasil, estado e município.
+Normas municipais de uma cidade nunca são aplicadas a projetos de outra. As
+fontes de Lajeado e Arroio do Meio estão configuradas no protótipo; novas
+cidades devem ser adicionadas ao registro de fontes oficiais.
 
 ### Testes
 
