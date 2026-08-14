@@ -36,6 +36,7 @@ from typing import Any, Callable, Dict, Optional
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.tenant import organization_scope
 from app.models.domain import JobRecord, JobStatus, User
 
 logger = logging.getLogger("atlas.workers")
@@ -264,8 +265,17 @@ def run_job(db: Session, job_id: str) -> JobRecord:
     record.worker_id = worker_identity()
     db.commit()
 
+    # A organização do trabalho entra em vigor para o executor (§3.1, D1):
+    # `job_records` não está sob RLS — é infraestrutura, não dado de cliente —,
+    # mas tudo que o executor toca está. Sem isto, um trabalho de fila veria
+    # zero linhas e falharia de forma difícil de diagnosticar.
+    #
+    # `organization_scope` desfaz ao sair, inclusive na exceção abaixo: o
+    # worker é um processo longo, e organização pendurada contaminaria o
+    # trabalho seguinte.
     try:
-        result = handler(db, record)
+        with organization_scope(record.organization_id):
+            result = handler(db, record)
     except Exception as exc:  # noqa: BLE001 — a falha precisa virar registro
         db.rollback()
         record = db.query(JobRecord).filter(JobRecord.id == job_id).first()

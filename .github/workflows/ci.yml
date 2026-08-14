@@ -32,6 +32,26 @@ jobs:
     defaults:
       run:
         working-directory: backend
+
+    # A suíte roda em SQLite, que é rápido e basta para quase tudo. O Postgres
+    # existe por causa da RLS: a política é **inerte** no SQLite, e os testes de
+    # isolamento de `test_rls_postgres.py` pulam sem ele. Verde no SQLite não
+    # prova nada — ver o item D1 no roadmap.
+    services:
+      postgres:
+        image: postgis/postgis:15-3.3
+        env:
+          POSTGRES_USER: atlas_user
+          POSTGRES_PASSWORD: atlas_password
+          POSTGRES_DB: atlas_rls
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U atlas_user -d atlas_rls"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -49,6 +69,19 @@ jobs:
         run: |
           set -o pipefail
           python -m pytest tests/ -q | tee pytest-output.txt
+
+      - name: Rodar os testes de RLS contra Postgres
+        # Módulo próprio, com DATABASE_URL apontando para o serviço acima. Sem
+        # este passo os seis testes de isolamento pulariam para sempre, e a
+        # política voltaria a existir sem defender nada.
+        env:
+          DATABASE_URL: postgresql+psycopg2://atlas_user:atlas_password@localhost:5432/atlas_rls
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m alembic upgrade head
+          python -m pytest tests/test_rls_postgres.py -q --no-header -p no:cacheprovider             | tee rls-output.txt
+          grep -q "skipped" rls-output.txt             && { echo "::error::Os testes de RLS pularam — Postgres não foi usado."; exit 1; }             || true
 
       - name: Registrar a contagem
         if: always()
