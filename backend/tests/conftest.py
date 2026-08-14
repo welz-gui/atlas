@@ -1,5 +1,6 @@
 import os
 import sys
+from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -54,7 +55,35 @@ def make_org(db_session, name="Organização de Teste"):
     return org
 
 
-def make_user(db_session, org, role=UserRole.ENGINEER, email=None):
+#: Papéis que, em produção, precisam de segundo fator para exercer as
+#: permissões `org:manage` e `catalog:validate` (§8.1, D2). As fixturas os
+#: criam já com o fator ativo, porque é o estado real de quem publica regra ou
+#: gere a organização — um validador sem MFA não consegue trabalhar, e testar
+#: com ele mediria a exceção em vez da regra.
+#:
+#: Para exercitar o cadastro do fator, use `usuario_sem_mfa`.
+MFA_ROLES = {UserRole.OWNER, UserRole.ADMIN, UserRole.VALIDATOR}
+
+
+#: Segredos em claro dos usuários de teste, por e-mail. Existe para que
+#: `auth_headers` gere o código no login sem que cada teste precise saber que o
+#: usuário tem segundo fator.
+_MFA_SECRETS: dict = {}
+
+
+def activate_mfa(db_session, user):
+    """Liga o segundo fator direto no banco, como se já tivesse sido cadastrado."""
+    from app.core import mfa
+
+    secret = mfa.generate_secret()
+    user.mfa_secret = mfa.encrypt_secret(secret)
+    user.mfa_activated_at = datetime.utcnow()
+    db_session.commit()
+    _MFA_SECRETS[user.email] = secret
+    return user
+
+
+def make_user(db_session, org, role=UserRole.ENGINEER, email=None, with_mfa=None):
     email = email or f"{role}-{org.id[:8]}@atlas-qa.com"
     user = User(
         organization_id=org.id,
@@ -65,13 +94,27 @@ def make_user(db_session, org, role=UserRole.ENGINEER, email=None):
     )
     db_session.add(user)
     db_session.commit()
+
+    if with_mfa if with_mfa is not None else role in MFA_ROLES:
+        activate_mfa(db_session, user)
     return user
 
 
 def auth_headers(client, email):
-    response = client.post(
-        "/api/v1/auth/login", json={"email": email, "password": TEST_PASSWORD}
-    )
+    """Autentica, acrescentando o segundo fator quando o usuário o tem.
+
+    Chamadores não precisam saber se o papel exige MFA: a fixture que ativou o
+    fator guardou o segredo em `_MFA_SECRETS`, e o código sai daí.
+    """
+    corpo = {"email": email, "password": TEST_PASSWORD}
+
+    secret = _MFA_SECRETS.get(email)
+    if secret:
+        import pyotp
+
+        corpo["mfa_code"] = pyotp.TOTP(secret).now()
+
+    response = client.post("/api/v1/auth/login", json=corpo)
     assert response.status_code == 200, response.text
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
@@ -93,7 +136,21 @@ def engineer_headers(client, engineer):
 
 @pytest.fixture
 def validator(db_session, org):
+    """Validador como em produção: com segundo fator ativo."""
     return make_user(db_session, org, UserRole.VALIDATOR)
+
+
+@pytest.fixture
+def usuario_sem_mfa(db_session, org):
+    """Validador **sem** o fator, para exercitar o cadastro (§8.1, D2)."""
+    return make_user(
+        db_session, org, UserRole.VALIDATOR, email="sem-mfa@atlas-qa.com", with_mfa=False
+    )
+
+
+@pytest.fixture
+def headers_sem_mfa(client, usuario_sem_mfa):
+    return auth_headers(client, usuario_sem_mfa.email)
 
 
 @pytest.fixture

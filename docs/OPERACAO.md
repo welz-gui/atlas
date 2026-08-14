@@ -92,7 +92,13 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 
 ### Rotação
 
-Trocar `SECRET_KEY` **invalida todas as sessões** — os tokens são assinados com
+Trocar `SECRET_KEY` **invalida todas as sessões e os segredos de MFA** — o
+segredo TOTP é cifrado com uma chave derivada dela (`core/mfa.py`), então quem
+tinha segundo fator precisa recadastrá-lo. Avise antes: uma pessoa sem o
+aplicativo reconfigurado e sem código de recuperação perde acesso às ações que
+exigem o fator.
+
+Trocar `SECRET_KEY` — os tokens são assinados com
 ela. Não é efeito colateral: é o comportamento desejado quando se rotaciona por
 suspeita de vazamento. Rotacione fora do horário de campo e avise quem estiver
 em obra, porque o app pedirá login de novo.

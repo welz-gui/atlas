@@ -15,6 +15,9 @@ class Token(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    #: Código do aplicativo autenticador ou de recuperação. Só é exigido de
+    #: quem tem segundo fator ativo — ver `core/mfa.py`.
+    mfa_code: Optional[str] = Field(default=None, max_length=12)
 
 
 class UserBase(BaseModel):
@@ -758,3 +761,45 @@ class AnonymizationResponse(BaseModel):
         "O que foi removido é o dado pessoal de terceiros, não o registro do "
         "ato técnico."
     )
+
+
+# --- Segundo fator (§8.1, §12 — D2) ------------------------------------------
+
+
+class MFAEnrollResponse(BaseModel):
+    """Cadastro iniciado. Ainda **não** vale como segundo fator."""
+
+    secret: str
+    provisioning_uri: str
+    note: str = (
+        "Leia o URI no aplicativo autenticador e confirme em "
+        "POST /auth/mfa/activate. Enquanto não confirmar, o segundo fator não "
+        "está ativo."
+    )
+
+
+class MFAActivateRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=10)
+
+
+class MFAActivateResponse(BaseModel):
+    """Códigos de recuperação — entregues **uma única vez**."""
+
+    activated_at: datetime
+    recovery_codes: List[str]
+    note: str = (
+        "Guarde os códigos agora: eles não serão exibidos de novo. Cada um "
+        "vale uma vez e substitui o aplicativo autenticador."
+    )
+
+
+class MFAStatusResponse(BaseModel):
+    active: bool
+    activated_at: Optional[datetime] = None
+    required_for_role: bool
+    recovery_codes_remaining: Optional[int] = None
+
+
+class MFADisableRequest(BaseModel):
+    #: Código do aplicativo ou de recuperação — provar posse antes de remover.
+    code: str = Field(min_length=6, max_length=12)
