@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
+from app.core.tenant import reset_current_organization, set_current_organization
 from app.api.v1.router import api_router
 
 # O esquema é criado por migrations versionadas (alembic upgrade head),
@@ -34,6 +35,25 @@ app.add_middleware(
         "X-Atlas-Antivirus-Status",
     ],
 )
+
+@app.middleware("http")
+async def tenant_scope(request, call_next):
+    """Garante que a organização não sobreviva à requisição (§3.1, D1).
+
+    `get_current_user` põe a organização em vigor e não a desfaz, porque ela
+    precisa valer até o fim do tratamento. Quem desfaz é este middleware — em
+    qualquer saída, inclusive erro.
+
+    Sem isto, o contexto de execução reaproveitado pela requisição seguinte
+    herdaria a organização anterior, que é precisamente o vazamento que a RLS
+    existe para impedir.
+    """
+    token = set_current_organization(None)
+    try:
+        return await call_next(request)
+    finally:
+        reset_current_organization(token)
+
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
 

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Query, Session
 
 from app.core.database import get_db
 from app.core.security import decode_access_token, role_has_permission
+from app.core.tenant import set_current_organization
 from app.models.domain import Project, User
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -38,6 +39,16 @@ def get_current_user(
     payload = decode_access_token(credentials.credentials)
     if not payload or not payload.get("sub"):
         raise CREDENTIALS_ERROR
+
+    # A organização entra em vigor **antes** da primeira consulta, porque a
+    # política de RLS já se aplica a ela (§3.1, D1). A fonte é o token
+    # assinado; a conferência contra o registro vem logo abaixo, de modo que um
+    # token com organização trocada não passa daqui.
+    #
+    # Não há `reset` neste ponto de propósito: o valor precisa continuar em
+    # vigor durante todo o tratamento da requisição. Quem limpa é o middleware
+    # `tenant_scope` em `app/main.py`.
+    set_current_organization(payload.get("org"))
 
     user = db.query(User).filter(User.id == payload["sub"]).first()
     if user is None or not user.is_active:

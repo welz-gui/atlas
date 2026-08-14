@@ -9,7 +9,7 @@ real do código** e o **caminho de execução** de cada estágio.
   [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
   estágios foi levantado em `7dc50d2` e continua valendo, com uma exceção
   registrada abaixo: o **Estágio 6 deixou de ser "nada construído"**.
-- Suíte: **292 casos, todos passando** (eram 199 em `7dc50d2`). Reproduz em
+- Suíte: **301 casos, todos passando** (mais 6 de RLS, que só rodam na CI contra Postgres) (eram 199 em `7dc50d2`). Reproduz em
   ~90 s: `backend/.venv/Scripts/python -m pytest tests/ -q`, e roda a cada push
   e a cada PR desde o **D0** (`.github/workflows/ci.yml`), junto com migrations
   em Postgres, ciclo de restauração de backup e build do frontend.
@@ -233,7 +233,7 @@ Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
 ## Estado atual em uma página
 
-**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 292 testes):
+**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 301 testes):
 
 ```
 app/
@@ -1292,7 +1292,7 @@ antes do que trava a liberação externa. Cada item é uma worktree e um PR.
 
 | # | Item | Esforço | Por quê |
 |---|---|---|---|
-| **D1** | **Ativar RLS** com `SET LOCAL` por transação + fixture Postgres real no CI | M | Segunda linha de defesa que hoje não defende nada. **Não bloqueia o Estágio 0** — analista interno, organização única — mas bloqueia o primeiro cliente com acesso próprio |
+| ~~**D1**~~ | ~~**Ativar RLS** com `SET LOCAL` por transação~~ | ✅ | Feito em `core/tenant.py` e no listener de `core/database.py`, com testes contra Postgres na CI. **`users` ficou fora da política** — login e cadastro precedem o tenant; ver `a4d7e91c5b20` |
 | **D2** | **MFA (TOTP)** para `owner`, `admin`, `validator` | M | §8.1 e §12; quem publica regra precisa de segundo fator. Mesma ressalva de D1 |
 | **D4** | **Assinatura real do diário** ou renomear `assinado` → `fechado` | P | Hoje é pior do que "campo mal nomeado": o valor é `default="assinado"` em [`models/domain.py:958`](../backend/app/models/domain.py) e o frontend envia a string literal em [`daily-log/page.tsx:228`](../frontend/app/daily-log/page.tsx). Todo diário nasce afirmando uma assinatura que não houve |
 
@@ -1338,7 +1338,8 @@ produto, e não o que está aberto no rastreador.
 | **Sem observabilidade** | Falha em produção chega por relato de cliente | — |
 | **Sem provedor de hospedagem** | A imagem e a composição existem; o ambiente, não | `docker-compose.prod.yml` |
 | **Catálogo maior, validação parada** | O coletor aumenta a fila do D3 sem que ninguém a consuma | `regulatory/discovery.py` |
-| RLS inativa | Isolamento depende só do filtro de aplicação | `alembic/.../d259cb880f7b` |
+| RLS não cobre `users` | Listagem de usuários tem só o filtro de aplicação; as tabelas com trabalho de cliente estão cobertas | `alembic/.../a4d7e91c5b20` |
+| **Conexão de produção pode ser superusuária** | Superusuário ignora RLS mesmo com `FORCE`. A política só defende se o app conectar com papel restrito | `OPERACAO.md` |
 | Sem MFA, sem refresh token | Sessão de 7 dias, fator único | `core/security.py` |
 | Sem OCR | PDF digitalizado não é extraível | `services/pdf_parser.py` |
 | Sem IFC/DXF/BIM | §3.6 parcial | — |

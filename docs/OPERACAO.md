@@ -107,6 +107,36 @@ em obra, porque o app pedirá login de novo.
 - **produção com SQLite recusa subir**, porque sem Postgres não há concorrência,
   nem RLS (D1), nem o caminho de backup deste documento.
 
+### ⚠️ A conexão da aplicação não pode ser superusuária
+
+A RLS (item **D1**) só defende se o papel do banco **não** for superusuário e
+**não** tiver `BYPASSRLS`. Postgres ignora a política para esses papéis mesmo
+com `FORCE ROW LEVEL SECURITY` — foi por isso que a política existiu desde a
+Fase B sem nunca ter defendido nada.
+
+Em produção, separe os dois papéis:
+
+```sql
+-- dono do esquema: roda migrations e o seed
+CREATE ROLE atlas_owner LOGIN PASSWORD '...';
+
+-- aplicação: sujeita à política
+CREATE ROLE atlas_app LOGIN PASSWORD '...';
+GRANT USAGE ON SCHEMA public TO atlas_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO atlas_app;
+```
+
+`DATABASE_URL` da API e do worker aponta para `atlas_app`. Migrations e
+`seed.py` rodam com `atlas_owner`.
+
+Para conferir que o papel em uso não escapa da política:
+
+```sql
+SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user;
+```
+
+Os dois precisam vir `false`.
+
 ### O que ainda depende do provedor
 
 Cofre com rotação automática e auditoria de acesso ao segredo. A escolha
