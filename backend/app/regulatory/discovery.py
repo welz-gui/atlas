@@ -20,15 +20,8 @@ from urllib.request import Request, urlopen
 from sqlalchemy.orm import Session
 
 from app.models.domain import RegulatoryDocument, RegulatoryDocumentState
+from app.regulatory.jurisdiction import jurisdiction_chain
 from app.regulatory.robots import RobotsDenied, RobotsGate
-
-
-@dataclass(frozen=True)
-class DiscoverySource:
-    jurisdiction: str
-    url: str
-    issuing_body: str
-    allowed_hosts: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -38,6 +31,15 @@ class DiscoveredDocument:
     doc_type: str
     number: str | None
     theme: str | None
+
+
+@dataclass(frozen=True)
+class DiscoverySource:
+    jurisdiction: str
+    url: str
+    issuing_body: str
+    allowed_hosts: tuple[str, ...]
+    known_documents: tuple[DiscoveredDocument, ...] = ()
 
 
 #: Hosts em que um candidato de Lajeado pode estar hospedado.
@@ -65,6 +67,47 @@ ALLOWED_HOSTS_LAJEADO = (
 )
 
 SOURCES: dict[str, tuple[DiscoverySource, ...]] = {
+    "BR": (
+        DiscoverySource(
+            jurisdiction="BR",
+            url="https://www.planalto.gov.br/ccivil_03/leis/l10098.htm",
+            issuing_body="Presidência da República",
+            allowed_hosts=("planalto.gov.br", "www.planalto.gov.br"),
+            known_documents=(
+                DiscoveredDocument(
+                    title="Lei nº 10.098/2000 — Lei da Acessibilidade",
+                    url="https://www.planalto.gov.br/ccivil_03/leis/l10098.htm",
+                    doc_type="lei", number="10.098/2000", theme="acessibilidade",
+                ),
+            ),
+        ),
+        DiscoverySource(
+            jurisdiction="BR",
+            url="https://www.planalto.gov.br/ccivil_03/_ato2004-2006/2004/decreto/d5296.htm",
+            issuing_body="Presidência da República",
+            allowed_hosts=("planalto.gov.br", "www.planalto.gov.br"),
+            known_documents=(
+                DiscoveredDocument(
+                    title="Decreto nº 5.296/2004 — Regulamenta a acessibilidade",
+                    url="https://www.planalto.gov.br/ccivil_03/_ato2004-2006/2004/decreto/d5296.htm",
+                    doc_type="decreto", number="5.296/2004", theme="acessibilidade",
+                ),
+            ),
+        ),
+        DiscoverySource(
+            jurisdiction="BR",
+            url="https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2015/lei/l13146.htm",
+            issuing_body="Presidência da República",
+            allowed_hosts=("planalto.gov.br", "www.planalto.gov.br"),
+            known_documents=(
+                DiscoveredDocument(
+                    title="Lei nº 13.146/2015 — Lei Brasileira de Inclusão",
+                    url="https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2015/lei/l13146.htm",
+                    doc_type="lei", number="13.146/2015", theme="acessibilidade",
+                ),
+            ),
+        ),
+    ),
     "BR-RS-4311403": (
         DiscoverySource(
             jurisdiction="BR-RS-4311403",
@@ -83,6 +126,34 @@ SOURCES: dict[str, tuple[DiscoverySource, ...]] = {
             ),
             issuing_body="Prefeitura Municipal de Lajeado",
             allowed_hosts=ALLOWED_HOSTS_LAJEADO,
+        ),
+    ),
+    "BR-RS-4301008": (
+        DiscoverySource(
+            jurisdiction="BR-RS-4301008",
+            url="https://arroiodomeio.rs.gov.br/legislacao",
+            issuing_body="Prefeitura Municipal de Arroio do Meio",
+            allowed_hosts=(
+                "arroiodomeio.rs.gov.br", "www.arroiodomeio.rs.gov.br",
+                "cespro.com.br", "www.cespro.com.br",
+            ),
+            known_documents=(
+                DiscoveredDocument(
+                    title="Lei nº 2.493/2006 — Código de Edificações",
+                    url="https://arroiodomeio.rs.gov.br/uploads/midia/16431/LEI_N_2493_2006_Cdigo_de_edificaes.pdf",
+                    doc_type="lei", number="2.493/2006", theme="edificações",
+                ),
+                DiscoveredDocument(
+                    title="Lei nº 2.491/2006 — Parcelamento do Solo Urbano",
+                    url="https://arroiodomeio.rs.gov.br/uploads/midia/16430/LEI_N_2491_2006_Parcelamento_do_solo_urbano.pdf",
+                    doc_type="lei", number="2.491/2006", theme="parcelamento do solo",
+                ),
+                DiscoveredDocument(
+                    title="Lei nº 3.269/2014 — Altera o Parcelamento do Solo Urbano",
+                    url="https://arroiodomeio.rs.gov.br/uploads/midia/16432/LEI_N_3269_2014_Parcelamento_do_solo_urbano.pdf",
+                    doc_type="lei", number="3.269/2014", theme="parcelamento do solo",
+                ),
+            ),
         ),
     ),
 }
@@ -278,6 +349,8 @@ def discover_regulations(
             skipped_sources.append({"url": source.url, "reason": str(recusa)})
             continue
         checked_sources.append(source.url)
+        for candidate in source.known_documents:
+            candidates[candidate.url] = (candidate, source)
         for candidate in extract_candidates(html, source):
             candidates[candidate.url] = (candidate, source)
 
@@ -343,5 +416,32 @@ def discover_regulations(
         "updated": updated,
         "unchanged": unchanged,
         "document_ids": document_ids,
+        "requires_human_validation": True,
+    }
+
+
+def discover_applicable_regulations(
+    db: Session,
+    jurisdiction: str,
+    fetcher: Callable[[str], str] = fetch_source,
+) -> dict:
+    """Descobre normas nacionais, estaduais e municipais aplicáveis ao local."""
+    scopes = [scope for scope in jurisdiction_chain(jurisdiction) if scope in SOURCES]
+    if not scopes:
+        raise ValueError(
+            f"Não há fontes oficiais configuradas para {jurisdiction} ou seus pais."
+        )
+
+    results = [discover_regulations(db, scope, fetcher=fetcher) for scope in scopes]
+    return {
+        "jurisdiction": jurisdiction,
+        "jurisdictions_checked": scopes,
+        "sources_checked": [source for result in results for source in result["sources_checked"]],
+        "sources_skipped": [source for result in results for source in result["sources_skipped"]],
+        "candidates_found": sum(result["candidates_found"] for result in results),
+        "created": sum(result["created"] for result in results),
+        "updated": sum(result["updated"] for result in results),
+        "unchanged": sum(result["unchanged"] for result in results),
+        "document_ids": [item for result in results for item in result["document_ids"]],
         "requires_human_validation": True,
     }

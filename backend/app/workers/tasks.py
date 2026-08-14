@@ -213,9 +213,9 @@ def purge_retention(db: Session, record: JobRecord) -> Dict[str, Any]:
 @register(JobType.DESCOBERTA_REGULATORIA)
 def discover_regulatory_documents(db: Session, record: JobRecord) -> Dict[str, Any]:
     """Consulta índices oficiais e cria somente candidatos para revisão humana."""
-    from app.regulatory.discovery import discover_regulations
+    from app.regulatory.discovery import discover_applicable_regulations
 
     jurisdiction = record.payload.get("jurisdiction")
     if not jurisdiction:
         raise ValueError("payload.jurisdiction é obrigatório.")
-    return discover_regulations(db, jurisdiction)
+    return discover_applicable_regulations(db, jurisdiction)

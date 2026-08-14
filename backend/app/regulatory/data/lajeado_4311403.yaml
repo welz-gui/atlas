@@ -190,28 +190,3 @@ rules:
     notes: >-
       No protótipo esta regra tinha `applies: lambda p: True` e vazava para
       qualquer município. Agora é restrita à jurisdição do catálogo.
-
-  - rule_id: lajeado_acessibilidade_nbr9050
-    title: Conformidade NBR 9050 — Acessibilidade e Rota Acessível
-    state: em_validacao
-    severity: bloqueio
-    applies_to: {}
-    check: null
-    requires_manual_review: true
-    manual_review_reason: >-
-      A verificação de rota acessível exige análise gráfica das pranchas
-      (larguras úteis, inclinações, desníveis). Não é derivável dos parâmetros
-      numéricos do cadastro.
-    evidence_required: [projeto_arquitetonico, laudo_acessibilidade]
-    source:
-      document: ABNT NBR 9050
-      article: null
-      url: null
-      consulted_at: null
-    effective_from: null
-    effective_until: null
-    validated_by: null
-    validated_at: null
-    notes: >-
-      Norma técnica federal, não municipal. Mantida no catálogo de Lajeado por
-      ora; deve migrar para um catálogo de normas nacionais.

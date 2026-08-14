@@ -42,7 +42,7 @@ def test_projeto_conforme(client, engineer_headers, seeded_catalog):
     assert status["lajeado_taxa_ocupacao_max_z2"] == CheckOutcome.CONFORME
     assert status["lajeado_recuo_fundos_z2"] == CheckOutcome.CONFORME
     assert status["lajeado_gabarito_maximo_z2"] == CheckOutcome.CONFORME
-    assert status["lajeado_acessibilidade_nbr9050"] == CheckOutcome.NAO_VERIFICAVEL
+    assert status["brasil_acessibilidade_edificacoes"] == CheckOutcome.NAO_VERIFICAVEL
 
 
 def test_projeto_nao_conforme(client, engineer_headers, seeded_catalog):
@@ -119,7 +119,7 @@ def test_analises_sao_append_only(client, engineer_headers, db_session, seeded_c
     ] == CheckOutcome.CONFORME
 
 
-def test_jurisdicao_estrangeira_nao_aplica_regras_de_lajeado(
+def test_outro_municipio_aplica_regra_nacional_mas_nao_regras_de_lajeado(
     client, engineer_headers, seeded_catalog
 ):
     projeto = _criar_projeto(
@@ -131,8 +131,20 @@ def test_jurisdicao_estrangeira_nao_aplica_regras_de_lajeado(
         f"/api/v1/projects/{projeto['id']}/evaluate", headers=engineer_headers
     ).json()
 
-    assert report["total_checks"] == 0
+    statuses = _status_map(client, engineer_headers, projeto["id"])
+    assert set(statuses) == {"brasil_acessibilidade_edificacoes"}
+    assert report["total_checks"] == 1
     assert report["is_publishable"] is False
+
+
+def test_arroio_do_meio_nao_recebe_regras_municipais_de_lajeado(client, engineer_headers, seeded_catalog):
+    projeto = _criar_projeto(
+        client, engineer_headers, "Projeto em Arroio do Meio",
+        city_ibge="BR-RS-4301008", city_name="Arroio do Meio", state="RS",
+        front_setback=1.0,
+    )
+    statuses = _status_map(client, engineer_headers, projeto["id"])
+    assert set(statuses) == {"brasil_acessibilidade_edificacoes"}
 
 
 def test_get_do_laudo_nao_cria_analise(client, engineer_headers, db_session, seeded_catalog):
