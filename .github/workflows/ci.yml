@@ -179,9 +179,12 @@ jobs:
       - name: Instalar dependências
         run: npm ci
 
+      - name: Testes
+        # O contrato do cliente HTTP (I13). Sem isto, o build é o único portão
+        # — e `catch { return [] }` compila.
+        run: npm test
+
       - name: Build
-        # Não há suíte de frontend — ver a dívida registrada em
-        # docs/ROADMAP.md. O build é o único portão disponível hoje: pega erro
-        # de TypeScript e de importação, e não pega regressão de comportamento.
-        # Quando existir `npm test`, ele entra aqui.
+        # Pega erro de TypeScript e de importação; comportamento é com os
+        # testes acima.
         run: npm run build
