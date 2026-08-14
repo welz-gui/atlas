@@ -1333,7 +1333,7 @@ produto, e não o que está aberto no rastreador.
 
 | Dívida | Impacto | Onde |
 |---|---|---|
-| **Sem teste de frontend** | Nenhum. Um PR que troque `request()` por `fetch` cru compila e passa em tudo — a CI só verifica o build | `frontend/` |
+| Teste de frontend só no cliente HTTP | `lib/api.test.ts` trava o I13 e roda na CI; componentes e telas seguem sem cobertura | `frontend/` |
 | Sem cofre de segredos | Variáveis de ambiente já bastam e o `repr` não vaza; falta rotação automática e auditoria de acesso | acompanha a escolha do provedor |
 | **Sem observabilidade** | Falha em produção chega por relato de cliente | — |
 | **Sem provedor de hospedagem** | A imagem e a composição existem; o ambiente, não | `docker-compose.prod.yml` |
