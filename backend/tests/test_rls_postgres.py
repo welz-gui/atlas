@@ -27,6 +27,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import sessionmaker
 
+from app.core.database import register_tenant_listener
 from app.core.tenant import organization_scope
 from app.models.domain import Organization, Project
 
@@ -107,8 +108,17 @@ def duas_organizacoes():
 
 
 def _sessao_restrita(url):
+    """Sessão com o papel restrito **e** com o listener de tenant.
+
+    O listener é o que emite `SET LOCAL`. Sem registrá-lo aqui, a sessão nunca
+    publicaria a organização e todo teste concluiria que a política nega tudo —
+    verde nos casos de negação, vermelho nos de permissão, e nenhuma conclusão
+    válida sobre a RLS.
+    """
     engine = create_engine(url)
-    return sessionmaker(bind=engine)(), engine
+    factory = sessionmaker(bind=engine)
+    register_tenant_listener(factory)
+    return factory(), engine
 
 
 # --- A política está mesmo ativa ---------------------------------------------

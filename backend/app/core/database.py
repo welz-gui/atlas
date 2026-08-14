@@ -17,8 +17,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 IS_POSTGRES = engine.dialect.name == "postgresql"
 
 
-@event.listens_for(SessionLocal, "after_begin")
-def _apply_tenant(session, transaction, connection) -> None:
+def apply_tenant(session, transaction, connection) -> None:
     """Publica a organização corrente para a política de RLS (§3.1, D1).
 
     `SET LOCAL` vale até o fim da transação, e não da conexão: quando a
@@ -44,6 +43,21 @@ def _apply_tenant(session, transaction, connection) -> None:
         text("SELECT set_config('atlas.organization_id', :org, true)"),
         {"org": organization_id},
     )
+
+
+def register_tenant_listener(session_factory) -> None:
+    """Liga `apply_tenant` a uma fábrica de sessões.
+
+    Existe como função, e não como decorador em `SessionLocal`, para que a
+    sessão que os testes de RLS abrem — contra um papel restrito, em outra
+    engine — receba o mesmo listener. Sem isto o teste mediria uma sessão que
+    nunca publica a organização, e concluiria que a política nega tudo. Foi
+    exatamente o que aconteceu na primeira execução da CI.
+    """
+    event.listen(session_factory, "after_begin", apply_tenant)
+
+
+register_tenant_listener(SessionLocal)
 
 
 class Base(DeclarativeBase):
