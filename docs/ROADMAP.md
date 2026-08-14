@@ -1300,7 +1300,7 @@ antes do que trava a liberação externa. Cada item é uma worktree e um PR.
 
 | # | Item | Esforço | Por quê |
 |---|---|---|---|
-| **D6** | **Teste de integração real** de storage S3 e clamd | P | Hoje há teste de contrato, não de integração |
+| ~~**D6**~~ | ~~**Teste de integração real** de storage S3 e clamd~~ | ✅ | Job `integracao` na CI, com MinIO e ClamAV. Os testes **pulam** sem serviço, e um passo falha se pularem |
 | ~~**D7**~~ | ~~**Retenção de `ai_interactions`** e `job_records`~~ | ✅ | Feito com a LGPD, em `POST /privacy/purge-*`. Expurga o conteúdo, preserva a proveniência |
 | **D8** | **Adotar TanStack Query** no frontend | M | §6.1; antes de as telas de obra multiplicarem estado manual |
 
@@ -1347,7 +1347,6 @@ produto, e não o que está aberto no rastreador.
 | Monitor regulatório ausente | O coletor descobre; nada detecta alteração ou revogação depois | §7.2 |
 | RAG lexical | Degrada com catálogo grande | `ai/retrieval.py` |
 | Fila offline sem mídia | Fotos não sincronizam | `lib/offline.ts` |
-| S3 e clamd sem teste de integração | Contrato testado, integração não | `tests/test_storage.py` |
 | `EAPItem` sem predecessoras | EAP incompleta para §8.8 | `models/domain.py` |
 | Sem TanStack Query/Table, sem shadcn/ui | Divergência do §6.1 | `frontend/` |
 
