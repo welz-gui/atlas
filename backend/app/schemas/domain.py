@@ -613,18 +613,33 @@ class DailyLogBase(BaseModel):
     manpower_subcontracted: int = 0
     activities_done: str
     occurrences: Optional[str] = None
-    status: str = "assinado"
 
 
 class DailyLogCreate(DailyLogBase):
     #: Ver `TaskItemCreate.client_token`.
     client_token: Optional[str] = Field(default=None, max_length=64)
 
+    # `status` **não** entra aqui de propósito (§8.12, D4): assinatura é ato
+    # do servidor, registrada em `POST /daily-logs/{id}/sign`. Deixá-la no
+    # corpo permitiria ao cliente declarar-se assinado — que é exatamente o
+    # que acontecia quando o campo nascia com `default="assinado"`.
+
 
 class DailyLogResponse(DailyLogBase):
     id: str
     project_id: str
     created_at: datetime
+
+    status: str
+    signed_by_name: Optional[str] = None
+    signed_at: Optional[datetime] = None
+    content_hash: Optional[str] = None
+
+    #: `True`, `False` ou `None`, e os três dizem coisas diferentes: assinatura
+    #: íntegra, conteúdo alterado depois de assinado, e **diário não assinado**.
+    #: `None` em vez de `False` porque ausência de assinatura não é adulteração.
+    signature_valid: Optional[bool] = None
+
     model_config = ConfigDict(from_attributes=True)
 
 

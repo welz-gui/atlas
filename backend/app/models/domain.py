@@ -153,6 +153,21 @@ class JobType:
     }
 
 
+class DailyLogState:
+    """Estados do diário de obra (§8.12).
+
+    A distinção existe porque `assinado` é uma afirmação sobre um ato humano.
+    Até a Fase D o campo nascia com esse valor por `default`, de modo que todo
+    diário afirmava uma assinatura que nunca houve — inclusive os criados pela
+    fila offline, onde ninguém sequer estava diante da tela.
+    """
+
+    RASCUNHO = "rascunho"
+    ASSINADO = "assinado"
+
+    ALL = {RASCUNHO, ASSINADO}
+
+
 class RequirementStatus:
     """Situação de uma exigência ou notificação."""
 
@@ -1036,7 +1051,24 @@ class DailyLog(Base):
     manpower_subcontracted: Mapped[int] = mapped_column(Integer, default=0)
     activities_done: Mapped[str] = mapped_column(Text, nullable=False)
     occurrences: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String(50), default="assinado")
+
+    # -- Assinatura (§8.12 — D4) -------------------------------------------
+    #: `rascunho` até alguém assinar. O padrão **não** é `assinado`: o registro
+    #: nasce afirmando apenas que existe.
+    status: Mapped[str] = mapped_column(
+        String(50), default=DailyLogState.RASCUNHO, index=True
+    )
+    #: SHA-256 do conteúdo no momento da assinatura. É o que permite detectar
+    #: alteração posterior: recalcular e comparar responde se o diário ainda é
+    #: o que foi assinado.
+    content_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    signed_by_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    #: Nome no momento da assinatura. Preservado mesmo que o usuário mude de
+    #: nome depois — quem assinou foi quem tinha aquele nome naquele dia.
+    signed_by_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    signed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     #: Chave de idempotência gerada pelo cliente de campo (§3.7). Um envio
     #: repetido depois de resposta perdida devolve o registro original em vez

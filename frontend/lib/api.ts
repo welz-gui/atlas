@@ -478,8 +478,18 @@ export interface DailyLogItem {
   manpower_subcontracted: number;
   activities_done: string;
   occurrences?: string;
-  status: string;
   created_at: string;
+
+  /** `rascunho` até alguém assinar (§8.12). */
+  status: "rascunho" | "assinado";
+  signed_by_name?: string | null;
+  signed_at?: string | null;
+  content_hash?: string | null;
+  /**
+   * `true` íntegra, `false` alterada depois de assinada, `null` **não
+   * assinada** — ausência de assinatura não é adulteração.
+   */
+  signature_valid?: boolean | null;
 }
 
 export interface AIChatResponse {
@@ -895,6 +905,10 @@ export function createProjectTask(
 
 // --- Diário de obra ----------------------------------------------------------
 
+export function signDailyLog(logId: string): Promise<DailyLogItem> {
+  return request<DailyLogItem>(`/daily-logs/${logId}/sign`, { method: "POST" });
+}
+
 export function fetchProjectDailyLogs(projectId: string): Promise<DailyLogItem[]> {
   return request<DailyLogItem[]>(`/projects/${projectId}/daily-logs`);
 }
@@ -908,7 +922,7 @@ export function createDailyLog(
     manpower_subcontracted: number;
     activities_done: string;
     occurrences?: string;
-    status?: string;
+    // `status` não entra: assinatura é ato do servidor, em `signDailyLog`.
   }
 ): Promise<DailyLogItem> {
   return request<DailyLogItem>(`/projects/${projectId}/daily-logs`, {

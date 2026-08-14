@@ -9,7 +9,7 @@ real do código** e o **caminho de execução** de cada estágio.
   [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
   estágios foi levantado em `7dc50d2` e continua valendo, com uma exceção
   registrada abaixo: o **Estágio 6 deixou de ser "nada construído"**.
-- Suíte: **318 casos, todos passando** (mais 6 de RLS, que só rodam na CI contra Postgres) (eram 199 em `7dc50d2`). Reproduz em
+- Suíte: **328 casos, todos passando** (mais 6 de RLS, que só rodam na CI contra Postgres) (eram 199 em `7dc50d2`). Reproduz em
   ~90 s: `backend/.venv/Scripts/python -m pytest tests/ -q`, e roda a cada push
   e a cada PR desde o **D0** (`.github/workflows/ci.yml`), junto com migrations
   em Postgres, ciclo de restauração de backup e build do frontend.
@@ -233,7 +233,7 @@ Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
 ## Estado atual em uma página
 
-**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 318 testes):
+**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 328 testes):
 
 ```
 app/
@@ -610,7 +610,7 @@ do cliente e **uso em obra real**.
 | **Painel diário** | Visão de "o que importa hoje" por obra |
 | **EAP completa (§8.8)** | Predecessoras, critérios de conclusão, entregáveis, responsáveis |
 | **Tarefas completas (§8.13)** | Dependências, evidências, aprovação, recorrência, escalonamento |
-| **Assinatura do diário (§8.12)** | Hoje o campo `status` diz "assinado" sem que nada assine |
+| ~~Assinatura do diário (§8.12)~~ | ✅ Feita no D4 — hash do conteúdo, identidade e conferência na leitura |
 
 ### Como implementar
 
@@ -1294,7 +1294,7 @@ antes do que trava a liberação externa. Cada item é uma worktree e um PR.
 |---|---|---|---|
 | ~~**D1**~~ | ~~**Ativar RLS** com `SET LOCAL` por transação~~ | ✅ | Feito em `core/tenant.py` e no listener de `core/database.py`, com testes contra Postgres na CI. **`users` ficou fora da política** — login e cadastro precedem o tenant; ver `a4d7e91c5b20` |
 | ~~**D2**~~ | ~~**MFA (TOTP)** para `owner`, `admin`, `validator`~~ | ✅ | Feito em `core/mfa.py`. A exigência recai na **ação** (`org:manage`, `catalog:validate`), não no login — exigir na entrada trancaria para fora quem já existe |
-| **D4** | **Assinatura real do diário** ou renomear `assinado` → `fechado` | P | Hoje é pior do que "campo mal nomeado": o valor é `default="assinado"` em [`models/domain.py:958`](../backend/app/models/domain.py) e o frontend envia a string literal em [`daily-log/page.tsx:228`](../frontend/app/daily-log/page.tsx). Todo diário nasce afirmando uma assinatura que não houve |
+| ~~**D4**~~ | ~~**Assinatura real do diário**~~ | ✅ | Feita, e não renomeada: `services/daily_log_signature.py` grava quem, quando e o hash do conteúdo. Diário nasce `rascunho`; alteração posterior devolve `signature_valid=false`, e não assinado devolve `null` |
 
 ### D-C — Higiene, sem data (fazer quando abrir espaço)
 
@@ -1349,7 +1349,6 @@ produto, e não o que está aberto no rastreador.
 | Fila offline sem mídia | Fotos não sincronizam | `lib/offline.ts` |
 | S3 e clamd sem teste de integração | Contrato testado, integração não | `tests/test_storage.py` |
 | `EAPItem` sem predecessoras | EAP incompleta para §8.8 | `models/domain.py` |
-| Diário "assinado" sem assinatura | Estado afirma o que não houve, por `default` | `models/domain.py:958` e `daily-log/page.tsx:228` |
 | Sem TanStack Query/Table, sem shadcn/ui | Divergência do §6.1 | `frontend/` |
 
 ---
