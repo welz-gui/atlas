@@ -17,6 +17,7 @@ import {
   DailyLogItem,
   createDailyLog,
   fetchProjectDailyLogs,
+  signDailyLog,
 } from "@/lib/api";
 import { projectShortLabel, useProjects } from "@/lib/useProjects";
 import { enqueue } from "@/lib/offline";
@@ -43,6 +44,21 @@ export default function DailyLogPage() {
   const [logs, setLogs] = useState<DailyLogItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<ApiError | Error | null>(null);
+  const [signingId, setSigningId] = useState<string | null>(null);
+
+  /** Assina o diário. A resposta traz o registro já com a conferência. */
+  async function handleSign(logId: string) {
+    setSigningId(logId);
+    setError(null);
+    try {
+      const assinado = await signDailyLog(logId);
+      setLogs((prev) => prev.map((l) => (l.id === assinado.id ? assinado : l)));
+    } catch (err) {
+      setError(err as ApiError);
+    } finally {
+      setSigningId(null);
+    }
+  }
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const loadLogs = useCallback(async () => {
@@ -148,9 +164,29 @@ export default function DailyLogPage() {
                     <Users className="w-3.5 h-3.5 text-slate-500" />
                     {log.manpower_own} próprios · {log.manpower_subcontracted} terceirizados
                   </span>
-                  <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                    {log.status}
-                  </span>
+                  {log.signature_valid === false ? (
+                    <span
+                      title="O conteúdo foi alterado depois da assinatura."
+                      className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-rose-500/10 text-rose-400 border border-rose-500/30"
+                    >
+                      Assinatura inválida
+                    </span>
+                  ) : log.status === "assinado" ? (
+                    <span
+                      title={`Assinado por ${log.signed_by_name ?? "—"}`}
+                      className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
+                    >
+                      Assinado · {log.signed_by_name}
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => handleSign(log.id)}
+                      disabled={signingId === log.id}
+                      className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 disabled:opacity-50"
+                    >
+                      {signingId === log.id ? "Assinando..." : "Rascunho · assinar"}
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -224,7 +260,8 @@ function NewLogModal({
       manpower_subcontracted: Number(manpowerSub) || 0,
       activities_done: activities,
       occurrences: occurrences || undefined,
-      status: "assinado",
+      // `status` não é enviado: o diário nasce como rascunho e a assinatura é
+      // ato próprio, em POST /daily-logs/{id}/sign (§8.12).
     };
 
     setIsSaving(true);
