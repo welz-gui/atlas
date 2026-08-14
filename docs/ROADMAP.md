@@ -4,14 +4,15 @@ Documento vivo. Consolida o **roadmap estratégico** do plano (§9 e §10 de
 [`PLANO_DE_IMPLEMENTACAO_v2.md`](PLANO_DE_IMPLEMENTACAO_v2.md)) com o **estado
 real do código** e o **caminho de execução** de cada estágio.
 
-- Última atualização: **2026-08-07**
-- Base avaliada: `master` em `3c6cd60`, espelhada em
+- Última atualização: **2026-08-14**
+- Base avaliada: `master` em `c20b2b8`, espelhada em
   [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
-  estágios foi levantado em `7dc50d2`; o que mudou desde então foi o lote de
-  PRs automáticos, que acrescentou cobertura de teste sem mexer em produto.
-- Suíte: **262 casos, todos passando** (eram 199 em `7dc50d2`). Reproduz em
+  estágios foi levantado em `7dc50d2` e continua valendo, com uma exceção
+  registrada abaixo: o **Estágio 6 deixou de ser "nada construído"**.
+- Suíte: **292 casos, todos passando** (eram 199 em `7dc50d2`). Reproduz em
   ~90 s: `backend/.venv/Scripts/python -m pytest tests/ -q`, e roda a cada push
-  e a cada PR desde o **D0** (`.github/workflows/ci.yml`).
+  e a cada PR desde o **D0** (`.github/workflows/ci.yml`), junto com migrations
+  em Postgres, ciclo de restauração de backup e build do frontend.
 - Documentos irmãos: [`REVISAO_ADERENCIA_PLANO_v2.md`](REVISAO_ADERENCIA_PLANO_v2.md)
   (diagnóstico do embrião e backlog das Fases A–C)
 
@@ -214,16 +215,25 @@ delas falhar, pare e conserte antes de continuar a construir.
 
 | Worktree | Branch | PR | Situação |
 |---|---|---|---|
-| `worktrees/estagio-0` | `feat/estagio-0-concierge` | [#22](https://github.com/welz-gui/atlas/pull/22) | 🟨 Em análise. Scripts de apoio ao Estágio 0; o seed deixou de publicar regra — ver o registro no Estágio 0. |
-| `worktrees/roadmap-correcoes` | `docs/roadmap-correcoes` | [#16](https://github.com/welz-gui/atlas/pull/16) | 🟨 Em análise. É a frente que trouxe esta seção. |
+| `worktrees/roadmap` | `docs/roadmap-estado-atual` | — | 🟨 A frente que trouxe esta atualização. |
 
 Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
+
+> **Duas vezes neste projeto uma frente de trabalho apareceu não commitada no
+> working tree do `master`** — o coletor regulatório em 12/08 e a hierarquia de
+> jurisdição em 13/08. Nas duas, o `master` local ficou impedido de avançar até
+> alguém mover o trabalho para uma worktree, e nas duas o trabalho existia
+> apenas em disco, sem backup que o cobrisse.
+>
+> Não é repreensão a ninguém: é a razão de a primeira linha da tabela de
+> sincronia ser "nenhum commit nasce em `master`". O custo aparece depois, e
+> recai sobre quem for atualizar o repositório.
 
 ---
 
 ## Estado atual em uma página
 
-**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 262 testes):
+**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 292 testes):
 
 ```
 app/
@@ -259,8 +269,31 @@ app/
 | 3 — Custos e campo nativo | ⬜ Nada | Portão 2 |
 | 4 — Copiloto de IA | 🟨 ~30% construído | Portão 3 |
 | 5 — BIM | ⬜ Nada | Portão 4 → 5 |
-| 6 — Expansão regulatória | ⬜ Nada | Portão 5 → 6 |
+| 6 — Expansão regulatória | 🟨 **Coletor construído**, fora de ordem | Portão 5 → 6 — atravessado, ver abaixo |
 | 7 — Preditiva | ⬜ Nada | Portão 6 → 7 — **não existe no plano**, ver adiante |
+
+> ### O Estágio 6 foi construído antes do portão
+>
+> Entre 12 e 14 de agosto de 2026, quatro entregas de Estágio 6 entraram em
+> `master`: o coletor de normas (#40), a conformidade com `robots.txt` (#41), a
+> correção da allowlist (#42) e a hierarquia de jurisdição com escopo nacional
+> (#43). São **quatro portões à frente** do estágio corrente.
+>
+> Fica registrado sem julgamento e sem apagar: o código é bom, respeita os
+> invariantes — o coletor não publica nada, e toda norma nova entra como
+> `descoberto` —, e a hierarquia de jurisdição resolve um problema real, o de
+> normas nacionais copiadas município a município. Mas o §15.15 do plano
+> condiciona desenvolvimento ao Portão 0, e este documento lista *"não pular o
+> Estágio 0 de novo"* como último item do que não fazer.
+>
+> **O que isso custa, concretamente:** o coletor descobre normas que ninguém
+> conferiu, e conferir é justamente o que está parado. Um catálogo maior com a
+> mesma taxa de validação (zero) não aproxima o Portão 0 → 1 — aumenta a fila
+> do D3.
+>
+> A decisão de seguir assim é legítima e é de quem toca o produto. O papel
+> deste parágrafo é impedir que, daqui a seis meses, a pergunta "como fomos
+> parar no Estágio 6 sem passar pelo 0" precise de arqueologia.
 
 > **Os portões do plano param em 5 → 6.** O §10 define seis portões (0→1 a
 > 5→6) e nada além. Os Estágios 6 e 7 não têm critério de saída escrito. Este
@@ -984,7 +1017,8 @@ processamento por modelo.
 
 # Estágio 6 — Expansão regulatória
 
-> **Situação: nada construído. É o que transforma o produto em plataforma.**
+> **Situação: coletor construído; monitor e rede de validadores, não.**
+> Construído fora de ordem — ver a nota no mapa dos estágios.
 
 ### Objetivo
 
@@ -993,16 +1027,37 @@ acessibilidade aprofundada, PPCI e novas tipologias.
 
 ### Já existe
 
-O **catálogo** (§7.2) e o **validador técnico** (§7.5) — construídos na Fase B —
-e o **extrator** parcial (§7.8 Nível 2), da Fase C. Faltam os dois extremos do
-subsistema: o coletor e o monitor.
+O **catálogo** (§7.2) e o **validador técnico** (§7.5), da Fase B, e o
+**extrator** parcial (§7.8 Nível 2), da Fase C. Em agosto de 2026 entrou também
+o **coletor**:
+
+| O que entrou | Onde |
+|---|---|
+| Descoberta em índices oficiais, com allowlist por fonte | `regulatory/discovery.py` |
+| Conformidade com `robots.txt` e intervalo entre buscas | `regulatory/robots.py` |
+| Hierarquia territorial `BR` → `BR-UF` → `BR-UF-IBGE` | `regulatory/jurisdiction.py` |
+| Catálogo nacional, com a acessibilidade fora de Lajeado | `regulatory/data/br_nacional.yaml` |
+| Trabalho em fila e disparo pela tela `/catalog` | `JobType.DESCOBERTA_REGULATORIA` |
+
+Três propriedades que a revisão desses PRs deixou travadas em teste, e que
+qualquer evolução do coletor precisa preservar:
+
+- **o coletor não publica nada.** Norma descoberta entra como `descoberto` e
+  continua dependendo de conferência humana (I8);
+- **`robots.txt` só é `robots.txt` se vier como `text/plain`.** O portal de
+  Lajeado devolve 200 com HTML nesse caminho, e um parser ingênuo liberaria
+  tudo por acidente;
+- **allowlist se justifica por evidência, não por convenção.** Em Lajeado o
+  host sem `www` tem certificado autoassinado e ficou de fora; no
+  `leismunicipais.com.br` é a versão sem `www` que os índices usam. O
+  procedimento para um município novo está em [`OPERACAO.md`](OPERACAO.md).
 
 ### Falta
 
 | Componente (§7.2) | Recorte |
 |---|---|
-| **Coletor regulatório** | Localizar fontes oficiais: prefeitura, Câmara, portal de legislação, diário oficial, geosserviços, Bombeiros |
-| **Monitor regulatório** | Detectar novas leis, alterações, revogações, links quebrados |
+| **Coletor — o que falta dele** | Feito para prefeitura e portal de legislação em Lajeado. Faltam Câmara, diário oficial, geosserviços e Bombeiros, e o segundo município |
+| **Monitor regulatório** | Detectar novas leis, alterações, revogações, links quebrados. `RegulatorySource` com `last_hash` ainda não existe |
 | **PPCI** | Corpo de Bombeiros — norma estadual, lógica distinta do plano diretor |
 | **Acessibilidade aprofundada** | NBR 9050 além da verificação documental atual |
 | **Rede de validadores (§7.9)** | Revisão dupla, remuneração por regra, biblioteca certificada |
@@ -1229,7 +1284,7 @@ antes do que trava a liberação externa. Cada item é uma worktree e um PR.
 | # | Item | Esforço | Por quê antes de tudo |
 |---|---|---|---|
 | ~~**D0**~~ | ~~**CI**: rodar a suíte a cada push e PR, com serviço Postgres~~ | ✅ | Feito em `.github/workflows/ci.yml`. Três jobs: suíte de backend, migrations construídas e revertidas em Postgres, build do frontend. D1 já tem onde rodar os testes de RLS |
-| **D3** | **Conferir e publicar o catálogo de Lajeado** | G | É o que libera laudo e portal, e é insumo do Estágio 0, não consequência dele. Operação, não código — precisa de quem confere a lei (ver Estágio 0) |
+| **D3** | **Conferir e publicar o catálogo de Lajeado** | G | Segue **aberto como trabalho**, embora a issue tenha sido fechada como *not planned* em 2026-08-14. É o que libera laudo e portal, e é insumo do Estágio 0, não consequência dele. Precisa de quem confere a lei |
 | ~~**D5**~~ | ~~**Instrumentar métricas §11** em endpoint próprio~~ | ✅ | Feito em `GET /api/v1/metrics`, com `services/metrics.py` e a seção `gate_0_to_1`. Custo sai em **tokens**, não em dinheiro: converter exigiria tabela de preços que não existe |
 | ~~**D9**~~ | ~~**Backup com restauração testada**, gestão de segredos e destino de deploy~~ | ✅ | Feito em `ops/`, `backend/Dockerfile`, `docker-compose.prod.yml` e [`OPERACAO.md`](OPERACAO.md). O ciclo de restauração roda na CI a cada push. **Escolher o provedor segue pendente** — é decisão de negócio |
 
@@ -1256,6 +1311,22 @@ Estágios 2 e 3 e dependem de portão.
 D-B pode seguir em paralelo ao Estágio 0, mas **nenhum acesso externo é
 concedido antes de D1 e D2 estarem em `master`.**
 
+### Onde a Fase D parou
+
+Três dos quatro itens do bloco D-A estão feitos — **D0**, **D5** e **D9** —,
+mais o **D7** do bloco de higiene. O que falta do D-A é o **D3**, que nunca foi
+de engenharia.
+
+As duas issues que restavam, [#30](https://github.com/welz-gui/atlas/issues/30)
+(D3) e [#33](https://github.com/welz-gui/atlas/issues/33) (LGPD), foram
+**fechadas como *not planned*** em 2026-08-14, a pedido do mantenedor. Fechar
+não as resolveu, e as issues registram isso: as sete regras seguem em
+`em_validacao`, nenhum `source.article` foi conferido, e as três janelas de
+retenção seguem em zero — que significa guardar indefinidamente.
+
+O trabalho continua listado aqui porque o roadmap descreve o que falta ao
+produto, e não o que está aberto no rastreador.
+
 ---
 
 # Dívidas técnicas conhecidas
@@ -1263,22 +1334,21 @@ concedido antes de D1 e D2 estarem em `master`.**
 | Dívida | Impacto | Onde |
 |---|---|---|
 | **Sem teste de frontend** | Nenhum. Um PR que troque `request()` por `fetch` cru compila e passa em tudo — a CI só verifica o build | `frontend/` |
-| **Sem backup nem restauração testada** | Perda do corpus do Estágio 0 seria irreversível | — |
-| **Segredos em `.env` de arquivo** | Sem cofre, sem rotação | `backend/.env` |
-| **Sem destino de deploy** | Só `docker-compose` local | `docker-compose.yml` |
+| Sem cofre de segredos | Variáveis de ambiente já bastam e o `repr` não vaza; falta rotação automática e auditoria de acesso | acompanha a escolha do provedor |
 | **Sem observabilidade** | Falha em produção chega por relato de cliente | — |
+| **Sem provedor de hospedagem** | A imagem e a composição existem; o ambiente, não | `docker-compose.prod.yml` |
+| **Catálogo maior, validação parada** | O coletor aumenta a fila do D3 sem que ninguém a consuma | `regulatory/discovery.py` |
 | RLS inativa | Isolamento depende só do filtro de aplicação | `alembic/.../d259cb880f7b` |
 | Sem MFA, sem refresh token | Sessão de 7 dias, fator único | `core/security.py` |
 | Sem OCR | PDF digitalizado não é extraível | `services/pdf_parser.py` |
 | Sem IFC/DXF/BIM | §3.6 parcial | — |
-| Coletor e monitor ausentes | Catálogo alimentado à mão | §7.2 |
+| Monitor regulatório ausente | O coletor descobre; nada detecta alteração ou revogação depois | §7.2 |
 | RAG lexical | Degrada com catálogo grande | `ai/retrieval.py` |
 | Fila offline sem mídia | Fotos não sincronizam | `lib/offline.ts` |
 | S3 e clamd sem teste de integração | Contrato testado, integração não | `tests/test_storage.py` |
 | `EAPItem` sem predecessoras | EAP incompleta para §8.8 | `models/domain.py` |
 | Diário "assinado" sem assinatura | Estado afirma o que não houve, por `default` | `models/domain.py:958` e `daily-log/page.tsx:228` |
 | Sem TanStack Query/Table, sem shadcn/ui | Divergência do §6.1 | `frontend/` |
-| **Worktree `estagio-0` com commit não publicado** | `a3955a0` publica regra com citação legal não conferida e grava evento de validação afirmando conferência | `worktrees/estagio-0` |
 
 ---
 
@@ -1294,7 +1364,11 @@ Registrado porque cada item já foi tentação em algum momento:
 4. **Não trocar por pgvector** sem medir falha da busca lexical.
 5. **Não deixar a IA publicar nada**, em nenhuma circunstância, por nenhum
    parâmetro de configuração (I8).
-6. **Não pular o Estágio 0 de novo.**
+6. **Não pular o Estágio 0 de novo.** — *quebrado em 2026-08-12/14.* Quatro
+   entregas de Estágio 6 entraram em `master` (#40 a #43) enquanto o Estágio 0
+   seguia sem começar. Fica como está, e com a data: uma regra que se apaga
+   quando é contrariada não é regra, é ornamento. O custo concreto está na nota
+   do mapa dos estágios — catálogo maior, mesma taxa de validação.
 7. **Não preencher `source.article` sem ter aberto o texto legal publicado**, e
    isso vale igualmente para YAML, script de seed, migration ou fixture de
    teste. Já aconteceu duas vezes: o protótipo trazia duas citações
