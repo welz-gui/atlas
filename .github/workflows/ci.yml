@@ -210,24 +210,11 @@ jobs:
     # Job separado de propósito: o clamd carrega assinaturas na partida e leva
     # minutos: prendê-lo à suíte principal tornaria lenta a resposta que mais
     # se espera.
+    # O MinIO sobe por `docker run` num passo, e não como serviço, porque
+    # exige `command` (`server /data`) — e serviços do Actions não permitem
+    # sobrescrevê-lo. A primeira tentativa usou uma imagem de terceiro que já
+    # trazia o comando embutido, e ela deixou de ser publicada.
     services:
-      minio:
-        # `bitnami/minio` sobe o servidor sem precisar de `command`, que os
-        # serviços do Actions não permitem sobrescrever, e cria o bucket pela
-        # variável abaixo.
-        image: bitnami/minio:latest
-        env:
-          MINIO_ROOT_USER: atlas_minio
-          MINIO_ROOT_PASSWORD: atlas_minio_secret
-          MINIO_DEFAULT_BUCKETS: atlas-integracao
-        ports:
-          - 9000:9000
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 20
-
       clamav:
         image: clamav/clamav:latest
         ports:
@@ -260,6 +247,24 @@ jobs:
 
       - name: Instalar dependências
         run: pip install -r requirements.txt
+
+      - name: Subir o MinIO e criar o bucket
+        shell: bash
+        run: |
+          docker run -d --name minio             -p 9000:9000             -e MINIO_ROOT_USER=atlas_minio             -e MINIO_ROOT_PASSWORD=atlas_minio_secret             minio/minio:latest server /data
+
+          # Espera o servidor responder antes de seguir. Sem isto, o primeiro
+          # teste falharia por conexão recusada e pareceria defeito do código.
+          for tentativa in $(seq 1 30); do
+            if curl -sf http://localhost:9000/minio/health/live; then
+              echo "MinIO no ar após ${tentativa} tentativa(s)."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::MinIO não respondeu."
+          docker logs minio
+          exit 1
 
       - name: Exercitar S3 e clamd
         shell: bash
