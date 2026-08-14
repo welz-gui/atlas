@@ -80,5 +80,22 @@ PERMISSIONS: Dict[str, Set[str]] = {
 }
 
 
+#: Permissões que exigem segundo fator ativo (§8.1, §12 — D2).
+#:
+#: A exigência recai sobre a **ação**, não sobre o login. Bloquear a entrada de
+#: quem ainda não cadastrou o MFA trancaria para fora todo `owner` e
+#: `validator` existente no instante do deploy; exigir na ação deixa a pessoa
+#: entrar, cadastrar e seguir.
+#:
+#: São as duas do §8.1: publicar regra e gerir a organização. `inspector` fica
+#: de fora de propósito — telefone de canteiro com MFA é atrito que empurra
+#: para senha compartilhada, que é pior que a ausência do fator.
+MFA_REQUIRED_PERMISSIONS = {"org:manage", "catalog:validate"}
+
+
+def permission_requires_mfa(permission: str) -> bool:
+    return permission in MFA_REQUIRED_PERMISSIONS
+
+
 def role_has_permission(role: str, permission: str) -> bool:
     return role in PERMISSIONS.get(permission, set())

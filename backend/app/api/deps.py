@@ -14,7 +14,11 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Query, Session
 
 from app.core.database import get_db
-from app.core.security import decode_access_token, role_has_permission
+from app.core.security import (
+    decode_access_token,
+    permission_requires_mfa,
+    role_has_permission,
+)
 from app.core.tenant import set_current_organization
 from app.models.domain import Project, User
 
@@ -73,6 +77,18 @@ def require_permission(permission: str):
                 detail=(
                     f"O papel '{user.role}' não tem permissão para '{permission}'."
                 ),
+            )
+        # O segundo fator é exigido na **ação**, não na entrada (§8.1, D2).
+        # Quem publica regra ou gere a organização precisa dele; quem apenas
+        # opera obra, não. Ver `MFA_REQUIRED_PERMISSIONS`.
+        if permission_requires_mfa(permission) and not user.mfa_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    f"'{permission}' exige segundo fator. "
+                    "Cadastre-o em POST /auth/mfa/enroll."
+                ),
+                headers={"X-Atlas-MFA-Required": "true"},
             )
         return user
 

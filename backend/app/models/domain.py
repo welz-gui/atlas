@@ -200,12 +200,51 @@ class User(Base):
 
     #: Hash argon2id. A senha em claro nunca é persistida nem registrada em log.
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # -- Segundo fator (§8.1, §12 — D2) ------------------------------------
+    #: Segredo TOTP **cifrado** (`core/mfa.py`). Em claro, qualquer cópia do
+    #: banco geraria códigos válidos para sempre.
+    mfa_secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    #: Quando o cadastro foi confirmado por um código válido. Segredo gerado e
+    #: não confirmado não vale como segundo fator — o usuário pode ter perdido
+    #: o QR Code no meio do caminho.
+    mfa_activated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     organization: Mapped["Organization"] = relationship(back_populates="users")
+    recovery_codes: Mapped[List["MFARecoveryCode"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
+    @property
+    def mfa_active(self) -> bool:
+        return self.mfa_secret is not None and self.mfa_activated_at is not None
+
+
+class MFARecoveryCode(Base):
+    """Código de recuperação de uso único (§12 — D2).
+
+    Hasheado como senha, porque substitui o segundo fator e portanto vale
+    tanto quanto ele. `used_at` preenchido é consumo: a linha permanece, para
+    que o uso fique no histórico em vez de sumir com a exclusão.
+    """
+
+    __tablename__ = "mfa_recovery_codes"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    code_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    user: Mapped["User"] = relationship(back_populates="recovery_codes")
 
 
 # =============================================================================
