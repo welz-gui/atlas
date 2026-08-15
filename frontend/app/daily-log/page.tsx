@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useState } from "react";
 import {
   AlertTriangle,
   Calendar,
@@ -19,6 +20,7 @@ import {
   fetchProjectDailyLogs,
   signDailyLog,
 } from "@/lib/api";
+import { queryKeys } from "@/lib/queryClient";
 import { projectShortLabel, useProjects } from "@/lib/useProjects";
 import { enqueue } from "@/lib/offline";
 import { EmptyState, ErrorBanner, LoadingState } from "@/components/StateViews";
@@ -41,46 +43,51 @@ export default function DailyLogPage() {
     reload: reloadProjects,
   } = useProjects();
 
-  const [logs, setLogs] = useState<DailyLogItem[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<ApiError | Error | null>(null);
-  const [signingId, setSigningId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [signError, setSignError] = useState<ApiError | Error | null>(null);
+
+  // `enabled` evita a chamada enquanto nenhum empreendimento está escolhido —
+  // o equivalente ao `if (!selectedProjectId) return` do useEffect anterior,
+  // sem o estado manual que vinha junto.
+  const logsQuery = useQuery({
+    queryKey: queryKeys.projectDailyLogs(selectedProjectId),
+    queryFn: () => fetchProjectDailyLogs(selectedProjectId),
+    enabled: Boolean(selectedProjectId),
+  });
+
+  const logs = logsQuery.data ?? [];
+  const isLoading = Boolean(selectedProjectId) && logsQuery.isPending;
+  const error = signError ?? (logsQuery.error as ApiError | Error | null) ?? null;
+
+  const loadLogs = useCallback(
+    () =>
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.projectDailyLogs(selectedProjectId),
+      }),
+    [queryClient, selectedProjectId]
+  );
+
+  const signMutation = useMutation({
+    mutationFn: signDailyLog,
+    onSuccess: (assinado) => {
+      // Substitui no cache em vez de refazer a consulta: a resposta já traz o
+      // registro com a conferência da assinatura.
+      queryClient.setQueryData<DailyLogItem[]>(
+        queryKeys.projectDailyLogs(selectedProjectId),
+        (atual) => (atual ?? []).map((l) => (l.id === assinado.id ? assinado : l))
+      );
+    },
+  });
 
   /** Assina o diário. A resposta traz o registro já com a conferência. */
-  async function handleSign(logId: string) {
-    setSigningId(logId);
-    setError(null);
-    try {
-      const assinado = await signDailyLog(logId);
-      setLogs((prev) => prev.map((l) => (l.id === assinado.id ? assinado : l)));
-    } catch (err) {
-      setError(err as ApiError);
-    } finally {
-      setSigningId(null);
-    }
+  function handleSign(logId: string) {
+    setSignError(null);
+    signMutation.mutate(logId, {
+      onError: (err) => setSignError(err as ApiError),
+    });
   }
-  const [isModalOpen, setIsModalOpen] = useState(false);
-
-  const loadLogs = useCallback(async () => {
-    if (!selectedProjectId) {
-      setLogs([]);
-      return;
-    }
-    setIsLoading(true);
-    setError(null);
-    try {
-      setLogs(await fetchProjectDailyLogs(selectedProjectId));
-    } catch (err) {
-      setLogs([]);
-      setError(err instanceof Error ? err : new Error(String(err)));
-    } finally {
-      setIsLoading(false);
-    }
-  }, [selectedProjectId]);
-
-  useEffect(() => {
-    loadLogs();
-  }, [loadLogs]);
+  const signingId = signMutation.isPending ? signMutation.variables : null;
 
   return (
     <div className="space-y-8">
@@ -216,7 +223,12 @@ export default function DailyLogPage() {
           projectName={selectedProject?.name}
           onClose={() => setIsModalOpen(false)}
           onCreated={(log) => {
-            setLogs((prev) => [log, ...prev]);
+            // Insere no cache em vez de recarregar: o diário recém-criado já
+            // veio completo na resposta.
+            queryClient.setQueryData<DailyLogItem[]>(
+              queryKeys.projectDailyLogs(selectedProjectId),
+              (atual) => [log, ...(atual ?? [])]
+            );
             setIsModalOpen(false);
           }}
           onQueued={() => setIsModalOpen(false)}

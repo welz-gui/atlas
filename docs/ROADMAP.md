@@ -1302,7 +1302,7 @@ antes do que trava a liberação externa. Cada item é uma worktree e um PR.
 |---|---|---|---|
 | ~~**D6**~~ | ~~**Teste de integração real** de storage S3 e clamd~~ | ✅ | Job `integracao` na CI, com MinIO e ClamAV. Os testes **pulam** sem serviço, e um passo falha se pularem |
 | ~~**D7**~~ | ~~**Retenção de `ai_interactions`** e `job_records`~~ | ✅ | Feito com a LGPD, em `POST /privacy/purge-*`. Expurga o conteúdo, preserva a proveniência |
-| **D8** | **Adotar TanStack Query** no frontend | M | §6.1; antes de as telas de obra multiplicarem estado manual |
+| ~~**D8**~~ | ~~**Adotar TanStack Query** no frontend~~ | ✅ | Provedor montado, `useProjects` migrado por dentro (nove páginas, zero alteradas) e `/daily-log` como exemplar. As sete páginas restantes seguem no padrão antigo — ver a nota adiante |
 
 **Não entra na Fase D:** fotos, inspeções, quantitativos, orçamento. São
 Estágios 2 e 3 e dependem de portão.
@@ -1329,6 +1329,35 @@ produto, e não o que está aberto no rastreador.
 
 ---
 
+## Busca de dados no frontend (§6.1)
+
+O TanStack Query entrou no **D8**, e o que importa não é a biblioteca — é a
+regra que a acompanha:
+
+> **Nenhuma consulta define `initialData` ou `placeholderData` com estrutura
+> vazia.** Seria a mesma mentira que a Fase A removeu: a tela diria "nenhum
+> empreendimento" enquanto o backend está fora do ar. É o **I13** dentro da
+> camada de cache, e há teste para cada decisão em `lib/queryClient.test.ts`.
+
+O que já está migrado:
+
+| | |
+|---|---|
+| `lib/queryClient.ts` | política de repetição, revalidação e as chaves |
+| `lib/useProjects` | consumido por **nove páginas, nenhuma alterada** — a forma de retorno foi preservada de propósito |
+| `/daily-log` | exemplar de página completa: consulta, mutação e escrita no cache |
+
+**As outras sete páginas seguem com `useState` + `useEffect`.** A migração de
+cada uma é mecânica, e o exemplar mostra o formato — mas não há teste de
+componente que cubra a troca, então cada uma deve ir junto da próxima mudança
+que a toque, não em lote.
+
+Ao escrever tela nova: chave em `queryKeys`, `useQuery` para leitura,
+`useMutation` para escrita, e **erro exposto**, nunca substituído por lista
+vazia.
+
+---
+
 # Dívidas técnicas conhecidas
 
 | Dívida | Impacto | Onde |
@@ -1348,7 +1377,8 @@ produto, e não o que está aberto no rastreador.
 | RAG lexical | Degrada com catálogo grande | `ai/retrieval.py` |
 | Fila offline sem mídia | Fotos não sincronizam | `lib/offline.ts` |
 | `EAPItem` sem predecessoras | EAP incompleta para §8.8 | `models/domain.py` |
-| Sem TanStack Query/Table, sem shadcn/ui | Divergência do §6.1 | `frontend/` |
+| Sete páginas ainda com estado manual | O padrão existe e está documentado; a migração de cada uma é mecânica e sem teste que a cubra | `frontend/app/` |
+| Sem TanStack Table, sem shadcn/ui | Divergência do §6.1 | `frontend/` |
 
 ---
 
