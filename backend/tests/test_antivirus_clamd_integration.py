@@ -89,10 +89,21 @@ def test_arquivo_grande_atravessa_o_instream(scanner, tmp_path):
     assert resultado.status == ScanStatus.LIMPO
 
 
-def test_eicar_no_meio_de_um_arquivo_maior_e_encontrado(scanner, tmp_path):
-    """Quem esconde carga não a põe no primeiro byte."""
-    conteudo = b"%PDF-1.4 " + b"z" * 100_000 + EICAR + b"y" * 100_000
-    resultado = scanner.scan_file(_arquivo(tmp_path, "escondido.pdf", conteudo))
+def test_eicar_com_espaco_ao_fim_ainda_e_reconhecido(scanner, tmp_path):
+    """O padrão EICAR admite espaços em branco ao fim, e só isso.
+
+    A primeira versão deste teste embutia o EICAR no meio de um arquivo maior e
+    esperava detecção. O clamd devolveu `limpo`, e estava certo: por definição
+    do padrão, o arquivo de teste precisa ser a cadeia exata, opcionalmente
+    seguida de espaço em branco. Antivírus não o detectam embutido de
+    propósito, para que o arquivo de teste não vire falso positivo dentro de
+    conteúdo legítimo.
+
+    O teste ficou para registrar isso — o engano era meu sobre o padrão, não
+    defeito do scanner.
+    """
+    conteudo = EICAR + b"  " + bytes([10])
+    resultado = scanner.scan_file(_arquivo(tmp_path, "com-espaco.txt", conteudo))
 
     assert resultado.status == ScanStatus.INFECTADO
 

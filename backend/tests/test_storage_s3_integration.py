@@ -64,24 +64,24 @@ def _gravar(storage, key: str, conteudo: bytes) -> int:
 
 
 def test_o_que_foi_gravado_e_o_que_se_le(storage):
-    key = build_key("org-1", "proj-1", "memorial.pdf")
+    key = build_key(".pdf")
     conteudo = b"%PDF-1.4 conteudo de integracao"
 
     tamanho = _gravar(storage, key, conteudo)
     assert tamanho == len(conteudo)
 
-    lido = b"".join(storage.reader(key))
-    assert lido == conteudo
+    assert storage.read(key) == conteudo
 
 
 def test_conteudo_grande_atravessa_em_blocos(storage):
     """Um memorial real não cabe num pedaço só."""
-    key = build_key("org-1", "proj-1", "grande.pdf")
+    key = build_key(".pdf")
     conteudo = b"x" * (5 * 1024 * 1024 + 17)
 
     _gravar(storage, key, conteudo)
 
-    lido = b"".join(storage.reader(key))
+    # `stream` é o caminho que o download usa, em blocos.
+    lido = b"".join(storage.stream(key))
     assert len(lido) == len(conteudo)
     assert lido == conteudo
 
@@ -89,7 +89,7 @@ def test_conteudo_grande_atravessa_em_blocos(storage):
 def test_hash_confere_com_o_conteudo_gravado(storage):
     import hashlib
 
-    key = build_key("org-1", "proj-1", "com-hash.pdf")
+    key = build_key(".pdf")
     conteudo = b"conteudo para conferir o hash"
 
     writer = storage.writer(key)
@@ -105,24 +105,23 @@ def test_hash_confere_com_o_conteudo_gravado(storage):
 def test_chave_inexistente_vira_ObjectNotFound(storage):
     """Não pode vazar `ClientError` do boto3 para o chamador."""
     with pytest.raises(ObjectNotFound):
-        list(storage.reader("nao/existe.pdf"))
+        storage.read("nao-existe.pdf")
 
 
 def test_apagar_o_que_nao_existe_nao_explode(storage):
     """Expurgo de arquivo já ausente é caso normal, não erro (§6.6)."""
-    assert storage.delete("nao/existe.pdf") is False
+    assert storage.delete("nao-existe.pdf") is False
 
 
 # --- Expurgo -----------------------------------------------------------------
 
 
 def test_apagar_remove_do_servidor(storage):
-    key = build_key("org-1", "proj-1", "para-expurgar.pdf")
+    key = build_key(".pdf")
     _gravar(storage, key, b"conteudo efemero")
 
     assert storage.delete(key) is True
-    with pytest.raises(ObjectNotFound):
-        list(storage.reader(key))
+    assert storage.exists(key) is False
 
 
 # --- Escrita interrompida ----------------------------------------------------
@@ -130,7 +129,7 @@ def test_apagar_remove_do_servidor(storage):
 
 def test_gravacao_interrompida_nao_publica_objeto(storage):
     """A falha no meio não pode deixar meio arquivo legível no bucket."""
-    key = build_key("org-1", "proj-1", "interrompido.pdf")
+    key = build_key(".pdf")
 
     with pytest.raises(RuntimeError):
         writer = storage.writer(key)
@@ -138,5 +137,4 @@ def test_gravacao_interrompida_nao_publica_objeto(storage):
             writer.write(b"primeiro pedaco")
             raise RuntimeError("falha no meio do upload")
 
-    with pytest.raises(ObjectNotFound):
-        list(storage.reader(key))
+    assert storage.exists(key) is False
