@@ -4,15 +4,21 @@ Documento vivo. Consolida o **roadmap estratégico** do plano (§9 e §10 de
 [`PLANO_DE_IMPLEMENTACAO_v2.md`](PLANO_DE_IMPLEMENTACAO_v2.md)) com o **estado
 real do código** e o **caminho de execução** de cada estágio.
 
-- Última atualização: **2026-08-14**
-- Base avaliada: `master` em `c20b2b8`, espelhada em
+- Última atualização: **2026-08-15**
+- Base avaliada: `master` em `79c1e75`, espelhada em
   [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
   estágios foi levantado em `7dc50d2` e continua valendo, com uma exceção
   registrada abaixo: o **Estágio 6 deixou de ser "nada construído"**.
-- Suíte: **328 casos, todos passando** (mais 6 de RLS, que só rodam na CI contra Postgres) (eram 199 em `7dc50d2`). Reproduz em
-  ~90 s: `backend/.venv/Scripts/python -m pytest tests/ -q`, e roda a cada push
-  e a cada PR desde o **D0** (`.github/workflows/ci.yml`), junto com migrations
-  em Postgres, ciclo de restauração de backup e build do frontend.
+- **A Fase D está encerrada, exceto pelo D3** — que nunca foi de engenharia.
+  Ver o registro adiante.
+- Suíte: **328 casos de backend** (eram 199 em `7dc50d2`) e **15 de frontend**.
+  Mais 13 de integração e 6 de RLS, que só rodam na CI porque exigem Postgres,
+  MinIO e clamd. Reproduz em ~90 s:
+  `backend/.venv/Scripts/python -m pytest tests/ -q`.
+- **Cinco portões** rodam a cada push e a cada PR
+  (`.github/workflows/ci.yml`): suíte de backend, migrations construídas e
+  revertidas em Postgres, ciclo de backup e restauração, integração com S3 e
+  clamd, e testes e build do frontend.
 - Documentos irmãos: [`REVISAO_ADERENCIA_PLANO_v2.md`](REVISAO_ADERENCIA_PLANO_v2.md)
   (diagnóstico do embrião e backlog das Fases A–C)
 
@@ -233,7 +239,7 @@ Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
 ## Estado atual em uma página
 
-**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 328 testes):
+**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 328 testes; RLS ativa, MFA por TOTP):
 
 ```
 app/
@@ -255,16 +261,18 @@ app/
 `protocol_processes`, `protocol_requirements`, `protocol_events`,
 `ai_interactions`, `job_records`, `eap_items`, `task_items`, `daily_logs`.
 
-**Frontend** (Next.js 14 App Router + TypeScript + Tailwind): `/login`, `/`,
-`/projects`, `/approvals`, `/catalog`, `/protocol`, `/documents`, `/plan`,
-`/daily-log`, `/ai`, `/portal`. PWA com service worker e fila offline.
+**Frontend** (Next.js 14 App Router + TypeScript + Tailwind + TanStack Query):
+`/login`, `/`, `/projects`, `/approvals`, `/catalog`, `/protocol`,
+`/documents`, `/plan`, `/daily-log`, `/ai`, `/portal`. PWA com service worker e
+fila offline. Quinze testes, todos sobre o cliente HTTP e a camada de consulta —
+componentes e telas seguem sem cobertura.
 
 **Mapa dos estágios:**
 
 | Estágio | Situação | Bloqueado por |
 |---|---|---|
 | 0 — Concierge | ⬜ Não iniciado | — |
-| 1 — Copiloto de Aprovação | 🟨 Código completo, não liberável | Catálogo não conferido; RLS inativa |
+| 1 — Copiloto de Aprovação | 🟨 Código completo, não liberável | **Só o catálogo não conferido** — a RLS foi ativada no D1 |
 | 2 — Núcleo operacional | 🟨 ~60% construído | Uso em obra real; fotos e inspeções |
 | 3 — Custos e campo nativo | ⬜ Nada | Portão 2 |
 | 4 — Copiloto de IA | 🟨 ~30% construído | Portão 3 |
@@ -1269,12 +1277,42 @@ cliente. Suíte: 110 → 199.
 | Citação legal | — | IA devolve `rule_key`, nunca artigo | Não bastava instruir o modelo a não inventar; era preciso que não houvesse por onde |
 | Offline | "funções essenciais de campo" (§3.7) | Lista explícita do que **recusa** offline | Veredicto sobre catálogo desatualizado é pior que ausência de veredicto |
 
+### Fase D — Liberação do Estágio 1 ✅ (2026-08-15), **exceto o D3**
+
+CI com cinco portões, RLS ativada de fato, segundo fator por TOTP, assinatura
+de diário com hash, métricas do §11 em endpoint, backup com restauração
+exercitada a cada push, retenção de conteúdo de IA e de trabalhos, integração
+real com S3 e clamd, e TanStack Query no frontend. Suíte: 199 → 328, mais 15 de
+frontend.
+
+**Falta o D3, e ele nunca foi de engenharia.** Nove itens eram código e estão
+fechados; o décimo é alguém abrir a legislação publicada de Lajeado.
+
+**Seis coisas que só apareceram porque foram exercitadas de verdade** — todas
+teriam passado despercebidas em revisão de código:
+
+| O que se descobriu | Como |
+|---|---|
+| A política de RLS **nunca defendeu nada** | Superusuário ignora RLS mesmo com `FORCE`, e era assim que tudo conectava |
+| `repr(settings)` **vazava a chave de assinatura** | Qualquer traceback com as configurações a mandaria para o log |
+| Modelos e migrations **divergiram** | `alembic check`, ao montar o portão do D0 |
+| O autogenerate propunha **apagar as tabelas do PostGIS** | Só apareceu contra Postgres real |
+| `build_key` e `read` não eram o que supus | Só apareceu contra MinIO real |
+| O EICAR **não é detectado embutido**, por definição do padrão | Só apareceu contra clamd real |
+
+O padrão vale como método: **nenhuma dessas seis** teria sido encontrada por
+leitura. Cada portão novo pagou-se na primeira execução.
+
 ---
 
-# Fase D — Liberação do Estágio 1 (proposta)
+# Fase D — Liberação do Estágio 1 (encerrada, exceto o D3)
 
 Recorte para rodar **em paralelo ao Estágio 0**, sem construir feature nova.
-Tudo aqui é dívida que impede liberar o que já existe.
+Tudo aqui era dívida que impedia liberar o que já existe.
+
+> **Nove dos dez itens estão fechados.** O que sobra é o **D3**, e a tabela
+> abaixo fica como está — riscada onde foi feito — para que a razão de cada
+> item continue legível para quem chegar depois.
 
 A ordem abaixo **não é por esforço, é por bloqueio**: o que trava o Estágio 0 vem
 antes do que trava a liberação externa. Cada item é uma worktree e um PR.
@@ -1313,9 +1351,14 @@ concedido antes de D1 e D2 estarem em `master`.**
 
 ### Onde a Fase D parou
 
-Três dos quatro itens do bloco D-A estão feitos — **D0**, **D5** e **D9** —,
-mais o **D7** do bloco de higiene. O que falta do D-A é o **D3**, que nunca foi
-de engenharia.
+**Nove dos dez itens estão fechados.** O que sobra é o **D3** — conferir o
+catálogo de Lajeado —, e ele nunca foi de engenharia.
+
+| Bloco | Situação |
+|---|---|
+| D-A (bloqueia o Estágio 0) | D0, D5 e D9 feitos; **D3 aberto** |
+| D-B (bloqueia liberação externa) | D1, D2 e D4 feitos |
+| D-C (higiene) | D6, D7 e D8 feitos |
 
 As duas issues que restavam, [#30](https://github.com/welz-gui/atlas/issues/30)
 (D3) e [#33](https://github.com/welz-gui/atlas/issues/33) (LGPD), foram
@@ -1326,6 +1369,19 @@ retenção seguem em zero — que significa guardar indefinidamente.
 
 O trabalho continua listado aqui porque o roadmap descreve o que falta ao
 produto, e não o que está aberto no rastreador.
+
+### O que a Fase D não mudou
+
+Vale escrever, porque a quantidade de trabalho fechado pode sugerir avanço que
+não houve: **o Portão 0 → 1 não se moveu.** Ele pede projetos pagos, recall
+medido contra exigência real e ≥ 15 regras publicadas. O contador está em zero
+nos três, e continuará até alguém conferir a lei.
+
+O que a Fase D fez foi outra coisa, e também vale: tirou do caminho todas as
+razões técnicas para não liberar. Antes dela, um cliente externo esbarraria em
+RLS inerte, ausência de segundo fator, backup não testado e diário que afirmava
+assinatura inexistente. Nenhuma dessas objeções existe mais — resta a que
+sempre foi a única que importava.
 
 ---
 
