@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import AppShell from "@/components/AppShell";
 import { AuthProvider } from "@/lib/auth";
+import { QueryProvider } from "./providers";
 
 export const metadata: Metadata = {
   title: "Atlas — Plataforma de Empreendimentos",
@@ -34,9 +35,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="pt-BR">
       <body className="min-h-screen bg-[#090d16] text-slate-100 flex antialiased">
-        <AuthProvider>
-          <AppShell>{children}</AppShell>
-        </AuthProvider>
+        <QueryProvider>
+          <AuthProvider>
+            <AppShell>{children}</AppShell>
+          </AuthProvider>
+        </QueryProvider>
       </body>
     </html>
   );
