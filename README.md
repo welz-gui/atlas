@@ -4,11 +4,16 @@ Plataforma para aprovação, planejamento, execução e gestão de empreendiment
 A porta de entrada é o **Copiloto de Aprovação**: pré-análise urbanística
 determinística, com trilha de auditoria.
 
-> **Estágio atual: Fases A, B e C concluídas.**
-> O catálogo regulatório ainda **não foi conferido** contra o texto legal
-> publicado por nenhum município. Enquanto uma regra não for validada por um
-> responsável identificado, os laudos que a aplicam saem marcados como uso
-> interno. Ver [Limites conhecidos](#limites-conhecidos).
+> **Estágio atual: Fases A a D concluídas — exceto a conferência do catálogo.**
+>
+> O catálogo regulatório **não foi conferido** contra o texto legal publicado
+> por nenhum município. Enquanto uma regra não for validada por um responsável
+> identificado, os laudos que a aplicam saem marcados como uso interno e o
+> portal do cliente omite o resumo de conformidade.
+>
+> Isso **não é defeito**: é o sistema recusando-se a entregar número não
+> verificado (§7.5). Mas é a única coisa entre o Atlas e o primeiro cliente —
+> ver [Limites conhecidos](#limites-conhecidos).
 
 ---
 
@@ -33,6 +38,9 @@ Estes não são aspirações — são invariantes cobertos por teste:
 | Isolamento entre organizações | Recurso de outro tenant responde 404, nunca 403 |
 | Falha de rede não vira dado | O cliente HTTP lança erro; a interface o exibe |
 | Registro offline não é registro salvo | Item na fila aparece como *pendente*, com a hora em que foi escrito |
+| Diário assinado diz **sobre qual conteúdo** | Assinatura grava hash; alteração posterior devolve `signature_valid: false` |
+| Ausência de assinatura não é adulteração | Diário não assinado devolve `null`, nunca `false` |
+| Quem publica regra tem segundo fator | `catalog:validate` e `org:manage` exigem MFA ativo |
 
 ---
 
@@ -91,8 +99,17 @@ cidades devem ser adicionadas ao registro de fontes oficiais.
 ### Testes
 
 ```bash
-cd backend && python -m pytest tests/ -q
+cd backend && python -m pytest tests/ -q     # 328 casos
+cd frontend && npm test                       # 15 casos
 ```
+
+Dezenove casos **pulam** localmente: os de RLS exigem Postgres, e os de
+integração exigem MinIO e clamd. Eles rodam na CI, e um passo do workflow
+**falha se pularem** — senão a verificação deixaria de existir em silêncio.
+
+A CI tem cinco portões, todos a cada push e a cada PR: suíte de backend,
+migrations construídas e revertidas em Postgres, ciclo de backup e restauração,
+integração com S3 e clamd, e testes e build do frontend.
 
 ---
 
@@ -108,6 +125,12 @@ cd backend && python -m pytest tests/ -q
 
 A matriz vive em `backend/app/core/security.py`. O frontend espelha uma cópia
 apenas para esconder botões — quem decide é sempre o servidor.
+
+**`catalog:validate` e `org:manage` exigem segundo fator ativo.** Quem tem esses
+papéis entra e lê normalmente, mas só publica regra ou gere a organização depois
+de cadastrar o MFA em `POST /auth/mfa/enroll`. `engineer` e `inspector` ficam de
+fora de propósito: telefone de canteiro com MFA é atrito que empurra para senha
+compartilhada.
 
 ---
 
@@ -206,6 +229,14 @@ A criação de diário e tarefa é idempotente por `client_token`, com escopo de
 organização: reenviar depois de uma resposta perdida devolve o registro
 original em vez de criar um segundo.
 
+**O diário nasce `rascunho`.** Assinar é ato próprio
+(`POST /daily-logs/{id}/sign`) e grava quem, quando e o **hash do conteúdo** —
+sem ele, "assinado" não distinguiria o texto que a pessoa leu do texto alterado
+depois. A conferência é recalculada na leitura e devolve três estados: íntegra,
+alterada, ou **não assinada**. Até a Fase D o campo nascia como `"assinado"` por
+padrão, inclusive nos registros vindos da fila offline — quando ninguém estava
+diante de tela alguma.
+
 ---
 
 ## API
@@ -235,6 +266,13 @@ restritos à organização do usuário.
 | `POST` | `/api/v1/ai/rule-drafts` | Rascunhos de regra por IA (validator) |
 | `GET` | `/api/v1/ai/interactions` | Proveniência das chamadas ao modelo |
 | `GET` | `/api/v1/portal/projects` | Visão de acompanhamento do cliente (§8.22) |
+| `POST` | `/api/v1/daily-logs/{id}/sign` | Assina o diário: quem, quando e hash do conteúdo |
+| `GET` | `/api/v1/metrics` | Métricas do §11 e o veredicto do Portão 0 → 1 |
+| `POST` | `/api/v1/auth/mfa/enroll` | Inicia o cadastro do segundo fator |
+| `POST` | `/api/v1/auth/mfa/activate` | Confirma e entrega os códigos de recuperação |
+| `POST` | `/api/v1/projects/{id}/anonymize` | Elimina dado pessoal preservando a trilha |
+| `POST` | `/api/v1/privacy/purge-ai-interactions` | Retenção de conteúdo de IA |
+| `POST` | `/api/v1/catalog/jobs/discovery` | Descobre normas em fontes oficiais (§7.2) |
 
 Documentação interativa em `/docs`.
 
@@ -248,15 +286,29 @@ Documentação interativa em `/docs`.
 - Isolamento por organização em toda consulta de negócio
   (`backend/app/api/deps.py`). Nos workers, que rodam sem `get_current_user`,
   o filtro é refeito à mão em cada executor.
-- **RLS no Postgres** como segunda linha de defesa. A migration de RLS cria as
-  políticas; para terem efeito é preciso conectar com um usuário sem
-  `BYPASSRLS` e definir, por transação:
+- **RLS no Postgres**, ativa, como segunda linha de defesa. A organização
+  corrente é publicada por transação (`core/tenant.py` e o listener de
+  `core/database.py`), e sem ela a política **nega tudo** — falhar fechado é
+  deliberado. Um `query()` sem filtro de aplicação não vira vazamento, e há
+  teste contra Postgres real provando isso.
 
-  ```sql
-  SET LOCAL atlas.organization_id = '<uuid da organização>';
-  ```
+  > ⚠️ **A conexão da aplicação não pode ser superusuária.** O Postgres ignora
+  > a política para superusuário e para papel com `BYPASSRLS`, **mesmo com
+  > `FORCE ROW LEVEL SECURITY`** — foi por isso que a política existiu por meses
+  > sem defender nada. Ver a separação de papéis em
+  > [`docs/OPERACAO.md`](docs/OPERACAO.md).
 
-  Sem isso a política nega tudo — falhar fechado é deliberado.
+  `users` fica **fora** da política de propósito: login procura por e-mail, e é
+  dali que a organização vem; o cadastro verifica e-mail duplicado em qualquer
+  organização. As duas consultas precedem o tenant por natureza.
+- **Segundo fator por TOTP** para quem publica regra ou gere a organização. A
+  exigência recai sobre a **ação** (`catalog:validate`, `org:manage`), não sobre
+  o login — exigir na entrada trancaria para fora quem ainda não cadastrou. O
+  segredo é cifrado em repouso, e os códigos de recuperação são hasheados como
+  senha e valem uma vez.
+- **Segredos não vazam em log**: `repr(settings)` redige `SECRET_KEY` e
+  `DATABASE_URL`. O padrão do Pydantic imprimiria os dois, e bastaria um
+  traceback contendo as configurações.
 - Upload grava sob chave opaca, com allowlist de extensão e limite de tamanho.
   Com `ANTIVIRUS_BACKEND=clamav` e `ANTIVIRUS_REQUIRED=true`, o que não pôde
   ser varrido é recusado.
@@ -268,20 +320,30 @@ Documentação interativa em `/docs`.
 Estado real do sistema, para que ninguém descubra isso tarde demais:
 
 - **O catálogo não foi validado.** Nenhum parâmetro foi conferido contra a
-  legislação de Lajeado. Laudos com regras pendentes saem marcados como uso
-  interno, e o portal do cliente não exibe o resumo de conformidade.
-- **RLS não está ativa por padrão** — falta o `SET LOCAL` por transação
-  descrito acima. Hoje o isolamento depende do filtro de aplicação.
-- **Sem MFA** e sem refresh token; a sessão expira em 7 dias.
+  legislação de Lajeado. As sete regras seguem em `em_validacao`, sem artigo e
+  sem validador. Laudos que as aplicam saem marcados como uso interno, o portal
+  do cliente não exibe o resumo de conformidade, e `GET /api/v1/metrics`
+  responde `null` no portão. **É a única pendência que não é técnica, e é a que
+  bloqueia tudo.**
+- **Nenhum ambiente escolhido.** A imagem de produção e a composição existem
+  (`docker-compose.prod.yml`), mas o Atlas nunca rodou fora da máquina de quem
+  desenvolve.
+- **LGPD sem decisão formal.** O inventário e as ferramentas existem — expurgo
+  de conteúdo e anonimização preservando a trilha —, mas papel, base legal,
+  prazos de retenção e política seguem indefinidos. As três janelas de retenção
+  estão em zero, que significa guardar indefinidamente. Ver
+  [`docs/LGPD.md`](docs/LGPD.md).
+- **Sem refresh token**; a sessão expira em 7 dias.
 - **Sem OCR.** PDF digitalizado (imagem) não é extraível e retorna aviso.
 - **Sem IFC, DXF ou BIM.**
-- **Sem coletor nem monitor regulatório** (§7.2) — o catálogo é alimentado à
-  mão ou por rascunho de IA sobre texto colado.
+- **Sem monitor regulatório** (§7.2) — o coletor descobre normas, mas nada
+  detecta alteração ou revogação depois.
 - **RAG lexical, não vetorial.** Suficiente para catálogo municipal; trocar por
   pgvector não muda a interface `retrieve()`.
 - **A fila offline não sincroniza fotos** — apenas diário e tarefas.
-- **Antivírus e S3 não foram exercitados contra serviço real** nesta base;
-  há teste de contrato, não de integração.
+- **Testes de frontend cobrem o cliente HTTP e a camada de consulta**, não
+  componentes nem telas. Sete páginas ainda usam `useState` + `useEffect` em vez
+  do TanStack Query.
 
 O caminho para resolver cada um está em
 [`docs/ROADMAP.md`](docs/ROADMAP.md).
@@ -316,3 +378,7 @@ barra um PR na análise — está em
 | [`docs/OPERACAO.md`](docs/OPERACAO.md) | Backup, restauração, segredos e deploy |
 | [`docs/PLANO_DE_IMPLEMENTACAO_v2.md`](docs/PLANO_DE_IMPLEMENTACAO_v2.md) | O plano original, na íntegra |
 | [`docs/REVISAO_ADERENCIA_PLANO_v2.md`](docs/REVISAO_ADERENCIA_PLANO_v2.md) | Diagnóstico do embrião e o backlog das Fases A, B e C |
+
+O registro da **Fase D** — o que entregou, e as seis coisas que só apareceram
+porque foram exercitadas contra serviço real — está em
+[`docs/ROADMAP.md`](docs/ROADMAP.md), na seção *Fases de execução*.
