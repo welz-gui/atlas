@@ -4,8 +4,8 @@ Documento vivo. Consolida o **roadmap estratégico** do plano (§9 e §10 de
 [`PLANO_DE_IMPLEMENTACAO_v2.md`](PLANO_DE_IMPLEMENTACAO_v2.md)) com o **estado
 real do código** e o **caminho de execução** de cada estágio.
 
-- Última atualização: **2026-08-15**
-- Base avaliada: `master` em `79c1e75`, espelhada em
+- Última atualização: **2026-08-17**
+- Base avaliada: `master` em `8676206`, espelhada em
   [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
   estágios foi levantado em `7dc50d2` e continua valendo, com uma exceção
   registrada abaixo: o **Estágio 6 deixou de ser "nada construído"**.
@@ -239,7 +239,8 @@ Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
 ## Estado atual em uma página
 
-**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 353 testes; RLS ativa, MFA por TOTP):
+**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 353 testes; RLS ativa, MFA
+por TOTP, log em JSON com correlação e sondas de vida e prontidão):
 
 ```
 app/
@@ -1303,6 +1304,34 @@ teriam passado despercebidas em revisão de código:
 O padrão vale como método: **nenhuma dessas seis** teria sido encontrada por
 leitura. Cada portão novo pagou-se na primeira execução.
 
+### Depois da Fase D — o eixo transversal (2026-08-17)
+
+Trabalho que **não pertence a fase nenhuma**: vem da tabela de *Operação e
+infraestrutura*, cujos itens o roadmap não conseguia alocar em estágio porque
+não são feature.
+
+**Observabilidade** (§12) — log em JSON com correlação por requisição, e duas
+sondas: vida, que não toca em dependência, e prontidão, que verifica banco,
+storage, fila e antivírus e devolve 503 quando alguma essencial falha. Suíte:
+328 → 353.
+
+E o **sétimo achado** da mesma família dos seis acima:
+
+> **`/health` afirmava saúde sem apurar nada.** Devolvia `{"status":
+> "healthy"}` estático — a API se declarava saudável com o banco fora do ar, e
+> um orquestrador que confiasse nela manteria em rotação um processo incapaz de
+> atender. Havia um teste, vindo do lote automático, **travando aquele corpo** e
+> portanto protegendo a afirmação.
+
+É o mesmo defeito do diário que nascia `"assinado"` e do catálogo com artigo não
+conferido: **afirmação sobre estado que ninguém apurou.** O projeto já o
+encontrou em três camadas diferentes, o que sugere procurá-lo de propósito em
+vez de esperar tropeçar: onde o sistema declara algo sem ter verificado?
+
+**Fora do eixo, e ainda pendentes:** escolher o provedor e o cofre de segredos
+com rotação. Os dois dependem de decisão e de conta, não de código — e, como o
+D3, não é engenharia que os trava.
+
 ---
 
 # Fase D — Liberação do Estágio 1 (encerrada, exceto o D3)
@@ -1376,6 +1405,9 @@ Vale escrever, porque a quantidade de trabalho fechado pode sugerir avanço que
 não houve: **o Portão 0 → 1 não se moveu.** Ele pede projetos pagos, recall
 medido contra exigência real e ≥ 15 regras publicadas. O contador está em zero
 nos três, e continuará até alguém conferir a lei.
+
+O trabalho de observabilidade, feito depois dela, também não moveu o portão —
+e nem se propunha a isso.
 
 O que a Fase D fez foi outra coisa, e também vale: tirou do caminho todas as
 razões técnicas para não liberar. Antes dela, um cliente externo esbarraria em
