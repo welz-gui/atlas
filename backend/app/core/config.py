@@ -88,6 +88,11 @@ class Settings(BaseSettings):
     # URL pública usada nos QR Codes de verificação de documento (§8.3)
     PUBLIC_BASE_URL: str = "http://localhost:3000"
 
+    # Observabilidade (§12)
+    # O log sai em JSON, uma linha por evento, com o identificador da
+    # requisição. Ver `core/logging.py`.
+    LOG_LEVEL: str = "INFO"
+
     # Segurança
     # Sem SECRET_KEY no ambiente, gera-se uma chave efêmera por processo em vez
     # de carregar um valor previsível versionado no repositório.
