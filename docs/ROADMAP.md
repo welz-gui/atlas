@@ -11,7 +11,7 @@ real do código** e o **caminho de execução** de cada estágio.
   registrada abaixo: o **Estágio 6 deixou de ser "nada construído"**.
 - **A Fase D está encerrada, exceto pelo D3** — que nunca foi de engenharia.
   Ver o registro adiante.
-- Suíte: **328 casos de backend** (eram 199 em `7dc50d2`) e **15 de frontend**.
+- Suíte: **353 casos de backend** (eram 199 em `7dc50d2`) e **15 de frontend**.
   Mais 13 de integração e 6 de RLS, que só rodam na CI porque exigem Postgres,
   MinIO e clamd. Reproduz em ~90 s:
   `backend/.venv/Scripts/python -m pytest tests/ -q`.
@@ -239,7 +239,7 @@ Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
 ## Estado atual em uma página
 
-**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 328 testes; RLS ativa, MFA por TOTP):
+**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 353 testes; RLS ativa, MFA por TOTP):
 
 ```
 app/
@@ -1238,7 +1238,7 @@ deixam de ser adiáveis.
 | Segregação | Feita em aplicação; falta RLS | D1 |
 | Limites por plano | Inexistente | Estágio 2, quando houver mais de um cliente ativo |
 | Deploy e ambientes | 🟨 Imagem e composição de produção prontas, com `migrate` e `worker` separados. Falta **escolher o provedor** | Estágio 0, se o analista não trabalhar na máquina do desenvolvedor |
-| **Observabilidade** | ⬜ Inexistente | Estágio 1 liberado — sem isso, falha em produção é relato de cliente |
+| Observabilidade | 🟨 Log em JSON com correlação, e sondas de vida e prontidão. Faltam métricas, rastreamento e alerta | Acompanham a escolha do provedor |
 | **Custo de infraestrutura** | ⬜ Não medido | Portão 3 → 4 pede "custo operacional controlado" |
 
 Nada disso é feature, e é justamente por isso que some do roadmap. Os três em
@@ -1420,7 +1420,7 @@ vazia.
 |---|---|---|
 | Teste de frontend só no cliente HTTP | `lib/api.test.ts` trava o I13 e roda na CI; componentes e telas seguem sem cobertura | `frontend/` |
 | Sem cofre de segredos | Variáveis de ambiente já bastam e o `repr` não vaza; falta rotação automática e auditoria de acesso | acompanha a escolha do provedor |
-| **Sem observabilidade** | Falha em produção chega por relato de cliente | — |
+| Sem métricas, rastreamento nem alerta | O log estruturado existe e alimenta os três; falta para onde mandá-los | acompanha a escolha do provedor |
 | **Sem provedor de hospedagem** | A imagem e a composição existem; o ambiente, não | `docker-compose.prod.yml` |
 | **Catálogo maior, validação parada** | O coletor aumenta a fila do D3 sem que ninguém a consuma | `regulatory/discovery.py` |
 | RLS não cobre `users` | Listagem de usuários tem só o filtro de aplicação; as tabelas com trabalho de cliente estão cobertas | `alembic/.../a4d7e91c5b20` |

@@ -1,8 +1,17 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+import logging
+import time
+import uuid
+
 from app.core.config import settings
+from app.core.logging import configure_logging, reset_request_id, set_request_id
+from app.core.tenant import current_organization_id
 from app.core.tenant import reset_current_organization, set_current_organization
+
+configure_logging(settings.LOG_LEVEL)
+logger = logging.getLogger("atlas.api")
 from app.api.v1.router import api_router
 
 # O esquema é criado por migrations versionadas (alembic upgrade head),
@@ -35,6 +44,61 @@ app.add_middleware(
         "X-Atlas-Antivirus-Status",
     ],
 )
+
+@app.middleware("http")
+async def observability(request, call_next):
+    """Correlaciona e registra cada requisição (§12 — observabilidade).
+
+    O identificador vem do cliente quando ele manda `X-Request-Id` — assim uma
+    chamada que atravessa serviços mantém o mesmo fio — e é gerado aqui quando
+    não vem. Volta sempre no cabeçalho, para que o relato de quem viu o erro
+    carregue a chave que acha a linha do servidor.
+
+    O que se registra é a **forma** da requisição, nunca o conteúdo: método,
+    rota, situação, duração e organização. Corpo e query string ficam de fora
+    porque carregam dado pessoal (`docs/LGPD.md`).
+    """
+    request_id = request.headers.get("X-Request-Id") or uuid.uuid4().hex
+    token = set_request_id(request_id)
+    inicio = time.perf_counter()
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        # Exceção não tratada precisa deixar rastro antes de virar 500 genérico.
+        logger.exception(
+            "Requisição falhou",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "duration_ms": round((time.perf_counter() - inicio) * 1000, 1),
+                "organization_id": current_organization_id(),
+            },
+        )
+        reset_request_id(token)
+        raise
+
+    duracao = round((time.perf_counter() - inicio) * 1000, 1)
+    response.headers["X-Request-Id"] = request_id
+
+    # 5xx é problema nosso; 4xx é do pedido. O nível reflete isso, para que
+    # alerta futuro possa filtrar por severidade sem ler mensagem.
+    nivel = logging.ERROR if response.status_code >= 500 else logging.INFO
+    logger.log(
+        nivel,
+        "Requisição atendida",
+        extra={
+            "method": request.method,
+            "path": request.url.path,
+            "status": response.status_code,
+            "duration_ms": duracao,
+            "organization_id": current_organization_id(),
+        },
+    )
+
+    reset_request_id(token)
+    return response
+
 
 @app.middleware("http")
 async def tenant_scope(request, call_next):

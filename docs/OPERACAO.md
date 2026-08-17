@@ -254,6 +254,61 @@ O procedimento, para cada município novo:
 
 ---
 
+## Observabilidade
+
+### Sondas
+
+| Rota | Pergunta | Quem consulta |
+|---|---|---|
+| `GET /api/v1/health` | *o processo está vivo?* | orquestrador, para decidir reinício |
+| `GET /api/v1/health/ready` | *dá para atender?* | balanceador, para decidir rotação |
+
+A sonda de vida **não toca em dependência nenhuma**, de propósito: uma que
+consultasse o banco derrubaria a aplicação inteira quando o banco oscilasse.
+
+A de prontidão verifica banco, storage, fila e antivírus, e devolve **503** se
+alguma essencial estiver fora. **Componente que não pôde ser verificado responde
+`nao_verificado`, nunca `ok`** — antivírus desligado por configuração não é
+antivírus funcionando (I10).
+
+```bash
+curl -s localhost:8000/api/v1/health/ready | jq .status
+# "pronto" ou "indisponivel"
+```
+
+### Log
+
+Uma linha, um objeto JSON, em `stdout` — que é onde qualquer coletor de
+contêiner procura. Nível em `LOG_LEVEL` (padrão `INFO`).
+
+```json
+{"ts":"...","level":"info","logger":"atlas.api","request_id":"demo-123",
+ "message":"Requisição atendida","method":"GET","path":"/api/v1/health",
+ "status":200,"duration_ms":4.8,"organization_id":null}
+```
+
+**`X-Request-Id` volta em toda resposta.** Se o cliente mandar o cabeçalho, ele
+é preservado — uma chamada que atravessa serviços mantém o mesmo fio. Peça o
+identificador a quem relatar um erro: é a chave que acha a linha.
+
+### O que o log não carrega
+
+Nem segredo nem dado pessoal. Campos cujo nome contenha `password`, `senha`,
+`secret`, `token`, `authorization`, `mfa`, `recovery`, `prompt`, `cpf` ou
+`document` saem como `***`, inclusive aninhados — e **corpo de requisição e
+query string nunca são registrados**.
+
+Não é zelo: `docs/LGPD.md` registra que a pergunta feita ao assistente pode
+conter dado pessoal, e log é o lugar onde dado vaza sem ninguém notar.
+
+### O que ainda não existe
+
+Métricas em série temporal, rastreamento distribuído e alerta. Todos dependem
+do provedor escolhido — o log estruturado é o que alimenta os três quando
+houver um.
+
+---
+
 ## O que falta, e é decisão humana
 
 | Item | Bloqueado por |
