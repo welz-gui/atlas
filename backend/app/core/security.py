@@ -47,10 +47,22 @@ def create_access_token(
 
 
 def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
-    try:
-        return jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
-    except jwt.PyJWTError:
-        return None
+    """Aceita a chave atual e, durante a janela, a anterior (§12).
+
+    A assinatura de token novo usa **sempre** a chave atual; a anterior serve
+    só para não derrubar quem já estava autenticado no instante da rotação.
+
+    Quando `SECRET_KEY_PREVIOUS` for removida da configuração, os tokens
+    remanescentes deixam de valer — que é o fim pretendido da janela.
+    """
+    for chave in (settings.SECRET_KEY, settings.SECRET_KEY_PREVIOUS):
+        if not chave:
+            continue
+        try:
+            return jwt.decode(token, chave, algorithms=[ALGORITHM])
+        except jwt.PyJWTError:
+            continue
+    return None
 
 
 # --- Permissões --------------------------------------------------------------

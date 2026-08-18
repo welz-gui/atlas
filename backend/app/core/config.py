@@ -99,6 +99,20 @@ class Settings(BaseSettings):
     SECRET_KEY: str = ""
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 dias
 
+    #: Chave anterior, durante a janela de rotação. Enquanto estiver definida,
+    #: token assinado com ela continua válido e segredo de MFA cifrado com ela
+    #: continua abrindo — ver `core/security.py` e `core/mfa.py`.
+    #:
+    #: Sem isto, rotacionar `SECRET_KEY` derrubava toda sessão **e destruía
+    #: todos os segundos fatores**, obrigando cada pessoa a recadastrar o MFA.
+    #: A rotação era tecnicamente possível e praticamente proibitiva.
+    SECRET_KEY_PREVIOUS: str = ""
+
+    # De onde vêm os segredos (§12). `env` é o padrão; `file` lê de
+    # `SECRETS_DIR`, que é como todo cofre entrega segredo a um contêiner.
+    SECRETS_BACKEND: str = "env"  # env | file
+    SECRETS_DIR: str = "/run/secrets"
+
     model_config = SettingsConfigDict(
         case_sensitive=True,
         env_file=".env",
@@ -109,12 +123,42 @@ class Settings(BaseSettings):
     #: isto é configuração da classe, não campo de configuração.
     SECRET_FIELDS: ClassVar[tuple[str, ...]] = (
         "SECRET_KEY",
+        "SECRET_KEY_PREVIOUS",
         "DATABASE_URL",
         "S3_ACCESS_KEY",
         "S3_SECRET_KEY",
     )
 
+    #: Campos que o backend `file` sabe carregar. Não é toda a configuração —
+    #: só o que é segredo.
+    SECRET_SOURCES: ClassVar[tuple[str, ...]] = (
+        "SECRET_KEY",
+        "SECRET_KEY_PREVIOUS",
+        "ANTHROPIC_API_KEY",
+    )
+
+    def _load_from_backend(self) -> None:
+        """Preenche segredos ausentes a partir do backend configurado.
+
+        O ambiente tem precedência: um valor já definido não é sobrescrito pelo
+        arquivo. É o que permite apontar `SECRETS_BACKEND=file` e ainda assim
+        substituir um segredo pontualmente em depuração.
+        """
+        if self.SECRETS_BACKEND != "file":
+            return
+
+        from app.core.secrets import read_secret
+
+        for nome in self.SECRET_SOURCES:
+            if getattr(self, nome, ""):
+                continue
+            valor = read_secret(nome, self.SECRETS_BACKEND, self.SECRETS_DIR)
+            if valor:
+                object.__setattr__(self, nome, valor)
+
     def model_post_init(self, __context) -> None:
+        self._load_from_backend()
+
         if not self.SECRET_KEY:
             if self.ENVIRONMENT == "production":
                 raise RuntimeError(

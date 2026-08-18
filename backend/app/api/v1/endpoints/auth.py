@@ -198,6 +198,14 @@ def consume_second_factor(db: Session, user: User, code: str) -> bool:
     """
     secret = mfa.decrypt_secret(user.mfa_secret) if user.mfa_secret else None
     if secret and mfa.verify_code(secret, code):
+        # Migra o segredo para a chave atual quando ele ainda estava na
+        # anterior. É assim que a janela de rotação se fecha sozinha: cada
+        # pessoa que entra leva o próprio segredo adiante, e `SECRET_KEY_PREVIOUS`
+        # pode ser removida quando não restar quem dependa dela.
+        recifrado = mfa.rotate_secret(user.mfa_secret)
+        if recifrado and recifrado != user.mfa_secret:
+            user.mfa_secret = recifrado
+            db.commit()
         return True
 
     for recovery in user.recovery_codes:

@@ -29,7 +29,7 @@ import secrets
 from typing import List, Optional
 
 import pyotp
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 
 from app.core.config import settings
 from app.core.security import hash_password, verify_password
@@ -45,15 +45,38 @@ RECOVERY_CODE_COUNT = 10
 VALID_WINDOW = 1
 
 
-def _fernet() -> Fernet:
-    """Chave de cifragem derivada de `SECRET_KEY`.
-
-    Derivar em vez de exigir uma variável nova evita mais um segredo para
-    administrar — ao custo de amarrar os segredos de MFA à chave de assinatura,
-    que é o que o parágrafo sobre rotação no topo registra.
-    """
-    digest = hashlib.sha256(settings.SECRET_KEY.encode("utf-8")).digest()
+def _key_from(secret: str) -> Fernet:
+    digest = hashlib.sha256(secret.encode("utf-8")).digest()
     return Fernet(base64.urlsafe_b64encode(digest))
+
+
+def _fernet() -> MultiFernet:
+    """Cifragem derivada de `SECRET_KEY`, aceitando também a chave anterior.
+
+    `MultiFernet` cifra **sempre com a primeira** e decifra com qualquer uma.
+    É o que torna a rotação uma operação e não um evento destrutivo: enquanto
+    `SECRET_KEY_PREVIOUS` estiver definida, o segredo cifrado com a chave velha
+    continua abrindo, e cada uso o migra para a nova — ver `rotate_secret`.
+
+    Antes disto, rotacionar `SECRET_KEY` destruía todos os segundos fatores, e
+    a rotação era tecnicamente possível e praticamente proibitiva.
+    """
+    chaves = [_key_from(settings.SECRET_KEY)]
+    if settings.SECRET_KEY_PREVIOUS:
+        chaves.append(_key_from(settings.SECRET_KEY_PREVIOUS))
+    return MultiFernet(chaves)
+
+
+def rotate_secret(encrypted: str) -> Optional[str]:
+    """Recifra com a chave atual, se ainda estiver na anterior.
+
+    Devolve `None` quando o valor não abre com nenhuma das chaves — mesmo
+    contrato de `decrypt_secret`.
+    """
+    try:
+        return _fernet().rotate(encrypted.encode("ascii")).decode("ascii")
+    except (InvalidToken, ValueError):
+        return None
 
 
 def generate_secret() -> str:
