@@ -1234,7 +1234,7 @@ deixam de ser adiáveis.
 | Logs e auditoria | Parcial: proveniência sim, log operacional não | Estágio 1 liberado |
 | Retenção | ✅ Documentos, IA e trabalhos — todas desligadas por padrão, e o prazo é decisão pendente | — |
 | LGPD | 🟨 Inventário, retenção e anonimização feitos ([`LGPD.md`](LGPD.md)). Faltam papel, base legal, contrato e política | Estágio 0 |
-| Gestão de segredos | 🟨 Tudo por variável de ambiente, `repr` redigido, `.env` fora da imagem. Falta cofre com rotação | Acompanha a escolha do provedor |
+| Gestão de segredos | 🟨 `repr` redigido, `.env` fora da imagem, backend `file` compatível com cofre externo, e `SECRET_KEY` rotaciona sem derrubar sessão nem destruir MFA (`SECRET_KEY_PREVIOUS`). Falta o cofre em si | Acompanha a escolha do provedor |
 | Antivírus | Feito (`services/antivirus.py`) | — |
 | Segregação | Feita em aplicação; falta RLS | D1 |
 | Limites por plano | Inexistente | Estágio 2, quando houver mais de um cliente ativo |
@@ -1328,9 +1328,19 @@ conferido: **afirmação sobre estado que ninguém apurou.** O projeto já o
 encontrou em três camadas diferentes, o que sugere procurá-lo de propósito em
 vez de esperar tropeçar: onde o sistema declara algo sem ter verificado?
 
-**Fora do eixo, e ainda pendentes:** escolher o provedor e o cofre de segredos
-com rotação. Os dois dependem de decisão e de conta, não de código — e, como o
-D3, não é engenharia que os trava.
+**Cofre de segredos — a camada de rotação (§12)** — `SECRET_KEY` cifra o
+segredo de MFA além de assinar token, então rotacioná-la destruía todo segundo
+fator cadastrado; a rotação era tecnicamente possível e praticamente
+proibitiva. `SECRET_KEY_PREVIOUS` abre uma janela em que a chave velha
+continua assinando e decifrando, e cada login com MFA migra o próprio segredo
+para a chave atual sozinho — a janela fecha por uso, sem lote de migração.
+`SECRETS_BACKEND=file` lê segredo de `SECRETS_DIR/<nome>`, a convenção de
+arquivo montado de qualquer cofre externo, tornando a aplicação compatível com
+um sem escolher nenhum. Suíte: 353 → 367.
+
+**Fora do eixo, e ainda pendente:** escolher o provedor e o cofre externo em
+si. Depende de decisão e de conta, não de código — e, como o D3, não é
+engenharia que o trava.
 
 ---
 
@@ -1451,14 +1461,13 @@ vazia.
 | Dívida | Impacto | Onde |
 |---|---|---|
 | Teste de frontend só no cliente HTTP | `lib/api.test.ts` trava o I13 e roda na CI; componentes e telas seguem sem cobertura | `frontend/` |
-| Sem cofre de segredos | Variáveis de ambiente já bastam e o `repr` não vaza; falta rotação automática e auditoria de acesso | acompanha a escolha do provedor |
+| Sem cofre de segredos | `repr` não vaza, backend `file` já é compatível com um cofre externo e a rotação de `SECRET_KEY` não derruba MFA; falta o cofre em si, com rotação automática e auditoria de acesso | acompanha a escolha do provedor |
 | Sem métricas, rastreamento nem alerta | O log estruturado existe e alimenta os três; falta para onde mandá-los | acompanha a escolha do provedor |
 | **Sem provedor de hospedagem** | A imagem e a composição existem; o ambiente, não | `docker-compose.prod.yml` |
 | **Catálogo maior, validação parada** | O coletor aumenta a fila do D3 sem que ninguém a consuma | `regulatory/discovery.py` |
 | RLS não cobre `users` | Listagem de usuários tem só o filtro de aplicação; as tabelas com trabalho de cliente estão cobertas | `alembic/.../a4d7e91c5b20` |
 | **Conexão de produção pode ser superusuária** | Superusuário ignora RLS mesmo com `FORCE`. A política só defende se o app conectar com papel restrito | `OPERACAO.md` |
 | Sem refresh token | Sessão de 7 dias sem renovação | `core/security.py` |
-| Segredo de MFA amarrado à `SECRET_KEY` | Rotacionar a chave obriga recadastro do fator | `core/mfa.py` |
 | Sem OCR | PDF digitalizado não é extraível | `services/pdf_parser.py` |
 | Sem IFC/DXF/BIM | §3.6 parcial | — |
 | Monitor regulatório ausente | O coletor descobre; nada detecta alteração ou revogação depois | §7.2 |

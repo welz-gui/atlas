@@ -74,12 +74,12 @@ como backups deixam de funcionar é justamente ninguém lembrar de testá-los.
 
 ## Segredos
 
-**Nenhum segredo mora em arquivo no servidor.** Todos chegam por variável de
-ambiente, injetadas pela plataforma:
+Por padrão, todos chegam por variável de ambiente, injetadas pela plataforma:
 
 | Variável | Observação |
 |---|---|
 | `SECRET_KEY` | Sem ela, a aplicação **recusa subir** em produção |
+| `SECRET_KEY_PREVIOUS` | Só durante uma rotação — ver abaixo |
 | `DATABASE_URL` | Carrega usuário e senha do Postgres |
 | `S3_*` | Quando `STORAGE_BACKEND=s3` |
 | `ANTHROPIC_API_KEY` | Quando `AI_PROVIDER=anthropic` |
@@ -90,24 +90,62 @@ Gerar uma chave:
 python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
+### De onde vêm os segredos (`SECRETS_BACKEND`)
+
+`env` é o padrão. `SECRETS_BACKEND=file` lê de `SECRETS_DIR/<nome em
+minúsculas>` — por exemplo, `SECRETS_DIR/secret_key` — a convenção de arquivo
+montado que Docker Swarm, Kubernetes e todo cofre externo (Vault, AWS Secrets
+Manager, Doppler, Infisical) usam para entregar segredo a um contêiner sem que
+ele passe pela lista de processos. Variável de ambiente definida tem
+precedência: dá para apontar `file` e ainda assim substituir um segredo
+pontualmente em depuração, sem editar o arquivo montado.
+
+Isto **não é um cofre** — `core/secrets.py` só lê o arquivo que outro sistema
+colocou lá. Rotação automática, auditoria de acesso e a escolha de qual cofre
+usar continuam dependendo do provedor (ver adiante).
+
 ### Rotação
 
-Trocar `SECRET_KEY` **invalida todas as sessões e os segredos de MFA** — o
-segredo TOTP é cifrado com uma chave derivada dela (`core/mfa.py`), então quem
-tinha segundo fator precisa recadastrá-lo. Avise antes: uma pessoa sem o
-aplicativo reconfigurado e sem código de recuperação perde acesso às ações que
-exigem o fator.
+Antes, trocar `SECRET_KEY` invalidava todas as sessões **e destruía todos os
+segredos de MFA** — o TOTP é cifrado com uma chave derivada dela
+(`core/mfa.py`) — obrigando cada pessoa com segundo fator a recadastrá-lo. A
+rotação era tecnicamente possível e praticamente proibitiva, então na prática
+não acontecia.
 
-Trocar `SECRET_KEY` — os tokens são assinados com
-ela. Não é efeito colateral: é o comportamento desejado quando se rotaciona por
-suspeita de vazamento. Rotacione fora do horário de campo e avise quem estiver
-em obra, porque o app pedirá login de novo.
+Agora a rotação tem uma janela, aberta por `SECRET_KEY_PREVIOUS`:
+
+```
+1. SECRET_KEY_PREVIOUS = valor atual de SECRET_KEY
+2. SECRET_KEY          = a chave nova
+3. reiniciar a aplicação
+```
+
+Durante a janela:
+
+- **tokens continuam válidos** — `decode_access_token` aceita a chave atual e a
+  anterior (`core/security.py`). Sessão em curso não cai;
+- **segredo de MFA continua abrindo** — `MultiFernet` decifra com qualquer uma
+  das duas (`core/mfa.py`);
+- **cada login com MFA migra o segredo para a chave atual sozinho** — a
+  verificação bem-sucedida recifra e grava, então a janela se fecha por uso,
+  sem *job* de migração em lote (`consume_second_factor`, em
+  `api/v1/endpoints/auth.py`).
+
+Quando não houver mais sessão nem segredo dependendo da chave velha, **remova
+`SECRET_KEY_PREVIOUS`**. A partir daí, token ou segredo ainda cifrado com ela
+deixa de abrir — é o fim pretendido da janela, não uma falha.
+
+O que a rotação continua causando: quem não usa o app durante a janela
+inteira recadastra o MFA depois que `SECRET_KEY_PREVIOUS` sai. Avise antes de
+uma rotação planejada, e mantenha a janela aberta por tempo suficiente para o
+time em campo logar ao menos uma vez.
 
 ### O que o código garante
 
-- **`repr(settings)` e `str(settings)` redigem os segredos.** O padrão do
-  Pydantic imprimiria tudo, e bastaria um traceback contendo as configurações
-  para a chave ir ao log. Coberto por `tests/test_config_secrets.py`;
+- **`repr(settings)` e `str(settings)` redigem os segredos**, incluindo
+  `SECRET_KEY_PREVIOUS`. O padrão do Pydantic imprimiria tudo, e bastaria um
+  traceback contendo as configurações para a chave ir ao log. Coberto por
+  `tests/test_config_secrets.py`;
 - **`.dockerignore` mantém `.env` fora do contexto de build** — segredo não
   entra em camada de imagem;
 - **produção com SQLite recusa subir**, porque sem Postgres não há concorrência,
@@ -145,7 +183,9 @@ Os dois precisam vir `false`.
 
 ### O que ainda depende do provedor
 
-Cofre com rotação automática e auditoria de acesso ao segredo. A escolha
+O cofre em si — Vault, AWS Secrets Manager, Doppler ou Infisical —, com
+rotação automática e auditoria de acesso ao segredo. `SECRETS_BACKEND=file`
+deixa a aplicação compatível com qualquer um deles; a escolha de qual usar
 acompanha a escolha do host.
 
 ---
