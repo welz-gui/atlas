@@ -30,7 +30,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -232,6 +232,76 @@ def _unvalidated_warning(rules: Sequence[Rule]) -> Optional[str]:
     )
 
 
+def _format_retrieved_rules(
+    retrieved: Sequence[RetrievedRule],
+    municipality: str,
+    statuses: Dict[str, str],
+) -> Tuple[List[str], List[str], List[str]]:
+    lines: List[str] = [
+        f"O catálogo regulatório do Atlas para {municipality} registra os "
+        f"seguintes parâmetros relacionados à sua consulta:"
+    ]
+    citations: List[str] = []
+    actions: List[str] = []
+
+    for item in retrieved:
+        rule = item.rule
+        limite = (
+            rule.expected_label()
+            if rule.check
+            else "verificação documental (não derivável de parâmetros numéricos)"
+        )
+        pendente = "" if rule.is_publishable else " — regra ainda não validada tecnicamente"
+        linha = f"• {rule.title}: {limite}{pendente}."
+        if rule.rule_id in statuses:
+            linha += (
+                f" No empreendimento analisado, esta verificação está "
+                f"'{statuses[rule.rule_id]}'."
+            )
+        lines.append(linha)
+        citations.append(f"{rule.title} — {rule.source.citation()}")
+        if rule.check:
+            actions.append(
+                f"Conferir '{rule.check['field']}' no projeto contra o limite "
+                f"{rule.expected_label()} e anexar evidência: "
+                f"{', '.join(rule.evidence_required) or 'não especificada'}."
+            )
+        else:
+            actions.append(
+                f"Providenciar análise técnica de {rule.title.lower()} "
+                f"({', '.join(rule.evidence_required) or 'evidência não especificada'})."
+            )
+    return lines, citations, actions
+
+
+def _format_missing_rules(
+    query: str,
+    catalog: RegulatoryCatalog,
+    jurisdiction: str,
+    municipality: str,
+) -> Tuple[List[str], List[str], List[str]]:
+    disponiveis = catalog.for_jurisdiction(jurisdiction)
+    lines: List[str] = [
+        f"Não encontrei no catálogo de {municipality} nenhum parâmetro "
+        f"correspondente a '{query}'."
+    ]
+    if disponiveis:
+        lines.append(
+            "Parâmetros cadastrados para esta jurisdição: "
+            + "; ".join(rule.title for rule in disponiveis)
+            + "."
+        )
+    citations: List[str] = [
+        f"Catálogo regulatório de {municipality} "
+        f"(versão {catalog.version_for(jurisdiction)})"
+    ]
+    actions: List[str] = [
+        "Reformule a consulta usando um dos parâmetros cadastrados, ou solicite "
+        "o cadastro da norma faltante ao responsável pelo catálogo."
+    ]
+    return lines, citations, actions
+
+
 def deterministic_answer(
     query: str,
     retrieved: Sequence[RetrievedRule],
@@ -249,61 +319,14 @@ def deterministic_answer(
     cadastrado.
     """
     statuses = statuses or {}
-    lines: List[str] = []
-    citations: List[str] = []
-    actions: List[str] = []
 
     if retrieved:
-        lines.append(
-            f"O catálogo regulatório do Atlas para {municipality} registra os "
-            f"seguintes parâmetros relacionados à sua consulta:"
+        lines, citations, actions = _format_retrieved_rules(
+            retrieved, municipality, statuses
         )
-        for item in retrieved:
-            rule = item.rule
-            limite = (
-                rule.expected_label()
-                if rule.check
-                else "verificação documental (não derivável de parâmetros numéricos)"
-            )
-            pendente = "" if rule.is_publishable else " — regra ainda não validada tecnicamente"
-            linha = f"• {rule.title}: {limite}{pendente}."
-            if rule.rule_id in statuses:
-                linha += (
-                    f" No empreendimento analisado, esta verificação está "
-                    f"'{statuses[rule.rule_id]}'."
-                )
-            lines.append(linha)
-            citations.append(f"{rule.title} — {rule.source.citation()}")
-            if rule.check:
-                actions.append(
-                    f"Conferir '{rule.check['field']}' no projeto contra o limite "
-                    f"{rule.expected_label()} e anexar evidência: "
-                    f"{', '.join(rule.evidence_required) or 'não especificada'}."
-                )
-            else:
-                actions.append(
-                    f"Providenciar análise técnica de {rule.title.lower()} "
-                    f"({', '.join(rule.evidence_required) or 'evidência não especificada'})."
-                )
     else:
-        disponiveis = catalog.for_jurisdiction(jurisdiction)
-        lines.append(
-            f"Não encontrei no catálogo de {municipality} nenhum parâmetro "
-            f"correspondente a '{query}'."
-        )
-        if disponiveis:
-            lines.append(
-                "Parâmetros cadastrados para esta jurisdição: "
-                + "; ".join(rule.title for rule in disponiveis)
-                + "."
-            )
-        citations.append(
-            f"Catálogo regulatório de {municipality} "
-            f"(versão {catalog.version_for(jurisdiction)})"
-        )
-        actions.append(
-            "Reformule a consulta usando um dos parâmetros cadastrados, ou solicite "
-            "o cadastro da norma faltante ao responsável pelo catálogo."
+        lines, citations, actions = _format_missing_rules(
+            query, catalog, jurisdiction, municipality
         )
 
     # O aviso de regra não validada faz parte da resposta, não de um rodapé
