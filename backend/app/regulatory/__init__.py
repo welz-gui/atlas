@@ -9,7 +9,6 @@ from app.regulatory.catalog import (
     Rule,
     RuleState,
     Severity,
-    CheckOutcome,
     EXECUTABLE_STATES,
     PUBLISHABLE_STATES,
 )
@@ -19,7 +18,6 @@ __all__ = [
     "Rule",
     "RuleState",
     "Severity",
-    "CheckOutcome",
     "EXECUTABLE_STATES",
     "PUBLISHABLE_STATES",
 ]
