@@ -63,6 +63,26 @@ def catalog_rules(db_session, seeded_catalog):
 # Recuperação
 # =============================================================================
 
+@pytest.mark.parametrize("input_text, expected", [
+    ("Ação", "acao"),
+    ("Coração", "coracao"),
+    ("Árvore", "arvore"),
+    ("Pão", "pao"),
+    ("pé", "pe"),
+    ("café", "cafe"),
+    ("você", "voce"),
+    ("MÚSICA", "musica"),
+    ("não", "nao"),
+    ("açúcar", "acucar"),
+    ("", ""),
+    ("123", "123"),
+    ("AaBb", "aabb"),
+])
+def test_fold_remove_acentos_e_minusculas(input_text, expected):
+    from app.ai.retrieval import fold
+    assert fold(input_text) == expected
+
+
 def test_tokenizacao_ignora_acento_e_palavra_vazia():
     assert "permeabilidade" in tokenize("Qual a taxa de permeabilidade mínima?")
     assert "de" not in tokenize("taxa de ocupação")
