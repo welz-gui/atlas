@@ -45,8 +45,8 @@ def _check_database() -> Dict[str, Any]:
     try:
         session.execute(text("SELECT 1"))
         return {"status": "ok", "dialect": session.bind.dialect.name}
-    except Exception as exc:  # noqa: BLE001 — a falha é o resultado
-        return {"status": "falhou", "detail": f"{type(exc).__name__}: {exc}"}
+    except Exception:  # noqa: BLE001 — a falha é o resultado
+        return {"status": "falhou", "detail": "banco de dados indisponível"}
     finally:
         session.close()
 
@@ -56,8 +56,8 @@ def _check_storage() -> Dict[str, Any]:
         from app.services.storage import get_storage
 
         return {"status": "ok", "backend": get_storage().describe()}
-    except Exception as exc:  # noqa: BLE001
-        return {"status": "falhou", "detail": f"{type(exc).__name__}: {exc}"}
+    except Exception:  # noqa: BLE001
+        return {"status": "falhou", "detail": "armazenamento indisponível"}
 
 
 def _check_queue() -> Dict[str, Any]:
@@ -65,8 +65,8 @@ def _check_queue() -> Dict[str, Any]:
         from app.workers.queue import get_queue
 
         descricao = get_queue().describe()
-    except Exception as exc:  # noqa: BLE001
-        return {"status": "falhou", "detail": f"{type(exc).__name__}: {exc}"}
+    except Exception:  # noqa: BLE001
+        return {"status": "falhou", "detail": "fila indisponível"}
 
     if settings.QUEUE_BACKEND == "inline":
         # Não é falha: é modo declarado. Mas quem lê precisa saber que não há
@@ -85,8 +85,8 @@ def _check_antivirus() -> Dict[str, Any]:
         from app.services.antivirus import ClamAVScanner
 
         versao = ClamAVScanner()._version()
-    except Exception as exc:  # noqa: BLE001
-        return {"status": "falhou", "detail": f"{type(exc).__name__}: {exc}"}
+    except Exception:  # noqa: BLE001
+        return {"status": "falhou", "detail": "antivírus indisponível"}
 
     if not versao:
         # Daemon fora do ar. Com ANTIVIRUS_REQUIRED, todo upload será recusado

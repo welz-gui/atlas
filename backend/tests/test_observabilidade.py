@@ -177,7 +177,7 @@ def test_banco_fora_do_ar_derruba_a_prontidao(client, monkeypatch):
     monkeypatch.setattr(
         health,
         "_check_database",
-        lambda: {"status": "falhou", "detail": "OperationalError: conexão recusada"},
+        lambda: {"status": "falhou", "detail": "banco de dados indisponível"},
     )
 
     resposta = client.get("/api/v1/health/ready")
