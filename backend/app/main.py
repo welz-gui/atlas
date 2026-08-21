@@ -29,12 +29,23 @@ app = FastAPI(
 )
 
 # CORS Middleware
+#
+# `allow_headers=["*"]` combinado com `allow_credentials=True` faz o Starlette
+# espelhar de volta qualquer cabeçalho que o preflight pedir — origem já
+# aprovada aceita cabeçalho customizado nenhum recusa. A API só usa dois:
+# `Content-Type` e `Authorization`. `X-Request-Id` entra para o dia em que o
+# frontend passar a propagar a correlação de requisição (§12).
+#
+# `allow_methods=["*"]` expande, dentro do Starlette, para o conjunto fixo de
+# verbos HTTP — não é o problema. Mas a API não expõe `PUT` nem `DELETE` hoje;
+# declarar só o que existe é o que falha primeiro quando um endpoint novo
+# esquecer de expor o próprio método.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Request-Id"],
     expose_headers=[
         "X-Atlas-Publishable",
         "X-Atlas-Content-Hash",
