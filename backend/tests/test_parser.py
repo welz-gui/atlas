@@ -112,6 +112,14 @@ def test_extrai_de_pdf_real_com_camada_de_texto():
         ("2", 2.0),
         ("", None),
         ("abc", None),
+        ("1.234.567", 1234567.0),  # múltiplos pontos (milhar sem decimal)
+        ("1,234,567", 1234567.0),  # múltiplas vírgulas (milhar sem decimal)
+        ("1.234.567,89", 1234567.89), # múltiplos pontos (milhar com decimal brasileiro)
+        ("1,234,567.89", 1234567.89), # múltiplas vírgulas (milhar com decimal inglês)
+        ("1a", None),              # string com letras junto aos dígitos falha no float
+        ("123 abc", None),         # string com espaços e letras falha no float
+        ("1-2-3", None),           # string com hifens falha no float
+        ("123,456.78.9", None),    # excesso de pontos e vírgulas combinados
     ],
 )
 def test_normalizacao_de_numeros(raw, expected):
