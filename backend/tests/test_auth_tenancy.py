@@ -78,6 +78,19 @@ def test_hash_da_mesma_senha_difere_entre_usuarios():
     assert hash_password("mesma-senha-longa") != hash_password("mesma-senha-longa")
 
 
+def test_hash_password_produces_verifiable_hash():
+    """O hash gerado deve ser verificável pela função verify_password."""
+    password = "minha-senha-segura"
+    hashed = hash_password(password)
+
+    assert hashed is not None
+    assert isinstance(hashed, str)
+    assert len(hashed) > 0
+    assert hashed != password
+    assert verify_password(password, hashed) is True
+    assert verify_password("senha-errada", hashed) is False
+
+
 # --- Isolamento entre tenants ----------------------------------------------
 
 def test_projeto_de_outra_organizacao_responde_404(client, db_session, project):
