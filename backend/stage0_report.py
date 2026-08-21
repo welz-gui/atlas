@@ -10,7 +10,6 @@ Uso:
     python stage0_report.py
 """
 
-from sqlalchemy import func
 from app.core.database import SessionLocal
 from app.models.domain import (
     Organization,
@@ -21,6 +20,7 @@ from app.models.domain import (
     ProtocolRequirement,
     RegulatoryRule,
 )
+from collections import defaultdict
 from app.regulatory.catalog import RuleState
 
 
@@ -87,14 +87,16 @@ def generate_stage0_report():
         print(f"  * Verificações Não Verificáveis:   {nao_verificaveis}")
         print("=" * 70)
 
+        proc_to_proj = {pr.id: pr.project_id for pr in processes}
+        proj_req_count = defaultdict(int)
+        for r in reqs:
+            proj_id = proc_to_proj.get(r.process_id)
+            if proj_id:
+                proj_req_count[proj_id] += 1
+
         print("\nDETALHAMENTO POR PROJETO:")
         for p in projects:
-            p_reqs = db.query(ProtocolRequirement).filter(
-                ProtocolRequirement.process_id.in_(
-                    db.query(ProtocolProcess.id).filter_by(project_id=p.id)
-                )
-            ).all()
-            print(f"  - [{p.name}] | Tipologia: {p.use_type} | Exigências: {len(p_reqs)}")
+            print(f"  - [{p.name}] | Tipologia: {p.use_type} | Exigências: {proj_req_count[p.id]}")
 
         print("\n[OK] Relatório concluído. Estágio 0 pronto para validação operacional.")
 
