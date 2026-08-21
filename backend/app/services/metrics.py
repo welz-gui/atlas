@@ -18,6 +18,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.domain import (
@@ -30,7 +31,6 @@ from app.models.domain import (
     ProtocolStatus,
     RegulatoryRule,
     RuleValidationEvent,
-    ValidationRecord,
 )
 from app.regulatory.catalog import CheckOutcome, RuleState
 from app.regulatory.jurisdiction import applicable_jurisdictions
@@ -136,21 +136,36 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
     }
 
     flagged_pairs: set[tuple[str, str]] = set()
-    for project_id in protocolled_project_ids:
-        latest = (
-            db.query(AnalysisRun)
+
+    if protocolled_project_ids:
+        subq_protocolled = (
+            db.query(
+                AnalysisRun.project_id,
+                func.max(AnalysisRun.created_at).label("max_created_at")
+            )
             .filter(
                 AnalysisRun.organization_id == organization_id,
-                AnalysisRun.project_id == project_id,
+                AnalysisRun.project_id.in_(protocolled_project_ids)
             )
-            .order_by(AnalysisRun.created_at.desc())
-            .first()
+            .group_by(AnalysisRun.project_id)
+            .subquery()
         )
-        if not latest:
-            continue
-        for record in latest.validations:
-            if record.status in FLAGGED:
-                flagged_pairs.add((project_id, record.rule_id))
+
+        latest_runs_protocolled = (
+            db.query(AnalysisRun)
+            .join(
+                subq_protocolled,
+                (AnalysisRun.project_id == subq_protocolled.c.project_id) &
+                (AnalysisRun.created_at == subq_protocolled.c.max_created_at)
+            )
+            .filter(AnalysisRun.organization_id == organization_id)
+            .all()
+        )
+
+        for latest in latest_runs_protocolled:
+            for record in latest.validations:
+                if record.status in FLAGGED:
+                    flagged_pairs.add((latest.project_id, record.rule_id))
 
     confirmed = len(flagged_pairs & required_pairs)
 
@@ -159,20 +174,35 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
     # quanto do projeto o sistema não consegue avaliar por falta de dado.
     total_checks = 0
     unverifiable = 0
-    for project_id in project_ids:
-        latest = (
-            db.query(AnalysisRun)
+
+    if project_ids:
+        subq_all = (
+            db.query(
+                AnalysisRun.project_id,
+                func.max(AnalysisRun.created_at).label("max_created_at")
+            )
             .filter(
                 AnalysisRun.organization_id == organization_id,
-                AnalysisRun.project_id == project_id,
+                AnalysisRun.project_id.in_(project_ids)
             )
-            .order_by(AnalysisRun.created_at.desc())
-            .first()
+            .group_by(AnalysisRun.project_id)
+            .subquery()
         )
-        if not latest:
-            continue
-        total_checks += latest.total_checks
-        unverifiable += latest.nao_verificavel_count
+
+        latest_runs_all = (
+            db.query(AnalysisRun)
+            .join(
+                subq_all,
+                (AnalysisRun.project_id == subq_all.c.project_id) &
+                (AnalysisRun.created_at == subq_all.c.max_created_at)
+            )
+            .filter(AnalysisRun.organization_id == organization_id)
+            .all()
+        )
+
+        for latest in latest_runs_all:
+            total_checks += latest.total_checks
+            unverifiable += latest.nao_verificavel_count
 
     # -- Cobertura do catálogo --------------------------------------------
     # Regra publicável sobre total, nas jurisdições em que a organização tem

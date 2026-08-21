@@ -12,7 +12,6 @@ O que estes testes protegem:
    variável na lista de processos.
 """
 
-import pytest
 
 from app.core import mfa
 from app.core.config import Settings

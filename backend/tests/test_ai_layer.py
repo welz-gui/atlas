@@ -9,7 +9,7 @@ O que precisa ficar provado, porque é aqui que o dano seria irreversível:
 3. **tudo fica registrado** — inclusive falhas, recusas e ausência de provedor.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import pytest
 
