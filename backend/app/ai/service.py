@@ -107,6 +107,7 @@ antes de ser conferida e publicada por uma pessoa.\
 # Resultado do assistente
 # =============================================================================
 
+
 @dataclass
 class AssistantResponse:
     answer: str
@@ -220,6 +221,7 @@ def _record(
 # Resposta determinística — o piso, não o improviso
 # =============================================================================
 
+
 def _unvalidated_warning(rules: Sequence[Rule]) -> Optional[str]:
     pendentes = [r for r in rules if not r.is_publishable]
     if not pendentes:
@@ -265,7 +267,11 @@ def deterministic_answer(
                 if rule.check
                 else "verificação documental (não derivável de parâmetros numéricos)"
             )
-            pendente = "" if rule.is_publishable else " — regra ainda não validada tecnicamente"
+            pendente = (
+                ""
+                if rule.is_publishable
+                else " — regra ainda não validada tecnicamente"
+            )
             linha = f"• {rule.title}: {limite}{pendente}."
             if rule.rule_id in statuses:
                 linha += (
@@ -340,6 +346,43 @@ def deterministic_answer(
 # Assistente
 # =============================================================================
 
+
+def _return_baseline(
+    db: Session,
+    user: User,
+    project: Optional[Project],
+    query: str,
+    baseline: AssistantResponse,
+    request_hash: str,
+    retrieved_keys: Sequence[str],
+    cited_keys: Sequence[str],
+    provider_name: str,
+    warning: Optional[str] = None,
+    result: Optional[AIResult] = None,
+    response_json: Optional[dict] = None,
+    grounded: bool = True,
+) -> AssistantResponse:
+    if warning:
+        baseline.warnings.append(warning)
+
+    baseline.interaction_id = _record(
+        db,
+        organization_id=user.organization_id,
+        user=user,
+        project=project,
+        purpose="consulta_normativa",
+        prompt=query,
+        request_hash=request_hash,
+        retrieved_keys=retrieved_keys,
+        cited_keys=cited_keys,
+        provider_name=provider_name,
+        result=result,
+        response_json=response_json,
+        grounded=grounded,
+    ).id
+    return baseline
+
+
 def ask(
     db: Session,
     query: str,
@@ -363,19 +406,17 @@ def ask(
     )
 
     if not engine.available:
-        baseline.interaction_id = _record(
-            db,
-            organization_id=user.organization_id,
+        return _return_baseline(
+            db=db,
             user=user,
             project=project,
-            purpose="consulta_normativa",
-            prompt=query,
+            query=query,
+            baseline=baseline,
             request_hash=_request_hash(query, _context_signature(retrieved), None),
             retrieved_keys=retrieved_keys,
             cited_keys=retrieved_keys,
             provider_name=engine.name,
-        ).id
-        return baseline
+        )
 
     request_hash = _request_hash(
         query, _context_signature(retrieved), getattr(engine, "model", None)
@@ -392,22 +433,18 @@ def ask(
         # Sem contexto não se pergunta ao modelo: seria convidá-lo a preencher
         # a lacuna com conhecimento próprio, que é exatamente o que a política
         # proíbe. A resposta determinística já diz que o catálogo não cobre.
-        baseline.warnings.append(
-            "O catálogo não cobre este assunto; o modelo não foi consultado para "
-            "evitar resposta sem base cadastrada."
-        )
-        baseline.interaction_id = _record(
-            db,
-            organization_id=user.organization_id,
+        return _return_baseline(
+            db=db,
             user=user,
             project=project,
-            purpose="consulta_normativa",
-            prompt=query,
+            query=query,
+            baseline=baseline,
             request_hash=request_hash,
             retrieved_keys=[],
+            cited_keys=[],
             provider_name=engine.name,
-        ).id
-        return baseline
+            warning="O catálogo não cobre este assunto; o modelo não foi consultado para evitar resposta sem base cadastrada.",
+        )
 
     contexto = format_context(retrieved)
     prompt = (
@@ -426,22 +463,19 @@ def ask(
     if not result.ok:
         # Falha ou recusa do modelo devolve a resposta determinística — com o
         # motivo à vista, nunca disfarçada de resposta de IA.
-        baseline.warnings.append(
-            result.error or "O modelo não respondeu; usando busca no catálogo."
-        )
-        baseline.interaction_id = _record(
-            db,
-            organization_id=user.organization_id,
+        return _return_baseline(
+            db=db,
             user=user,
             project=project,
-            purpose="consulta_normativa",
-            prompt=query,
+            query=query,
+            baseline=baseline,
             request_hash=request_hash,
             retrieved_keys=retrieved_keys,
             cited_keys=retrieved_keys,
+            provider_name=engine.name,
+            warning=result.error or "O modelo não respondeu; usando busca no catálogo.",
             result=result,
-        ).id
-        return baseline
+        )
 
     parsed: AssistantAnswer = result.parsed  # type: ignore[assignment]
 
@@ -452,48 +486,40 @@ def ask(
     grounded = not inventadas and parsed.answered_from_context
 
     if inventadas:
-        baseline.warnings.append(
-            "A resposta do modelo referenciou regra fora do catálogo consultado e foi "
-            "substituída pela consulta determinística."
-        )
-        baseline.interaction_id = _record(
-            db,
-            organization_id=user.organization_id,
+        return _return_baseline(
+            db=db,
             user=user,
             project=project,
-            purpose="consulta_normativa",
-            prompt=query,
+            query=query,
+            baseline=baseline,
             request_hash=request_hash,
             retrieved_keys=retrieved_keys,
             cited_keys=citadas,
+            provider_name=engine.name,
+            warning="A resposta do modelo referenciou regra fora do catálogo consultado e foi substituída pela consulta determinística.",
             result=result,
             response_json=parsed.model_dump(),
             grounded=False,
-        ).id
-        return baseline
+        )
 
     if not parsed.answered_from_context:
         # O próprio modelo disse que o contexto não bastava. Melhor entregar o
         # que o catálogo tem do que uma resposta que ele mesmo não sustenta.
-        baseline.warnings.append(
-            "O modelo indicou que o catálogo não sustenta uma resposta completa para "
-            "esta consulta."
-        )
-        baseline.interaction_id = _record(
-            db,
-            organization_id=user.organization_id,
+        return _return_baseline(
+            db=db,
             user=user,
             project=project,
-            purpose="consulta_normativa",
-            prompt=query,
+            query=query,
+            baseline=baseline,
             request_hash=request_hash,
             retrieved_keys=retrieved_keys,
             cited_keys=citadas,
+            provider_name=engine.name,
+            warning="O modelo indicou que o catálogo não sustenta uma resposta completa para esta consulta.",
             result=result,
             response_json=parsed.model_dump(),
             grounded=True,
-        ).id
-        return baseline
+        )
 
     # A citação legal é resolvida pelo Atlas, a partir do catálogo — nunca pelo
     # texto que o modelo escreveu.
@@ -543,6 +569,7 @@ def ask(
 # Extração de rascunhos de regra
 # =============================================================================
 
+
 @dataclass
 class DraftResult:
     created_rule_ids: List[str] = field(default_factory=list)
@@ -581,7 +608,9 @@ def _draft_to_rule(
         jurisdiction=jurisdiction,
         title=draft.title,
         state=RuleState.RASCUNHO_EXTRAIDO_POR_IA,
-        severity=draft.severity if draft.severity in {"bloqueio", "alerta"} else "alerta",
+        severity=draft.severity
+        if draft.severity in {"bloqueio", "alerta"}
+        else "alerta",
         applies_to=applies_to,
         check=check,
         requires_manual_review=check is None,
@@ -616,7 +645,9 @@ def extract_rule_drafts(
     tivesse conferido.
     """
     engine = provider or get_provider()
-    request_hash = _request_hash(legal_text, [jurisdiction], getattr(engine, "model", None))
+    request_hash = _request_hash(
+        legal_text, [jurisdiction], getattr(engine, "model", None)
+    )
 
     if not engine.available:
         return DraftResult(
