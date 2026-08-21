@@ -600,6 +600,52 @@ def _draft_to_rule(
     )
 
 
+def _process_draft_batch(
+    db: Session,
+    batch: RuleDraftBatch,
+    jurisdiction: str,
+    user: User,
+    result: AIResult,
+    document: Optional[RegulatoryDocument],
+) -> List[str]:
+    """Processa o lote de rascunhos retornando os IDs das regras criadas."""
+    criadas: List[str] = []
+
+    for draft in batch.drafts:
+        existente = (
+            db.query(RegulatoryRule)
+            .filter(
+                RegulatoryRule.jurisdiction == jurisdiction,
+                RegulatoryRule.rule_key == draft.rule_key,
+            )
+            .first()
+        )
+        if existente:
+            continue
+
+        rule = _draft_to_rule(draft, jurisdiction, document)
+        db.add(rule)
+        db.flush()
+        db.add(
+            RuleValidationEvent(
+                rule_id=rule.id,
+                from_state=None,
+                to_state=RuleState.RASCUNHO_EXTRAIDO_POR_IA,
+                action="extraida_por_ia",
+                notes=(
+                    f"Extraída por {result.provider}/{result.model} a partir de texto "
+                    f"legal enviado por {user.name}. Aguarda conferência humana."
+                ),
+                actor_id=user.id,
+                actor_name=user.name,
+            )
+        )
+        criadas.append(rule.id)
+
+    db.commit()
+    return criadas
+
+
 def extract_rule_drafts(
     db: Session,
     legal_text: str,
@@ -662,40 +708,7 @@ def extract_rule_drafts(
         )
 
     batch: RuleDraftBatch = result.parsed  # type: ignore[assignment]
-    criadas: List[str] = []
-
-    for draft in batch.drafts:
-        existente = (
-            db.query(RegulatoryRule)
-            .filter(
-                RegulatoryRule.jurisdiction == jurisdiction,
-                RegulatoryRule.rule_key == draft.rule_key,
-            )
-            .first()
-        )
-        if existente:
-            continue
-
-        rule = _draft_to_rule(draft, jurisdiction, document)
-        db.add(rule)
-        db.flush()
-        db.add(
-            RuleValidationEvent(
-                rule_id=rule.id,
-                from_state=None,
-                to_state=RuleState.RASCUNHO_EXTRAIDO_POR_IA,
-                action="extraida_por_ia",
-                notes=(
-                    f"Extraída por {result.provider}/{result.model} a partir de texto "
-                    f"legal enviado por {user.name}. Aguarda conferência humana."
-                ),
-                actor_id=user.id,
-                actor_name=user.name,
-            )
-        )
-        criadas.append(rule.id)
-
-    db.commit()
+    criadas = _process_draft_batch(db, batch, jurisdiction, user, result, document)
 
     interaction = _record(
         db,
