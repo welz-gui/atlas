@@ -6,7 +6,6 @@ estado, vigência, severidade e proveniência, e não como código.
 
 from app.regulatory.catalog import (
     RegulatoryCatalog,
-    Rule,
     RuleState,
     Severity,
     CheckOutcome,
@@ -16,7 +15,6 @@ from app.regulatory.catalog import (
 
 __all__ = [
     "RegulatoryCatalog",
-    "Rule",
     "RuleState",
     "Severity",
     "CheckOutcome",
