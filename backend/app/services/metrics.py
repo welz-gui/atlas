@@ -30,7 +30,6 @@ from app.models.domain import (
     ProtocolStatus,
     RegulatoryRule,
     RuleValidationEvent,
-    ValidationRecord,
 )
 from app.regulatory.catalog import CheckOutcome, RuleState
 from app.regulatory.jurisdiction import applicable_jurisdictions
@@ -69,29 +68,12 @@ def _parse_date(raw: Optional[str]) -> Optional[date]:
 # --- Aprovação (§11) ---------------------------------------------------------
 
 
-def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
-    projects = db.query(Project).filter(Project.organization_id == organization_id).all()
-    project_ids = [p.id for p in projects]
 
-    processes = (
-        db.query(ProtocolProcess)
-        .filter(ProtocolProcess.organization_id == organization_id)
-        .all()
-    )
-    process_ids = [p.id for p in processes]
-
-    requirements = (
-        db.query(ProtocolRequirement)
-        .filter(ProtocolRequirement.organization_id == organization_id)
-        .all()
-        if process_ids
-        else []
-    )
-
+def _get_notification_events(db: Session, organization_id: str, process_ids: list[str]) -> int:
     # -- Ciclos de notificação -------------------------------------------
     # Cada volta do órgão é uma transição para `notificado`. Um processo que
     # foi notificado duas vezes custou dois ciclos ao cliente.
-    notification_events = (
+    return (
         db.query(ProtocolEvent)
         .filter(
             ProtocolEvent.organization_id == organization_id,
@@ -102,6 +84,8 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
         else 0
     )
 
+
+def _calculate_durations(processes: list[ProtocolProcess]) -> tuple[list[float], int]:
     # -- Dias até alvará --------------------------------------------------
     # Só processos decididos e aprovados entram. Processo em andamento não
     # tem duração; tem duração parcial, que é outra coisa.
@@ -115,14 +99,20 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
         decided = _parse_date(process.decided_at)
         if submitted and decided and decided >= submitted:
             durations.append((decided - submitted).days)
+    return durations, approved
 
+
+def _calculate_recall(requirements: list[ProtocolRequirement]) -> tuple[list[ProtocolRequirement], int, int]:
     # -- Recall de bloqueios e falsos negativos críticos -------------------
     # Só exigência vinculada a regra entra: exigência documental que nenhuma
     # regra poderia prever não é falha do motor.
     linked = [r for r in requirements if r.linked_rule_key]
     predicted = sum(1 for r in linked if r.was_predicted)
     false_negatives = sum(1 for r in linked if r.was_predicted is False)
+    return linked, predicted, false_negatives
 
+
+def _calculate_precision(db: Session, organization_id: str, processes: list[ProtocolProcess], requirements: list[ProtocolRequirement]) -> tuple[int, set[tuple[str, str]]]:
     # -- Precisão ---------------------------------------------------------
     # Do que o motor apontou, quanto o órgão confirmou. O denominador é o
     # conjunto de pares (projeto, regra) apontados na análise mais recente de
@@ -153,7 +143,10 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
                 flagged_pairs.add((project_id, record.rule_id))
 
     confirmed = len(flagged_pairs & required_pairs)
+    return confirmed, flagged_pairs
 
+
+def _calculate_unverifiable(db: Session, organization_id: str, project_ids: list[str]) -> tuple[int, int]:
     # -- Não verificáveis --------------------------------------------------
     # Sobre todas as análises mais recentes, não só as protocoladas: mede
     # quanto do projeto o sistema não consegue avaliar por falta de dado.
@@ -173,7 +166,10 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
             continue
         total_checks += latest.total_checks
         unverifiable += latest.nao_verificavel_count
+    return total_checks, unverifiable
 
+
+def _calculate_catalog_coverage(db: Session, projects: list[Project]) -> tuple[list[RegulatoryRule], int, set[str]]:
     # -- Cobertura do catálogo --------------------------------------------
     # Regra publicável sobre total, nas jurisdições em que a organização tem
     # projeto. É a medida do progresso do D3, e é o que decide se um laudo
@@ -193,6 +189,34 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
         for r in rules
         if r.state == RuleState.VIGENTE and r.validated_by_id is not None
     )
+    return rules, publishable, jurisdictions
+
+
+def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
+    projects = db.query(Project).filter(Project.organization_id == organization_id).all()
+    project_ids = [p.id for p in projects]
+
+    processes = (
+        db.query(ProtocolProcess)
+        .filter(ProtocolProcess.organization_id == organization_id)
+        .all()
+    )
+    process_ids = [p.id for p in processes]
+
+    requirements = (
+        db.query(ProtocolRequirement)
+        .filter(ProtocolRequirement.organization_id == organization_id)
+        .all()
+        if process_ids
+        else []
+    )
+
+    notification_events = _get_notification_events(db, organization_id, process_ids)
+    durations, approved = _calculate_durations(processes)
+    linked, predicted, false_negatives = _calculate_recall(requirements)
+    confirmed, flagged_pairs = _calculate_precision(db, organization_id, processes, requirements)
+    total_checks, unverifiable = _calculate_unverifiable(db, organization_id, project_ids)
+    rules, publishable, jurisdictions = _calculate_catalog_coverage(db, projects)
 
     return {
         "projects": len(projects),
