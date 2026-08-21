@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_project_or_404, require_permission, tenant_query
 from app.core.database import get_db
-from app.models.domain import Organization, Project, ProjectVersion, ProjectVersionState, User
+from app.models.domain import Organization, Project, ProjectVersionState, User
 from app.schemas.domain import (
     OrganizationResponse,
     ProjectCreate,

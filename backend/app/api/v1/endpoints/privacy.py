@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_project_or_404, require_permission
-from app.core.config import settings
 from app.core.database import get_db
 from app.models.domain import User
 from app.schemas.domain import (

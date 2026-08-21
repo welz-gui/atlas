@@ -30,7 +30,6 @@ from app.models.domain import (
     ProtocolStatus,
     RegulatoryRule,
     RuleValidationEvent,
-    ValidationRecord,
 )
 from app.regulatory.catalog import CheckOutcome, RuleState
 from app.regulatory.jurisdiction import applicable_jurisdictions

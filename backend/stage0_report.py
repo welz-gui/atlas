@@ -10,7 +10,6 @@ Uso:
     python stage0_report.py
 """
 
-from sqlalchemy import func
 from app.core.database import SessionLocal
 from app.models.domain import (
     Organization,

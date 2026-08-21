@@ -11,7 +11,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
-    get_current_user,
     get_project_or_404,
     get_scoped_or_404,
     require_permission,

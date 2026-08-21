@@ -1,6 +1,5 @@
 """Testes da EAP (Estrutura Analítica do Projeto) e Tarefas."""
 
-import pytest
 from app.models.domain import EAPItem
 
 def test_list_project_eap_empty(client, engineer_headers, project):
