@@ -315,23 +315,11 @@ def fetch_source(
         return content.decode(charset, errors="replace")
 
 
-def discover_regulations(
-    db: Session,
-    jurisdiction: str,
-    fetcher: Callable[[str], str] = fetch_source,
-) -> dict:
-    """Sincroniza candidatos encontrados, de forma idempotente por URL.
-
-    Documento já validado nunca é rebaixado. Uma mudança de metadados apenas
-    atualiza a data de consulta; cabe ao validador decidir se há nova versão.
-    """
+def _collect_candidates(
+    sources: tuple[DiscoverySource, ...],
+    fetcher: Callable[[str], str],
+) -> tuple[dict[str, tuple[DiscoveredDocument, DiscoverySource]], list[str], list[dict]]:
     uses_gate = "gate" in inspect.signature(fetcher).parameters
-
-    sources = SOURCES.get(jurisdiction)
-    if not sources:
-        raise ValueError(f"Não há fontes oficiais configuradas para {jurisdiction}.")
-
-    now = datetime.utcnow()
     candidates: dict[str, tuple[DiscoveredDocument, DiscoverySource]] = {}
     checked_sources: list[str] = []
     skipped_sources: list[dict] = []
@@ -354,57 +342,94 @@ def discover_regulations(
         for candidate in extract_candidates(html, source):
             candidates[candidate.url] = (candidate, source)
 
+    return candidates, checked_sources, skipped_sources
+
+
+def _sync_candidate(
+    db: Session,
+    jurisdiction: str,
+    candidate: DiscoveredDocument,
+    source: DiscoverySource,
+    now: datetime,
+) -> tuple[str, str]:
+    existing = (
+        db.query(RegulatoryDocument)
+        .filter(
+            RegulatoryDocument.jurisdiction == jurisdiction,
+            RegulatoryDocument.url == candidate.url,
+        )
+        .order_by(RegulatoryDocument.created_at.desc())
+        .first()
+    )
+    if existing is None:
+        existing = RegulatoryDocument(
+            jurisdiction=jurisdiction,
+            doc_type=candidate.doc_type,
+            number=candidate.number,
+            title=candidate.title,
+            issuing_body=source.issuing_body,
+            url=candidate.url,
+            theme=candidate.theme,
+            state=RegulatoryDocumentState.DESCOBERTO,
+            consulted_at=now,
+        )
+        db.add(existing)
+        db.flush()
+        return "created", str(existing.id)
+
+    changed = any(
+        (
+            existing.title != candidate.title,
+            existing.doc_type != candidate.doc_type,
+            existing.number != candidate.number,
+            existing.theme != candidate.theme,
+            existing.issuing_body != source.issuing_body,
+        )
+    )
+    existing.consulted_at = now
+    if changed and existing.state != RegulatoryDocumentState.VALIDADO:
+        existing.title = candidate.title
+        existing.doc_type = candidate.doc_type
+        existing.number = candidate.number
+        existing.theme = candidate.theme
+        existing.issuing_body = source.issuing_body
+        existing.state = RegulatoryDocumentState.DESCOBERTO
+        return "updated", str(existing.id)
+
+    return "unchanged", str(existing.id)
+
+
+def discover_regulations(
+    db: Session,
+    jurisdiction: str,
+    fetcher: Callable[[str], str] = fetch_source,
+) -> dict:
+    """Sincroniza candidatos encontrados, de forma idempotente por URL.
+
+    Documento já validado nunca é rebaixado. Uma mudança de metadados apenas
+    atualiza a data de consulta; cabe ao validador decidir se há nova versão.
+    """
+    sources = SOURCES.get(jurisdiction)
+    if not sources:
+        raise ValueError(f"Não há fontes oficiais configuradas para {jurisdiction}.")
+
+    candidates, checked_sources, skipped_sources = _collect_candidates(sources, fetcher)
+
     created = 0
     updated = 0
     unchanged = 0
     document_ids: list[str] = []
+
+    now = datetime.utcnow()
     for candidate, source in candidates.values():
-        existing = (
-            db.query(RegulatoryDocument)
-            .filter(
-                RegulatoryDocument.jurisdiction == jurisdiction,
-                RegulatoryDocument.url == candidate.url,
-            )
-            .order_by(RegulatoryDocument.created_at.desc())
-            .first()
-        )
-        if existing is None:
-            existing = RegulatoryDocument(
-                jurisdiction=jurisdiction,
-                doc_type=candidate.doc_type,
-                number=candidate.number,
-                title=candidate.title,
-                issuing_body=source.issuing_body,
-                url=candidate.url,
-                theme=candidate.theme,
-                state=RegulatoryDocumentState.DESCOBERTO,
-                consulted_at=now,
-            )
-            db.add(existing)
-            db.flush()
+        status, doc_id = _sync_candidate(db, jurisdiction, candidate, source, now)
+        if status == "created":
             created += 1
+        elif status == "updated":
+            updated += 1
         else:
-            changed = any(
-                (
-                    existing.title != candidate.title,
-                    existing.doc_type != candidate.doc_type,
-                    existing.number != candidate.number,
-                    existing.theme != candidate.theme,
-                    existing.issuing_body != source.issuing_body,
-                )
-            )
-            existing.consulted_at = now
-            if changed and existing.state != RegulatoryDocumentState.VALIDADO:
-                existing.title = candidate.title
-                existing.doc_type = candidate.doc_type
-                existing.number = candidate.number
-                existing.theme = candidate.theme
-                existing.issuing_body = source.issuing_body
-                existing.state = RegulatoryDocumentState.DESCOBERTO
-                updated += 1
-            else:
-                unchanged += 1
-        document_ids.append(existing.id)
+            unchanged += 1
+        document_ids.append(doc_id)
 
     db.commit()
     return {
