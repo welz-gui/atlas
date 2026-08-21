@@ -88,6 +88,22 @@ def test_tokenizacao_ignora_acento_e_palavra_vazia():
     assert "de" not in tokenize("taxa de ocupação")
 
 
+def test_tokenize_remove_punctuation_and_special_characters():
+    assert tokenize("recuo, frontal: 4m!") == ["recuo", "frontal", "4m"]
+    assert tokenize("taxa de ocupação (total)") == ["taxa", "ocupacao", "total"]
+
+
+def test_tokenize_filters_short_words():
+    # Palavras com tamanho <= 1 são removidas (e também stopwords)
+    assert "a" not in tokenize("a casa")
+    assert "o" not in tokenize("o predio")
+    assert "1" not in tokenize("recuo 1 metro")
+
+
+def test_tokenize_multiple_spaces():
+    assert tokenize("recuo   frontal    total") == ["recuo", "frontal", "total"]
+
+
 def test_recupera_regra_pelo_jargao_do_usuario(catalog_rules):
     """'afastamento' e 'alinhamento' são o que se fala; 'recuo' é o cadastrado."""
     encontradas = [r.rule_key for r in retrieve("afastamento frontal", catalog_rules)]
