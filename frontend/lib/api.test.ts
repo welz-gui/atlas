@@ -84,6 +84,14 @@ describe("request — o contrato do cliente HTTP", () => {
     await expect(fetchProjects()).rejects.toBeInstanceOf(ApiError);
   });
 
+  it("converte TypeError (falha de fetch) em ApiError de conexão com status 0", async () => {
+    (global.fetch as any).mockRejectedValueOnce(new TypeError("Failed to fetch"));
+
+    const promise = fetchProjects();
+    await expect(promise).rejects.toBeInstanceOf(ApiError);
+    await expect(promise).rejects.toHaveProperty("status", 0);
+  });
+
   it("a ApiError de rede carrega status 0", async () => {
     (global.fetch as any).mockRejectedValueOnce(new Error("ECONNREFUSED"));
 
