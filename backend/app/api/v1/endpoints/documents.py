@@ -11,9 +11,17 @@ import io
 import os
 import re
 import urllib.parse
-from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -28,10 +36,10 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.models.domain import Document, DocumentState, User
 from app.schemas.domain import DocumentResponse, ExtractionResponse, PurgeReportResponse
-from app.services.antivirus import get_scanner
+from app.services.antivirus import ScanResult, get_scanner
 from app.services.pdf_parser import PDFPlanParser
 from app.services.retention import mark_obsolete, purge_expired_documents
-from app.services.storage import ObjectNotFound, build_key, get_storage
+from app.services.storage import ObjectNotFound, StoredObject, build_key, get_storage
 
 router = APIRouter()
 
@@ -60,50 +68,25 @@ def secure_filename(filename: str) -> str:
     return filename
 
 
-@router.post(
-    "/projects/{project_id}/documents/upload",
-    response_model=DocumentResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-def upload_document(
-    project_id: str,
-    title: str = Form(...),
-    category: str = Form("projeto_arquitetonico"),
-    version: str = Form("v1.0"),
-    supersedes_id: Optional[str] = Form(None),
-    file: UploadFile = File(...),
-    user: User = Depends(require_permission("document:write")),
-    db: Session = Depends(get_db),
-):
-    project = get_project_or_404(db, project_id, user)
 
-    superseded: Optional[Document] = None
-    if supersedes_id:
-        superseded = (
-            tenant_query(db, Document, user)
-            .filter(Document.id == supersedes_id, Document.project_id == project_id)
-            .first()
-        )
-        if not superseded:
-            raise HTTPException(
-                status_code=404, detail="Documento a ser substituído não encontrado."
-            )
-
-    # O nome enviado pelo cliente é tratado como dado hostil: dele só se
-    # aproveita a extensão, e ainda assim contra uma allowlist. A chave no
-    # armazenamento é opaca e gerada pelo servidor, de modo que sequências como
-    # "../" não têm efeito algum.
-    original_filename = secure_filename(file.filename or "")
-    extension = os.path.splitext(original_filename)[1].lower()
-    if extension not in ALLOWED_EXTENSIONS:
+def _get_superseded_document(
+    db: Session, user: User, project_id: str, supersedes_id: str | None
+) -> Document | None:
+    if not supersedes_id:
+        return None
+    superseded = (
+        tenant_query(db, Document, user)
+        .filter(Document.id == supersedes_id, Document.project_id == project_id)
+        .first()
+    )
+    if not superseded:
         raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=(
-                f"Extensão '{extension or 'desconhecida'}' não permitida. "
-                f"Aceitas: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
-            ),
+            status_code=404, detail="Documento a ser substituído não encontrado."
         )
+    return superseded
 
+
+def _process_upload_file(file: UploadFile, extension: str) -> tuple[StoredObject, ScanResult]:
     storage = get_storage()
     key = build_key(extension)
     max_bytes = settings.MAX_UPLOAD_MB * 1024 * 1024
@@ -149,12 +132,49 @@ def upload_document(
             )
 
         stored = writer.commit()
+        return stored, scan
     except HTTPException:
         writer.abort()
         raise
     except Exception:
         writer.abort()
         raise
+
+@router.post(
+    "/projects/{project_id}/documents/upload",
+    response_model=DocumentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def upload_document(
+    project_id: str,
+    title: str = Form(...),
+    category: str = Form("projeto_arquitetonico"),
+    version: str = Form("v1.0"),
+    supersedes_id: str | None = Form(None),
+    file: UploadFile = File(...),
+    user: User = Depends(require_permission("document:write")),
+    db: Session = Depends(get_db),
+):
+    project = get_project_or_404(db, project_id, user)
+
+    superseded = _get_superseded_document(db, user, project_id, supersedes_id)
+
+    # O nome enviado pelo cliente é tratado como dado hostil: dele só se
+    # aproveita a extensão, e ainda assim contra uma allowlist. A chave no
+    # armazenamento é opaca e gerada pelo servidor, de modo que sequências como
+    # "../" não têm efeito algum.
+    original_filename = secure_filename(file.filename or "")
+    extension = os.path.splitext(original_filename)[1].lower()
+    if extension not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=(
+                f"Extensão '{extension or 'desconhecida'}' não permitida. "
+                f"Aceitas: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
+            ),
+        )
+
+    stored, scan = _process_upload_file(file, extension)
 
     document = Document(
         organization_id=user.organization_id,
@@ -192,7 +212,7 @@ def upload_document(
     return document
 
 
-@router.get("/projects/{project_id}/documents", response_model=List[DocumentResponse])
+@router.get("/projects/{project_id}/documents", response_model=list[DocumentResponse])
 def list_project_documents(
     project_id: str,
     include_obsolete: bool = True,
