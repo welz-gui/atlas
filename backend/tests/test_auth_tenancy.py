@@ -78,6 +78,23 @@ def test_hash_da_mesma_senha_difere_entre_usuarios():
     assert hash_password("mesma-senha-longa") != hash_password("mesma-senha-longa")
 
 
+def test_verify_password_correct_password():
+    password = "minha-senha-segura"
+    hashed = hash_password(password)
+    assert verify_password(password, hashed) is True
+
+
+def test_verify_password_incorrect_password():
+    password = "minha-senha-segura"
+    hashed = hash_password(password)
+    assert verify_password("senha-errada", hashed) is False
+
+
+def test_verify_password_malformed_hash():
+    password = "minha-senha-segura"
+    assert verify_password(password, "isso-nao-e-um-hash-valido") is False
+
+
 # --- Isolamento entre tenants ----------------------------------------------
 
 def test_projeto_de_outra_organizacao_responde_404(client, db_session, project):
