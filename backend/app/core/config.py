@@ -2,9 +2,12 @@ import os
 import secrets
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine.url import URL
 from typing import ClassVar, List
 
-BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+BACKEND_DIR = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 
 
 class Settings(BaseSettings):
@@ -23,7 +26,9 @@ class Settings(BaseSettings):
     # Banco de dados
     # Fallback SQLite para desenvolvimento local. Em produção, aponte para o
     # Postgres (ver docker-compose.yml e .env.example).
-    DATABASE_URL: str = f"sqlite:///{os.path.join(BACKEND_DIR, 'atlas_dev.db')}"
+    DATABASE_URL: str = str(
+        URL.create("sqlite", database=os.path.join(BACKEND_DIR, "atlas_dev.db"))
+    )
 
     # Armazenamento de documentos (§6.6)
     # `local` grava no disco do servidor; `s3` grava em bucket compatível com
