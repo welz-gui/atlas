@@ -236,3 +236,52 @@ def test_fonte_recusada_vira_resultado_e_nao_erro(db_session, monkeypatch):
     assert resultado["sources_checked"] == []
     assert len(resultado["sources_skipped"]) == 2
     assert "proibido" in resultado["sources_skipped"][0]["reason"]
+
+def test_parse_robots_allow_directive():
+    regras = parse_robots(
+        """
+        User-agent: *
+        Disallow: /
+        Allow: /public/
+        """
+    )
+    assert regras["disallow"] == ("/",)
+    assert regras["allow"] == ("/public/",)
+
+
+def test_parse_robots_directives_before_user_agent_ignored():
+    regras = parse_robots(
+        """
+        Disallow: /before
+        Allow: /ignored
+        User-agent: *
+        Disallow: /after
+        """
+    )
+    assert regras["disallow"] == ("/after",)
+    assert regras["allow"] == ()
+
+
+def test_parse_robots_invalid_crawl_delay_ignored():
+    regras = parse_robots(
+        """
+        User-agent: *
+        Crawl-delay: not-a-number
+        Crawl-delay: 1,5
+        """
+    )
+    # 1,5 should be converted to 1.5
+    assert regras["delay"] == 1.5
+
+
+def test_parse_robots_no_matching_user_agent():
+    regras = parse_robots(
+        """
+        User-agent: Googlebot
+        Disallow: /
+        """,
+        user_agent="Bingbot"
+    )
+    assert regras["allow"] == ()
+    assert regras["disallow"] == ()
+    assert regras["delay"] is None
