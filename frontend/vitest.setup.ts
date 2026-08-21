@@ -1,3 +1,4 @@
+import "@testing-library/jest-dom/vitest";
 // `lib/api.ts` guarda o token em `localStorage`, que o jsdom não implementa.
 const store: Record<string, string> = {};
 
