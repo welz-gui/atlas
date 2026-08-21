@@ -1,13 +1,17 @@
 """Empreendimentos e versões de projeto (§8.2, §3.2)."""
 
-from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, get_project_or_404, require_permission, tenant_query
+from app.api.deps import (
+    get_current_user,
+    get_project_or_404,
+    require_permission,
+    tenant_query,
+)
 from app.core.database import get_db
-from app.models.domain import Organization, Project, ProjectVersion, ProjectVersionState, User
+from app.models.domain import Organization, Project, ProjectVersionState, User
 from app.schemas.domain import (
     OrganizationResponse,
     ProjectCreate,
@@ -23,7 +27,7 @@ from app.services.regulatory_engine import RegulatoryEngine
 router = APIRouter()
 
 
-@router.get("/organizations", response_model=List[OrganizationResponse])
+@router.get("/organizations", response_model=list[OrganizationResponse])
 def list_organizations(
     user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
@@ -68,7 +72,7 @@ def create_project(
     return project
 
 
-@router.get("/projects", response_model=List[ProjectResponse])
+@router.get("/projects", response_model=list[ProjectResponse])
 def list_projects(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return tenant_query(db, Project, user).all()
 
@@ -102,7 +106,7 @@ def update_project(
 
 # --- Versões ----------------------------------------------------------------
 
-@router.get("/projects/{project_id}/versions", response_model=List[ProjectVersionResponse])
+@router.get("/projects/{project_id}/versions", response_model=list[ProjectVersionResponse])
 def list_versions(
     project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
