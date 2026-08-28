@@ -427,3 +427,21 @@ def test_expurgo_pela_api_e_simulacao_por_padrao(client, db_session, org, upload
     body = response.json()
     assert body["dry_run"] is True
     assert body["retention_enabled"] is False
+
+
+def test_download_documento_desaparecido_responde_404(
+    client, engineer_headers, project, upload_dir
+):
+    from tests.test_documents import _upload
+    from app.services.storage import get_storage
+
+    documento = _upload(client, engineer_headers, project["id"], "planta.pdf").json()
+
+    storage = get_storage()
+    storage.delete(documento["file_path"])
+
+    response = client.get(
+        f"/api/v1/documents/{documento['id']}/download", headers=engineer_headers
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Arquivo não encontrado no armazenamento."
