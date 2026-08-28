@@ -219,9 +219,7 @@ def consume_second_factor(db: Session, user: User, code: str) -> bool:
 
 
 @router.post("/auth/mfa/enroll", response_model=MFAEnrollResponse)
-def enroll_mfa(
-    user: User = Depends(get_current_user), db: Session = Depends(get_db)
-):
+def enroll_mfa(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Gera um segredo TOTP. **Ainda não** ativa o segundo fator.
 
     Recadastrar sobrescreve o segredo anterior e só passa a valer após a
@@ -278,12 +276,13 @@ def activate_mfa(
 
     # Cadastro novo zera os códigos anteriores: deixá-los válidos manteria de pé
     # a recuperação de um fator que já não existe.
-    for antigo in list(user.recovery_codes):
-        db.delete(antigo)
+    db.query(MFARecoveryCode).filter(MFARecoveryCode.user_id == user.id).delete()
 
     codigos = mfa.generate_recovery_codes()
     for codigo in codigos:
-        db.add(MFARecoveryCode(user_id=user.id, code_hash=mfa.hash_recovery_code(codigo)))
+        db.add(
+            MFARecoveryCode(user_id=user.id, code_hash=mfa.hash_recovery_code(codigo))
+        )
     db.commit()
 
     return MFAActivateResponse(
@@ -321,7 +320,8 @@ def disable_mfa(
     """
     if not user.mfa_active:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Segundo fator não está ativo."
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Segundo fator não está ativo.",
         )
     if not consume_second_factor(db, user, payload.code):
         raise HTTPException(
