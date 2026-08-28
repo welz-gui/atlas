@@ -186,3 +186,32 @@ def test_banco_fora_do_ar_derruba_a_prontidao(client, monkeypatch):
     assert resposta.json()["status"] == "indisponivel"
     # E a sonda de vida continua respondendo: o processo está de pé.
     assert client.get("/api/v1/health").status_code == 200
+
+
+def test_antivirus_indisponivel_por_excecao(client, monkeypatch):
+    def _mock_version(self):
+        raise Exception("mocked failure")
+
+    from app.services.antivirus import ClamAVScanner
+    monkeypatch.setattr(ClamAVScanner, "_version", _mock_version)
+
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "ANTIVIRUS_BACKEND", "clamd")
+
+    componente = client.get("/api/v1/health/ready").json()["components"]["antivirus"]
+
+    assert componente["status"] == "falhou"
+    assert "antivírus indisponível" in componente["detail"]
+
+
+def test_antivirus_daemon_fora_do_ar(client, monkeypatch):
+    from app.services.antivirus import ClamAVScanner
+    monkeypatch.setattr(ClamAVScanner, "_version", lambda self: None)
+
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "ANTIVIRUS_BACKEND", "clamd")
+
+    componente = client.get("/api/v1/health/ready").json()["components"]["antivirus"]
+
+    assert componente["status"] == "falhou"
+    assert "clamd não respondeu ao VERSION" in componente["detail"]
