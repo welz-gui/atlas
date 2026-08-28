@@ -146,11 +146,11 @@ export default function DocumentsPage() {
     if (!extraction || !selectedProjectId) return;
     const parameters = extraction.extracted_parameters;
 
-    const payload: Record<string, number> = {};
-    for (const { key } of EXTRACTION_FIELDS) {
+    const payload = EXTRACTION_FIELDS.reduce<Record<string, number>>((acc, { key }) => {
       const value = parameters[key];
-      if (value !== null && value !== undefined) payload[key] = value;
-    }
+      if (value !== null && value !== undefined) acc[key as string] = value;
+      return acc;
+    }, {});
     if (Object.keys(payload).length === 0) return;
 
     try {
@@ -360,7 +360,7 @@ export default function DocumentsPage() {
                 {EXTRACTION_FIELDS.map(({ key, label, unit }) => {
                   const value = extraction.extracted_parameters[key];
                   return (
-                    <div key={key}>
+                    <div key={key as string}>
                       <span className="text-slate-500 text-[11px] block">{label}:</span>
                       {value === null || value === undefined ? (
                         <span className="font-mono text-blue-300/70 italic">
