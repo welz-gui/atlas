@@ -1,7 +1,6 @@
-import uuid
 """Motor de regras: aplicabilidade, veredictos e append-only (§3.4, §3.5)."""
 
-import pytest
+import uuid
 
 from app.models.domain import AnalysisRun, ValidationRecord
 from app.regulatory.catalog import CheckOutcome
@@ -265,3 +264,19 @@ def test_generate_regulatory_pdf_report_project_not_found(client, engineer_heade
     )
     assert response.status_code == 404
     assert response.json()["detail"] == "Empreendimento não encontrado."
+
+def test_evaluate_project_without_version_raises_409(client, engineer_headers, db_session, seeded_catalog):
+    from app.models.domain import ProjectVersion
+
+    projeto = _criar_projeto(client, engineer_headers, "Sem versao")
+
+    db_session.query(ProjectVersion).filter_by(project_id=projeto["id"]).delete()
+    db_session.commit()
+
+    response = client.post(
+        f"/api/v1/projects/{projeto['id']}/evaluate",
+        headers=engineer_headers
+    )
+
+    assert response.status_code == 409
+    assert "O empreendimento não possui nenhuma versão de projeto para analisar" in response.json()["detail"]
