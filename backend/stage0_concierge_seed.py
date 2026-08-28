@@ -29,6 +29,8 @@ Uso:
     python stage0_concierge_seed.py
 """
 
+import os
+import secrets
 from datetime import date, timedelta
 from sqlalchemy import inspect
 
@@ -51,7 +53,7 @@ from app.regulatory.importer import import_seed_catalog
 from app.services import project_versions
 from app.services.regulatory_engine import RegulatoryEngine
 
-DEMO_PASSWORD = "atlas-concierge-2026"
+DEMO_PASSWORD = os.getenv("DEMO_PASSWORD", secrets.token_urlsafe(16))
 
 #: Resultados que contam como "o Atlas apontou isto antes do órgão".
 APONTADO = (CheckOutcome.NAO_CONFORME, CheckOutcome.ATENCAO)
@@ -65,10 +67,14 @@ def run_stage0_seed():
     try:
         print("1. Atualizando e reimportando catálogo regulatório de Lajeado/RS...")
         summary = import_seed_catalog(db)
-        print(f"   Catálogo: {summary['created']} criadas, {summary['updated']} atualizadas.")
+        print(
+            f"   Catálogo: {summary['created']} criadas, {summary['updated']} atualizadas."
+        )
 
         # Garantir registro do documento regulatório
-        doc_lajeado = db.query(RegulatoryDocument).filter_by(jurisdiction="BR-RS-4311403").first()
+        doc_lajeado = (
+            db.query(RegulatoryDocument).filter_by(jurisdiction="BR-RS-4311403").first()
+        )
         if not doc_lajeado:
             doc_lajeado = RegulatoryDocument(
                 jurisdiction="BR-RS-4311403",
@@ -82,7 +88,11 @@ def run_stage0_seed():
             db.flush()
 
         print("2. Criando/Recuperando organização e usuários do Concierge...")
-        org = db.query(Organization).filter_by(document_number="99.888.777/0001-10").first()
+        org = (
+            db.query(Organization)
+            .filter_by(document_number="99.888.777/0001-10")
+            .first()
+        )
         if not org:
             org = Organization(
                 name="Atlas Concierge Lajeado (Estágio 0)",
@@ -92,7 +102,9 @@ def run_stage0_seed():
             db.flush()
 
         # Usuários
-        validador = db.query(User).filter_by(email="validador.concierge@atlas.demo").first()
+        validador = (
+            db.query(User).filter_by(email="validador.concierge@atlas.demo").first()
+        )
         if not validador:
             validador = User(
                 organization_id=org.id,
@@ -103,7 +115,9 @@ def run_stage0_seed():
             )
             db.add(validador)
 
-        analista = db.query(User).filter_by(email="analista.concierge@atlas.demo").first()
+        analista = (
+            db.query(User).filter_by(email="analista.concierge@atlas.demo").first()
+        )
         if not analista:
             analista = User(
                 organization_id=org.id,
@@ -116,12 +130,20 @@ def run_stage0_seed():
 
         db.commit()
 
-        print("3. Conferindo o estado do catálogo (nenhuma regra é publicada por aqui)...")
-        regras_lajeado = db.query(RegulatoryRule).filter_by(jurisdiction="BR-RS-4311403").all()
+        print(
+            "3. Conferindo o estado do catálogo (nenhuma regra é publicada por aqui)..."
+        )
+        regras_lajeado = (
+            db.query(RegulatoryRule).filter_by(jurisdiction="BR-RS-4311403").all()
+        )
         pendentes = [r for r in regras_lajeado if r.state != RuleState.VIGENTE]
-        print(f"   {len(regras_lajeado)} regras de Lajeado, {len(pendentes)} aguardando conferência humana.")
+        print(
+            f"   {len(regras_lajeado)} regras de Lajeado, {len(pendentes)} aguardando conferência humana."
+        )
         if pendentes:
-            print(f"   Publique-as em /catalog, como '{validador.email}', depois de conferir o texto legal.")
+            print(
+                f"   Publique-as em /catalog, como '{validador.email}', depois de conferir o texto legal."
+            )
 
         print("4. Cadastrando 5 cenários de demonstração (Concierge Lajeado)...")
 
@@ -131,20 +153,34 @@ def run_stage0_seed():
                 "desc": "Residencial unifamiliar de 2 pavimentos na Zona Z2 — Projeto 100% Conforme",
                 "use_type": "residencial_unifamiliar",
                 "params": dict(
-                    zone="Z2", building_type="residencial_unifamiliar", lot_area=450.0,
-                    built_area=225.0, floors=2, front_setback=4.50, side_setback=1.80,
-                    rear_setback=3.50, permeability_rate=20.0, parking_spaces=2
+                    zone="Z2",
+                    building_type="residencial_unifamiliar",
+                    lot_area=450.0,
+                    built_area=225.0,
+                    floors=2,
+                    front_setback=4.50,
+                    side_setback=1.80,
+                    rear_setback=3.50,
+                    permeability_rate=20.0,
+                    parking_spaces=2,
                 ),
-                "requirements": []
+                "requirements": [],
             },
             {
                 "name": "Concierge #2: Residencial Jardim Florestal",
                 "desc": "Residencial unifamiliar com recuo frontal insuficiente (3.5m vs 4.0m)",
                 "use_type": "residencial_unifamiliar",
                 "params": dict(
-                    zone="Z2", building_type="residencial_unifamiliar", lot_area=380.0,
-                    built_area=210.0, floors=2, front_setback=3.50, side_setback=1.50,
-                    rear_setback=3.20, permeability_rate=18.0, parking_spaces=1
+                    zone="Z2",
+                    building_type="residencial_unifamiliar",
+                    lot_area=380.0,
+                    built_area=210.0,
+                    floors=2,
+                    front_setback=3.50,
+                    side_setback=1.50,
+                    rear_setback=3.20,
+                    permeability_rate=18.0,
+                    parking_spaces=1,
                 ),
                 "requirements": [
                     {
@@ -152,16 +188,23 @@ def run_stage0_seed():
                         "desc": "Ajustar o recuo frontal ao mínimo exigido para a Zona Z2.",
                         "rule": "lajeado_recuo_frontal_z2",
                     }
-                ]
+                ],
             },
             {
                 "name": "Concierge #3: Residencial San José",
                 "desc": "Residencial geminado com taxa de ocupação excedida (65% vs 60% max)",
                 "use_type": "residencial_geminado",
                 "params": dict(
-                    zone="Z2", building_type="residencial_geminado", lot_area=300.0,
-                    built_area=195.0, floors=2, front_setback=4.00, side_setback=1.50,
-                    rear_setback=3.00, permeability_rate=16.0, parking_spaces=2
+                    zone="Z2",
+                    building_type="residencial_geminado",
+                    lot_area=300.0,
+                    built_area=195.0,
+                    floors=2,
+                    front_setback=4.00,
+                    side_setback=1.50,
+                    rear_setback=3.00,
+                    permeability_rate=16.0,
+                    parking_spaces=2,
                 ),
                 "requirements": [
                     {
@@ -169,16 +212,23 @@ def run_stage0_seed():
                         "desc": "Taxa de ocupação acima do limite máximo da Zona Z2.",
                         "rule": "lajeado_taxa_ocupacao_max_z2",
                     }
-                ]
+                ],
             },
             {
                 "name": "Concierge #4: Residencial Montanha",
                 "desc": "Projeto conforme nos parâmetros, mas notificado por documento complementar do órgão",
                 "use_type": "residencial_unifamiliar",
                 "params": dict(
-                    zone="Z2", building_type="residencial_unifamiliar", lot_area=500.0,
-                    built_area=240.0, floors=2, front_setback=4.20, side_setback=2.00,
-                    rear_setback=4.00, permeability_rate=25.0, parking_spaces=2
+                    zone="Z2",
+                    building_type="residencial_unifamiliar",
+                    lot_area=500.0,
+                    built_area=240.0,
+                    floors=2,
+                    front_setback=4.20,
+                    side_setback=2.00,
+                    rear_setback=4.00,
+                    permeability_rate=25.0,
+                    parking_spaces=2,
                 ),
                 "requirements": [
                     {
@@ -186,7 +236,7 @@ def run_stage0_seed():
                         "desc": "Apresentar laudo de sondagem de solo e parecer de esgotamento sanitário.",
                         "rule": None,
                     }
-                ]
+                ],
             },
             {
                 "name": "Concierge #5: Terreno Alto do Parque",
@@ -195,14 +245,18 @@ def run_stage0_seed():
                 "params": dict(
                     zone="Z2", building_type="residencial_unifamiliar", lot_area=400.0
                 ),
-                "requirements": []
-            }
+                "requirements": [],
+            },
         ]
 
         created_projects = []
         created_runs = []
         for index, sc in enumerate(scenarios, start=1):
-            proj = db.query(Project).filter_by(organization_id=org.id, name=sc["name"]).first()
+            proj = (
+                db.query(Project)
+                .filter_by(organization_id=org.id, name=sc["name"])
+                .first()
+            )
             if not proj:
                 proj = Project(
                     organization_id=org.id,
@@ -212,17 +266,19 @@ def run_stage0_seed():
                     city_name="Lajeado",
                     state="RS",
                     use_type=sc["use_type"],
-                    created_by_id=analista.id
+                    created_by_id=analista.id,
                 )
                 db.add(proj)
                 db.flush()
 
                 # Versão inicial
                 project_versions.create_version(
-                    db, proj, sc["params"],
+                    db,
+                    proj,
+                    sc["params"],
                     user=analista,
                     change_reason=f"Cadastro de Pré-análise Concierge #{index}",
-                    commit=False
+                    commit=False,
                 )
                 db.flush()
 
@@ -240,7 +296,9 @@ def run_stage0_seed():
             # Cadastra protocolo e exigências se houver
             if sc["requirements"]:
                 proj.current_version.state = ProjectVersionState.PROTOCOLADA
-                process = db.query(ProtocolProcess).filter_by(project_id=proj.id).first()
+                process = (
+                    db.query(ProtocolProcess).filter_by(project_id=proj.id).first()
+                )
                 if not process:
                     process = ProtocolProcess(
                         organization_id=org.id,
@@ -249,7 +307,7 @@ def run_stage0_seed():
                         protocol_number=f"2026/PMU-0090{index}",
                         agency="Secretaria de Planejamento e Urbanismo — Lajeado/RS",
                         status="notificado",
-                        submitted_at=str(date.today() - timedelta(days=10))
+                        submitted_at=str(date.today() - timedelta(days=10)),
                     )
                     db.add(process)
                     db.flush()
@@ -264,7 +322,8 @@ def run_stage0_seed():
                                 raised_at=str(date.today() - timedelta(days=3)),
                                 due_date=str(date.today() + timedelta(days=27)),
                                 linked_rule_key=req["rule"],
-                                was_predicted=bool(req["rule"]) and req["rule"] in apontadas,
+                                was_predicted=bool(req["rule"])
+                                and req["rule"] in apontadas,
                             )
                         )
 
@@ -285,6 +344,7 @@ def run_stage0_seed():
                 "     não conferida — comportamento esperado (§7.5). Confira o catálogo em\n"
                 "     /catalog para que passem a ser publicáveis."
             )
+        print(f"     Acesso de demonstração — senha: {DEMO_PASSWORD}")
 
     finally:
         db.close()
