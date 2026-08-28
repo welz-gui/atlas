@@ -9,7 +9,9 @@ import pytest
 # arquivo de teste desde a abstração de §6.6.
 
 
-def _upload(client, headers, project_id, filename, content=b"%PDF-1.4 conteudo", **extra):
+def _upload(
+    client, headers, project_id, filename, content=b"%PDF-1.4 conteudo", **extra
+):
     data = {"title": "Prancha", "category": "projeto_arquitetonico", "version": "v1.0"}
     data.update(extra)
     return client.post(
@@ -21,6 +23,7 @@ def _upload(client, headers, project_id, filename, content=b"%PDF-1.4 conteudo",
 
 
 # --- Segurança do upload -----------------------------------------------------
+
 
 def test_path_traversal_nao_escapa_do_diretorio(
     client, engineer_headers, project, upload_dir
@@ -68,13 +71,16 @@ def test_extensao_fora_da_allowlist_e_recusada(
 
 
 def test_arquivo_sem_extensao_e_recusado(client, engineer_headers, project, upload_dir):
-    assert _upload(client, engineer_headers, project["id"], "arquivo").status_code == 415
+    assert (
+        _upload(client, engineer_headers, project["id"], "arquivo").status_code == 415
+    )
 
 
 def test_arquivo_vazio_e_recusado(client, engineer_headers, project, upload_dir):
-    assert _upload(
-        client, engineer_headers, project["id"], "vazio.pdf", b""
-    ).status_code == 400
+    assert (
+        _upload(client, engineer_headers, project["id"], "vazio.pdf", b"").status_code
+        == 400
+    )
 
 
 def test_upload_acima_do_limite_e_recusado(
@@ -94,7 +100,9 @@ def test_upload_acima_do_limite_e_recusado(
 
 def test_hash_e_tamanho_sao_registrados(client, engineer_headers, project, upload_dir):
     content = b"%PDF-1.4 conteudo para auditoria"
-    body = _upload(client, engineer_headers, project["id"], "prancha.pdf", content).json()
+    body = _upload(
+        client, engineer_headers, project["id"], "prancha.pdf", content
+    ).json()
 
     assert body["hash_sha256"] == hashlib.sha256(content).hexdigest()
     assert body["size_bytes"] == len(content)
@@ -189,6 +197,7 @@ def test_cliente_nao_faz_upload(client, db_session, org, project, upload_dir):
 
 # --- Versionamento (§8.3) ----------------------------------------------------
 
+
 def test_upload_supersedes_nao_encontrado(
     client, engineer_headers, project, upload_dir
 ):
@@ -213,8 +222,12 @@ def test_nova_versao_torna_a_anterior_obsoleta(
     assert v1["is_current"] is True
 
     v2 = _upload(
-        client, engineer_headers, project["id"], "planta.pdf",
-        version="v2.0", supersedes_id=v1["id"],
+        client,
+        engineer_headers,
+        project["id"],
+        "planta.pdf",
+        version="v2.0",
+        supersedes_id=v1["id"],
     ).json()
 
     assert v2["status"] == "vigente"
@@ -232,8 +245,12 @@ def test_nova_versao_torna_a_anterior_obsoleta(
 def test_listagem_pode_ocultar_obsoletos(client, engineer_headers, project, upload_dir):
     v1 = _upload(client, engineer_headers, project["id"], "planta.pdf").json()
     _upload(
-        client, engineer_headers, project["id"], "planta.pdf",
-        version="v2.0", supersedes_id=v1["id"],
+        client,
+        engineer_headers,
+        project["id"],
+        "planta.pdf",
+        version="v2.0",
+        supersedes_id=v1["id"],
     )
 
     vigentes = client.get(
@@ -250,8 +267,12 @@ def test_documento_obsoleto_nao_alimenta_analise(
     """§8.3 — bloqueio de versão obsoleta."""
     v1 = _upload(client, engineer_headers, project["id"], "planta.pdf").json()
     _upload(
-        client, engineer_headers, project["id"], "planta.pdf",
-        version="v2.0", supersedes_id=v1["id"],
+        client,
+        engineer_headers,
+        project["id"],
+        "planta.pdf",
+        version="v2.0",
+        supersedes_id=v1["id"],
     )
 
     response = client.post(
@@ -281,6 +302,7 @@ def test_marcar_obsoleto_manualmente(client, engineer_headers, project, upload_d
 
 # --- QR Code (§8.3) ----------------------------------------------------------
 
+
 def test_qrcode_do_documento(client, engineer_headers, project, upload_dir):
     documento = _upload(client, engineer_headers, project["id"], "planta.pdf").json()
     response = client.get(
@@ -302,7 +324,9 @@ def test_qrcode_de_outro_tenant_responde_404(
     documento = _upload(client, engineer_headers, project["id"], "planta.pdf").json()
 
     outra_org = make_org(db_session, "Concorrente S.A.")
-    intruso = make_user(db_session, outra_org, UserRole.OWNER, "intruso-qr@atlas-qa.com")
+    intruso = make_user(
+        db_session, outra_org, UserRole.OWNER, "intruso-qr@atlas-qa.com"
+    )
 
     response = client.get(
         f"/api/v1/documents/{documento['id']}/qrcode",
@@ -312,6 +336,7 @@ def test_qrcode_de_outro_tenant_responde_404(
 
 
 # --- Extração ----------------------------------------------------------------
+
 
 def test_extracao_de_documento_inexistente_responde_404(
     client, engineer_headers, project
@@ -349,3 +374,23 @@ def test_extracao_de_documento_sem_texto_nao_inventa_valores(
     assert body["status"] == "nao_verificavel"
     assert all(value is None for value in body["extracted_parameters"].values())
     assert body["warnings"]
+
+
+def test_extracao_arquivo_nao_encontrado_no_storage_responde_410(
+    client, engineer_headers, project, upload_dir
+):
+    documento = _upload(
+        client, engineer_headers, project["id"], "prancha.pdf", b"%PDF-1.4 sem texto"
+    ).json()
+
+    # Simulate missing file in storage by clearing the upload directory
+    for f in upload_dir.iterdir():
+        f.unlink()
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/documents/{documento['id']}/extract",
+        headers=engineer_headers,
+    )
+
+    assert response.status_code == 410
+    assert "armazenamento" in response.json()["detail"].lower()
