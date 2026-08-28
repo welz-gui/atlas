@@ -159,6 +159,26 @@ def test_upload_antivirus_obrigatorio_falha(
     assert "Timeout" in response.json()["detail"]
 
 
+
+def test_upload_erro_http_aborta_escrita(
+    client, engineer_headers, project, upload_dir, monkeypatch
+):
+    from app.services.storage import StorageWriter
+    from fastapi import HTTPException
+
+    def mock_commit(*args, **kwargs):
+        raise HTTPException(status_code=400, detail="Erro simulado de HTTP")
+
+    monkeypatch.setattr(StorageWriter, "commit", mock_commit)
+
+    response = _upload(client, engineer_headers, project["id"], "planta.pdf", b"qualquer")
+
+    assert response.status_code == 400
+    assert "Erro simulado de HTTP" in response.json()["detail"]
+    # The abort is tested implicitly by making sure the file isn't created in the storage dir
+    assert list(upload_dir.iterdir()) == []
+
+
 def test_upload_erro_inesperado_aborta_escrita(
     client, engineer_headers, project, upload_dir, monkeypatch
 ):
