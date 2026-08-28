@@ -186,3 +186,28 @@ def test_banco_fora_do_ar_derruba_a_prontidao(client, monkeypatch):
     assert resposta.json()["status"] == "indisponivel"
     # E a sonda de vida continua respondendo: o processo está de pé.
     assert client.get("/api/v1/health").status_code == 200
+
+def test_excecao_nao_tratada_e_logada_e_repassada(monkeypatch, caplog):
+    """Uma exceção não tratada na requisição é registrada antes de virar 500."""
+    from app.api.v1.endpoints import health
+    import logging
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    def raise_error():
+        raise ValueError("Simulated unexpected error")
+
+    monkeypatch.setattr(health, "_check_database", raise_error)
+
+    # Use TestClient with raise_server_exceptions=False so we get the 500 response
+    # instead of the client raising the exception directly.
+    client = TestClient(app, raise_server_exceptions=False)
+    resposta = client.get("/api/v1/health/ready")
+
+    assert resposta.status_code == 500
+
+    # Ensure log is recorded
+    records = [r for r in caplog.records if r.message == "Requisição falhou"]
+    assert len(records) == 1
+    assert records[0].levelno == logging.ERROR
+    assert "Simulated unexpected error" in str(records[0].exc_info)
