@@ -85,7 +85,8 @@ def _check_antivirus() -> Dict[str, Any]:
         from app.services.antivirus import ClamAVScanner
 
         versao = ClamAVScanner()._version()
-    except Exception:  # noqa: BLE001
+    except Exception:
+        logger.exception("Erro inesperado ao verificar o antivírus")
         return {"status": "falhou", "detail": "antivírus indisponível"}
 
     if not versao:
