@@ -164,15 +164,16 @@ class RegulatoryEngine:
         db.add(run)
         db.flush()
 
-        for result in results:
-            db.add(
-                ValidationRecord(
-                    organization_id=project.organization_id,
-                    analysis_run_id=run.id,
-                    project_id=project.id,
-                    **result,
-                )
+        records = [
+            ValidationRecord(
+                organization_id=project.organization_id,
+                analysis_run_id=run.id,
+                project_id=project.id,
+                **result,
             )
+            for result in results
+        ]
+        db.add_all(records)
 
         db.commit()
         db.refresh(run)
