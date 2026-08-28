@@ -16,7 +16,9 @@ from app.models.domain import RegulatoryRule
 from app.regulatory.catalog import RegulatoryCatalog, RuleState
 
 
-def import_seed_catalog(db: Session, overwrite_validated: bool = False) -> Dict[str, int]:
+def import_seed_catalog(
+    db: Session, overwrite_validated: bool = False
+) -> Dict[str, int]:
     """Sincroniza os YAML de semente com a tabela `regulatory_rules`."""
     summary = {"created": 0, "updated": 0, "skipped_validated": 0}
 
@@ -24,18 +26,26 @@ def import_seed_catalog(db: Session, overwrite_validated: bool = False) -> Dict[
         jurisdiction = catalog["jurisdiction"]
         catalog_version = catalog["catalog_version"]
 
+        rule_keys = [raw["rule_id"] for raw in catalog["rules"]]
+        existing_rules_query = (
+            db.query(RegulatoryRule)
+            .filter(
+                RegulatoryRule.jurisdiction == jurisdiction,
+                RegulatoryRule.rule_key.in_(rule_keys),
+            )
+            .all()
+        )
+        existing_rules = {r.rule_key: r for r in existing_rules_query}
+
         for raw in catalog["rules"]:
             rule_key = raw["rule_id"]
-            existing = (
-                db.query(RegulatoryRule)
-                .filter(
-                    RegulatoryRule.jurisdiction == jurisdiction,
-                    RegulatoryRule.rule_key == rule_key,
-                )
-                .first()
-            )
+            existing = existing_rules.get(rule_key)
 
-            if existing and existing.state == RuleState.VIGENTE and not overwrite_validated:
+            if (
+                existing
+                and existing.state == RuleState.VIGENTE
+                and not overwrite_validated
+            ):
                 summary["skipped_validated"] += 1
                 continue
 
