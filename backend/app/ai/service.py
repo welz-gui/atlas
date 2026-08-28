@@ -107,6 +107,7 @@ antes de ser conferida e publicada por uma pessoa.\
 # Resultado do assistente
 # =============================================================================
 
+
 @dataclass
 class AssistantResponse:
     answer: str
@@ -220,6 +221,7 @@ def _record(
 # Resposta determinística — o piso, não o improviso
 # =============================================================================
 
+
 def _unvalidated_warning(rules: Sequence[Rule]) -> Optional[str]:
     pendentes = [r for r in rules if not r.is_publishable]
     if not pendentes:
@@ -251,7 +253,9 @@ def _format_retrieved_rules(
             if rule.check
             else "verificação documental (não derivável de parâmetros numéricos)"
         )
-        pendente = "" if rule.is_publishable else " — regra ainda não validada tecnicamente"
+        pendente = (
+            "" if rule.is_publishable else " — regra ainda não validada tecnicamente"
+        )
         linha = f"• {rule.title}: {limite}{pendente}."
         if rule.rule_id in statuses:
             linha += (
@@ -603,6 +607,7 @@ def ask(
 # Extração de rascunhos de regra
 # =============================================================================
 
+
 @dataclass
 class DraftResult:
     created_rule_ids: List[str] = field(default_factory=list)
@@ -641,7 +646,9 @@ def _draft_to_rule(
         jurisdiction=jurisdiction,
         title=draft.title,
         state=RuleState.RASCUNHO_EXTRAIDO_POR_IA,
-        severity=draft.severity if draft.severity in {"bloqueio", "alerta"} else "alerta",
+        severity=draft.severity
+        if draft.severity in {"bloqueio", "alerta"}
+        else "alerta",
         applies_to=applies_to,
         check=check,
         requires_manual_review=check is None,
@@ -669,24 +676,37 @@ def _process_draft_batch(
     document: Optional[RegulatoryDocument],
 ) -> List[str]:
     """Processa o lote de rascunhos retornando os IDs das regras criadas."""
-    criadas: List[str] = []
+    if not batch.drafts:
+        return []
 
-    for draft in batch.drafts:
-        existente = (
-            db.query(RegulatoryRule)
-            .filter(
-                RegulatoryRule.jurisdiction == jurisdiction,
-                RegulatoryRule.rule_key == draft.rule_key,
-            )
-            .first()
+    rule_keys = [draft.rule_key for draft in batch.drafts]
+    existentes = (
+        db.query(RegulatoryRule.rule_key)
+        .filter(
+            RegulatoryRule.jurisdiction == jurisdiction,
+            RegulatoryRule.rule_key.in_(rule_keys),
         )
-        if existente:
-            continue
+        .all()
+    )
+    chaves_existentes = {k[0] for k in existentes}
 
-        rule = _draft_to_rule(draft, jurisdiction, document)
-        db.add(rule)
-        db.flush()
-        db.add(
+    novas_regras = []
+    for draft in batch.drafts:
+        if draft.rule_key in chaves_existentes:
+            continue
+        chaves_existentes.add(draft.rule_key)
+        novas_regras.append(_draft_to_rule(draft, jurisdiction, document))
+
+    if not novas_regras:
+        return []
+
+    db.add_all(novas_regras)
+    db.flush()
+
+    eventos = []
+    criadas: List[str] = []
+    for rule in novas_regras:
+        eventos.append(
             RuleValidationEvent(
                 rule_id=rule.id,
                 from_state=None,
@@ -702,6 +722,7 @@ def _process_draft_batch(
         )
         criadas.append(rule.id)
 
+    db.add_all(eventos)
     db.commit()
     return criadas
 
@@ -722,7 +743,9 @@ def extract_rule_drafts(
     tivesse conferido.
     """
     engine = provider or get_provider()
-    request_hash = _request_hash(legal_text, [jurisdiction], getattr(engine, "model", None))
+    request_hash = _request_hash(
+        legal_text, [jurisdiction], getattr(engine, "model", None)
+    )
 
     if not engine.available:
         return DraftResult(
