@@ -60,7 +60,7 @@ describe("cliente de consultas", () => {
 
     // O técnico de campo perde e recupera rede o tempo todo, e é aí que a tela
     // está desatualizada (§3.7). Voltar para a aba não é motivo.
-    expect(queries.refetchOnReconnect).toBe(true);
+    expect(queries.refetchOnReconnect).toBe("always");
     expect(queries.refetchOnWindowFocus).toBe(false);
   });
 });
