@@ -265,3 +265,44 @@ def test_generate_regulatory_pdf_report_project_not_found(client, engineer_heade
     )
     assert response.status_code == 404
     assert response.json()["detail"] == "Empreendimento não encontrado."
+
+
+def test_get_project_validations_success(client, engineer_headers, seeded_catalog):
+    projeto = _criar_projeto(client, engineer_headers, "Validations Success")
+    client.post(
+        f"/api/v1/projects/{projeto['id']}/evaluate", headers=engineer_headers
+    )
+
+    response = client.get(
+        f"/api/v1/projects/{projeto['id']}/validations", headers=engineer_headers
+    )
+    assert response.status_code == 200
+    validations = response.json()
+    assert isinstance(validations, list)
+    assert len(validations) > 0
+    # verify expected structure
+    status_map = {v["rule_id"]: v["status"] for v in validations}
+    assert "lajeado_recuo_frontal_z2" in status_map
+
+
+def test_get_project_validations_no_run(client, engineer_headers, db_session, seeded_catalog):
+    projeto = _criar_projeto(client, engineer_headers, "Validations No Run")
+
+    db_session.query(AnalysisRun).filter_by(project_id=projeto["id"]).delete()
+    db_session.commit()
+
+    response = client.get(
+        f"/api/v1/projects/{projeto['id']}/validations", headers=engineer_headers
+    )
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_get_project_validations_not_found(client, engineer_headers):
+    import uuid
+    non_existent_id = str(uuid.uuid4())
+    response = client.get(
+        f"/api/v1/projects/{non_existent_id}/validations", headers=engineer_headers
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Empreendimento não encontrado."
