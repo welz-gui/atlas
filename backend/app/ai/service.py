@@ -671,36 +671,50 @@ def _process_draft_batch(
     """Processa o lote de rascunhos retornando os IDs das regras criadas."""
     criadas: List[str] = []
 
-    for draft in batch.drafts:
-        existente = (
-            db.query(RegulatoryRule)
-            .filter(
-                RegulatoryRule.jurisdiction == jurisdiction,
-                RegulatoryRule.rule_key == draft.rule_key,
-            )
-            .first()
+    draft_keys = [draft.rule_key for draft in batch.drafts]
+    existentes = (
+        db.query(RegulatoryRule.rule_key)
+        .filter(
+            RegulatoryRule.jurisdiction == jurisdiction,
+            RegulatoryRule.rule_key.in_(draft_keys),
         )
-        if existente:
+        .all()
+    )
+    chaves_existentes = {r[0] for r in existentes}
+
+    novas_regras = []
+    for draft in batch.drafts:
+        if draft.rule_key in chaves_existentes:
             continue
 
+        chaves_existentes.add(draft.rule_key)
+
         rule = _draft_to_rule(draft, jurisdiction, document)
-        db.add(rule)
+        novas_regras.append(rule)
+
+    if novas_regras:
+        db.add_all(novas_regras)
         db.flush()
-        db.add(
-            RuleValidationEvent(
-                rule_id=rule.id,
-                from_state=None,
-                to_state=RuleState.RASCUNHO_EXTRAIDO_POR_IA,
-                action="extraida_por_ia",
-                notes=(
-                    f"Extraída por {result.provider}/{result.model} a partir de texto "
-                    f"legal enviado por {user.name}. Aguarda conferência humana."
-                ),
-                actor_id=user.id,
-                actor_name=user.name,
+
+        eventos = []
+        for rule in novas_regras:
+            eventos.append(
+                RuleValidationEvent(
+                    rule_id=rule.id,
+                    from_state=None,
+                    to_state=RuleState.RASCUNHO_EXTRAIDO_POR_IA,
+                    action="extraida_por_ia",
+                    notes=(
+                        f"Extraída por {result.provider}/{result.model} a partir de texto "
+                        f"legal enviado por {user.name}. Aguarda conferência humana."
+                    ),
+                    actor_id=user.id,
+                    actor_name=user.name,
+                )
             )
-        )
-        criadas.append(rule.id)
+            criadas.append(rule.id)
+
+        db.add_all(eventos)
 
     db.commit()
     return criadas
