@@ -186,3 +186,38 @@ def test_banco_fora_do_ar_derruba_a_prontidao(client, monkeypatch):
     assert resposta.json()["status"] == "indisponivel"
     # E a sonda de vida continua respondendo: o processo está de pé.
     assert client.get("/api/v1/health").status_code == 200
+
+
+def test_sonda_armazenamento_falha(monkeypatch):
+    import app.services.storage
+    from app.api.v1.endpoints.health import _check_storage
+
+    def erro():
+        raise RuntimeError("simulado")
+
+    monkeypatch.setattr(app.services.storage, "get_storage", erro)
+    assert _check_storage() == {"status": "falhou", "detail": "armazenamento indisponível"}
+
+
+def test_sonda_fila_falha(monkeypatch):
+    import app.workers.queue
+    from app.api.v1.endpoints.health import _check_queue
+
+    def erro():
+        raise RuntimeError("simulado")
+
+    monkeypatch.setattr(app.workers.queue, "get_queue", erro)
+    assert _check_queue() == {"status": "falhou", "detail": "fila indisponível"}
+
+
+def test_sonda_antivirus_falha(monkeypatch):
+    import app.services.antivirus
+    from app.api.v1.endpoints.health import _check_antivirus
+    from app.core.config import settings
+
+    def erro():
+        raise RuntimeError("simulado")
+
+    monkeypatch.setattr(settings, "ANTIVIRUS_BACKEND", "clamav")
+    monkeypatch.setattr(app.services.antivirus, "ClamAVScanner", erro)
+    assert _check_antivirus() == {"status": "falhou", "detail": "antivírus indisponível"}
