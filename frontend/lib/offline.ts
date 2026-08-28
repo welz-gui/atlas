@@ -168,44 +168,70 @@ export async function flushOutbox(): Promise<FlushReport> {
   const items = await listOutbox();
   let sent = 0;
   let failed = 0;
+  let isOffline = false;
 
-  for (const item of items) {
-    if (item.status === "falhou") {
-      failed += 1;
-      continue;
-    }
+  // A concurrent worker pool with a concurrency limit.
+  // It handles the items sequentially per worker, ensuring we don't start
+  // any operations (like DB updates or network requests) once isOffline is true.
 
-    await update({ ...item, status: "enviando" });
+  let currentIndex = 0;
 
-    try {
-      if (item.kind === "daily_log") {
-        await createDailyLog(item.projectId, item.payload as never);
-      } else {
-        await createProjectTask(item.projectId, item.payload as never);
+  async function worker() {
+    while (currentIndex < items.length) {
+      if (isOffline) break;
+
+      const item = items[currentIndex++];
+
+      if (item.status === "falhou") {
+        failed += 1;
+        continue;
       }
-      await removeFromOutbox(item.id);
-      sent += 1;
-    } catch (error) {
-      const apiError = error instanceof ApiError ? error : null;
-      const permanente =
-        apiError !== null &&
-        apiError.status >= 400 &&
-        apiError.status < 500 &&
-        apiError.status !== 401;
 
-      await update({
-        ...item,
-        status: permanente ? "falhou" : "pendente",
-        attempts: item.attempts + 1,
-        lastError: apiError?.detail ?? (error as Error).message,
-      });
-      failed += 1;
+      await update({ ...item, status: "enviando" });
 
-      // Falha de rede derruba o resto da tentativa: não adianta insistir nos
-      // próximos itens enquanto não há conexão.
-      if (apiError?.isOffline) break;
+      if (isOffline) {
+        // Se a rede caiu durante o update local (raro mas possível em concorrência alta)
+        // Restauramos para pendente
+        await update({ ...item, status: "pendente" });
+        break;
+      }
+
+      try {
+        if (item.kind === "daily_log") {
+          await createDailyLog(item.projectId, item.payload as never);
+        } else {
+          await createProjectTask(item.projectId, item.payload as never);
+        }
+        await removeFromOutbox(item.id);
+        sent += 1;
+      } catch (error) {
+        const apiError = error instanceof ApiError ? error : null;
+        const permanente =
+          apiError !== null &&
+          apiError.status >= 400 &&
+          apiError.status < 500 &&
+          apiError.status !== 401;
+
+        await update({
+          ...item,
+          status: permanente ? "falhou" : "pendente",
+          attempts: item.attempts + 1,
+          lastError: apiError?.detail ?? (error as Error).message,
+        });
+        failed += 1;
+
+        if (apiError?.isOffline) {
+          isOffline = true;
+          break;
+        }
+      }
     }
   }
+
+  // Limit concurrency to avoid network/DB starvation but still get a speedup
+  const concurrency = Math.min(5, items.length);
+  const workers = Array.from({ length: concurrency }, () => worker());
+  await Promise.all(workers);
 
   const remaining = (await listOutbox()).length;
   return { sent, failed, remaining };
