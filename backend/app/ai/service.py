@@ -671,22 +671,38 @@ def _process_draft_batch(
     """Processa o lote de rascunhos retornando os IDs das regras criadas."""
     criadas: List[str] = []
 
-    for draft in batch.drafts:
-        existente = (
-            db.query(RegulatoryRule)
-            .filter(
-                RegulatoryRule.jurisdiction == jurisdiction,
-                RegulatoryRule.rule_key == draft.rule_key,
-            )
-            .first()
+    if not batch.drafts:
+        return criadas
+
+    draft_keys = [d.rule_key for d in batch.drafts]
+    existing_keys = {
+        row[0]
+        for row in db.query(RegulatoryRule.rule_key)
+        .filter(
+            RegulatoryRule.jurisdiction == jurisdiction,
+            RegulatoryRule.rule_key.in_(draft_keys),
         )
-        if existente:
+        .all()
+    }
+
+    rules_to_add = []
+    for draft in batch.drafts:
+        if draft.rule_key in existing_keys:
             continue
+        existing_keys.add(draft.rule_key)
 
         rule = _draft_to_rule(draft, jurisdiction, document)
-        db.add(rule)
-        db.flush()
-        db.add(
+        rules_to_add.append(rule)
+
+    if not rules_to_add:
+        return criadas
+
+    db.add_all(rules_to_add)
+    db.flush()
+
+    events_to_add = []
+    for rule in rules_to_add:
+        events_to_add.append(
             RuleValidationEvent(
                 rule_id=rule.id,
                 from_state=None,
@@ -702,6 +718,7 @@ def _process_draft_batch(
         )
         criadas.append(rule.id)
 
+    db.add_all(events_to_add)
     db.commit()
     return criadas
 
