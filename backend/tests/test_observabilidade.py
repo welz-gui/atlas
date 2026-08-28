@@ -186,3 +186,23 @@ def test_banco_fora_do_ar_derruba_a_prontidao(client, monkeypatch):
     assert resposta.json()["status"] == "indisponivel"
     # E a sonda de vida continua respondendo: o processo está de pé.
     assert client.get("/api/v1/health").status_code == 200
+
+def test_fila_fora_do_ar_e_reportada_na_sonda(client, monkeypatch):
+    """A falha na fila aparece no relatório, mas não derruba a prontidão."""
+    from app.workers import queue
+
+    def mock_get_queue():
+        raise RuntimeError("Simulando falha de conexão com a fila")
+
+    monkeypatch.setattr(queue, "get_queue", mock_get_queue)
+
+    resposta = client.get("/api/v1/health/ready")
+
+    # A fila não é essencial, então a sonda de prontidão continua respondendo 200
+    assert resposta.status_code == 200
+
+    corpo = resposta.json()
+    componente = corpo["components"]["queue"]
+
+    assert componente["status"] == "falhou"
+    assert componente["detail"] == "fila indisponível"
