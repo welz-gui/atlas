@@ -191,9 +191,13 @@ class RegulatoryReportGenerator:
         table_rows = [header]
         status_row_styles = []
 
+        cached_status_paragraphs = {}
+
         for index, item in enumerate(validations, start=1):
             status = str(item.get("status", ""))
-            label, color = STATUS_PRESENTATION.get(status, (status.upper(), "#334155"))
+            if status not in cached_status_paragraphs:
+                label, color = STATUS_PRESENTATION.get(status, (status.upper(), "#334155"))
+                cached_status_paragraphs[status] = Paragraph(f"<font color='{color}'><b>{label}</b></font>", styles["bold"])
 
             citation = str(item.get("source_citation") or "—")
             if not item.get("source_is_verified", False):
@@ -203,7 +207,7 @@ class RegulatoryReportGenerator:
                 Paragraph(str(item.get("rule_title", "")), styles["normal"]),
                 Paragraph(str(item.get("expected_value", "")), styles["normal"]),
                 Paragraph(str(item.get("actual_value", "")), styles["normal"]),
-                Paragraph(f"<font color='{color}'><b>{label}</b></font>", styles["bold"]),
+                cached_status_paragraphs[status],
                 Paragraph(citation, styles["small"]),
             ])
             if status == "nao_verificavel":
