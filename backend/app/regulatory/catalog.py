@@ -26,6 +26,7 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 # --- Estados da regra (§7.4) -------------------------------------------------
 
+
 class RuleState:
     RASCUNHO_EXTRAIDO_POR_IA = "rascunho_extraido_por_ia"
     EM_VALIDACAO = "em_validacao"
@@ -35,8 +36,12 @@ class RuleState:
     SUBSTITUIDA = "substituida"
 
     ALL = {
-        RASCUNHO_EXTRAIDO_POR_IA, EM_VALIDACAO, VIGENTE,
-        SUSPENSA, REVOGADA, SUBSTITUIDA,
+        RASCUNHO_EXTRAIDO_POR_IA,
+        EM_VALIDACAO,
+        VIGENTE,
+        SUSPENSA,
+        REVOGADA,
+        SUBSTITUIDA,
     }
 
 
@@ -51,7 +56,9 @@ PUBLISHABLE_STATES = {RuleState.VIGENTE}
 ALLOWED_TRANSITIONS: Dict[str, set] = {
     RuleState.RASCUNHO_EXTRAIDO_POR_IA: {RuleState.EM_VALIDACAO, RuleState.REVOGADA},
     RuleState.EM_VALIDACAO: {
-        RuleState.VIGENTE, RuleState.RASCUNHO_EXTRAIDO_POR_IA, RuleState.REVOGADA,
+        RuleState.VIGENTE,
+        RuleState.RASCUNHO_EXTRAIDO_POR_IA,
+        RuleState.REVOGADA,
     },
     RuleState.VIGENTE: {RuleState.SUSPENSA, RuleState.REVOGADA, RuleState.SUBSTITUIDA},
     RuleState.SUSPENSA: {RuleState.VIGENTE, RuleState.EM_VALIDACAO, RuleState.REVOGADA},
@@ -66,6 +73,7 @@ class Severity:
 
 
 # --- Estados da verificação (§7.7) -------------------------------------------
+
 
 class CheckOutcome:
     CONFORME = "conforme"
@@ -196,7 +204,9 @@ class Rule:
     def expected_label(self) -> str:
         if not self.check:
             return "Análise documental / gráfica"
-        return f"{self.check['operator']} {self.format_value(self.check['value'])}".strip()
+        return (
+            f"{self.check['operator']} {self.format_value(self.check['value'])}".strip()
+        )
 
     def format_value(self, value: Any) -> str:
         if value is None:
@@ -294,10 +304,14 @@ class RegulatoryCatalog:
 
     # -- carregamento do banco --------------------------------------------
     @classmethod
-    def from_db(cls, db: Session, jurisdiction: Optional[str] = None) -> "RegulatoryCatalog":
+    def from_db(
+        cls, db: Session, jurisdiction: Optional[str] = None
+    ) -> "RegulatoryCatalog":
         from app.models.domain import RegulatoryRule
 
-        query = db.query(RegulatoryRule).filter(RegulatoryRule.superseded_by_id.is_(None))
+        query = db.query(RegulatoryRule).filter(
+            RegulatoryRule.superseded_by_id.is_(None)
+        )
         if jurisdiction:
             query = query.filter(
                 RegulatoryRule.jurisdiction.in_(jurisdiction_chain(jurisdiction))
@@ -315,13 +329,23 @@ class RegulatoryCatalog:
     def load_seed_files(cls, data_dir: str = DATA_DIR) -> List[Dict[str, Any]]:
         """Lê os YAML de semente. Não toca no banco."""
         catalogs: List[Dict[str, Any]] = []
+
+        # Security: Prevent directory traversal by ensuring data_dir is within DATA_DIR
+        abs_data_dir = os.path.abspath(data_dir)
+        abs_base_dir = os.path.abspath(DATA_DIR)
+
+        if os.path.commonpath([abs_base_dir, abs_data_dir]) != abs_base_dir:
+            raise ValueError("data_dir must be within the designated data directory")
+
         if not os.path.isdir(data_dir):
             return catalogs
 
         for filename in sorted(os.listdir(data_dir)):
             if not filename.endswith((".yaml", ".yml")):
                 continue
-            with open(os.path.join(data_dir, filename), "r", encoding="utf-8") as handle:
+            with open(
+                os.path.join(data_dir, filename), "r", encoding="utf-8"
+            ) as handle:
                 payload = yaml.safe_load(handle) or {}
 
             jurisdiction = (payload.get("jurisdiction") or {}).get("code")
