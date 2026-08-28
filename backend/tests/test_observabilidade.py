@@ -186,3 +186,17 @@ def test_banco_fora_do_ar_derruba_a_prontidao(client, monkeypatch):
     assert resposta.json()["status"] == "indisponivel"
     # E a sonda de vida continua respondendo: o processo está de pé.
     assert client.get("/api/v1/health").status_code == 200
+
+
+def test_check_database_captura_excecao(monkeypatch):
+    from sqlalchemy.orm import Session
+    from app.api.v1.endpoints.health import _check_database
+
+    def mock_execute(*args, **kwargs):
+        raise Exception("Erro forçado")
+
+    monkeypatch.setattr(Session, "execute", mock_execute)
+
+    resultado = _check_database()
+
+    assert resultado == {"status": "falhou", "detail": "banco de dados indisponível"}
