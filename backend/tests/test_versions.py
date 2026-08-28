@@ -178,3 +178,24 @@ def test_taxa_de_ocupacao_e_derivada_da_versao(client, engineer_headers, project
         json={"built_area": 300.0},
     ).json()
     assert nova["occupancy_rate"] == 66.7
+
+
+def test_mark_official_baseline_value_error(client, engineer_headers, project, monkeypatch):
+    version_id = project["current_version"]["id"]
+    client.patch(
+        f"/api/v1/projects/{project['id']}/versions/{version_id}/state",
+        headers=engineer_headers,
+        json={"state": "aprovada"},
+    )
+
+    def mock_set_official_baseline(*args, **kwargs):
+        raise ValueError("Simulated error")
+
+    monkeypatch.setattr("app.api.v1.endpoints.projects.project_versions.set_official_baseline", mock_set_official_baseline)
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/versions/{version_id}/baseline",
+        headers=engineer_headers,
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Simulated error"
