@@ -259,3 +259,30 @@ def test_antivirus_daemon_nao_responde_ao_version(client, monkeypatch):
 
     assert componente["status"] == "falhou"
     assert componente["detail"] == "clamd não respondeu ao VERSION."
+
+
+def test_excecao_nao_tratada_e_logada_antes_de_virar_500(monkeypatch, caplog):
+    """A observability middleware (app/main.py) loga antes de repassar (§12)."""
+    import logging
+
+    from fastapi.testclient import TestClient
+
+    from app.api.v1.endpoints import health
+    from app.main import app
+
+    def falha():
+        raise ValueError("erro inesperado simulado")
+
+    monkeypatch.setattr(health, "_check_database", falha)
+
+    # raise_server_exceptions=False: queremos a resposta 500, não a exceção
+    # subindo pelo próprio cliente de teste.
+    client_sem_propagar = TestClient(app, raise_server_exceptions=False)
+    resposta = client_sem_propagar.get("/api/v1/health/ready")
+
+    assert resposta.status_code == 500
+
+    registros = [r for r in caplog.records if r.message == "Requisição falhou"]
+    assert len(registros) == 1
+    assert registros[0].levelno == logging.ERROR
+    assert "erro inesperado simulado" in str(registros[0].exc_info)
