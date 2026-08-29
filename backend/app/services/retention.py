@@ -28,7 +28,7 @@ from app.models.domain import (
     JobRecord,
     JobStatus,
 )
-from app.services.storage import ObjectNotFound, StorageBackend, get_storage
+from app.services.storage import StorageBackend, get_storage
 
 
 def retention_deadline(
@@ -111,25 +111,36 @@ def purge_expired_documents(
     moment = now or datetime.utcnow()
     report = PurgeReport(dry_run=dry_run)
 
-    for document in eligible_documents(db, organization_id, moment):
+    documents = list(eligible_documents(db, organization_id, moment))
+    if not documents:
+        return report
+
+    keys_to_delete = []
+    for document in documents:
         report.examined += 1
         report.document_ids.append(document.id)
+        if not dry_run:
+            keys_to_delete.append(document.file_path)
+
+    removal_results = {}
+    if not dry_run and keys_to_delete:
+        try:
+            removal_results = backend.delete_bulk(keys_to_delete)
+        except Exception:
+            for key in keys_to_delete:
+                removal_results[key] = "error"
+
+    for document in documents:
         if dry_run:
             continue
 
-        try:
-            removed = backend.delete(document.file_path)
-        except ObjectNotFound:
-            removed = False
-        except Exception as exc:  # falha de rede/permissão no backend remoto
+        status = removal_results.get(document.file_path, "error")
+        if status == "error":
             report.failed += 1
-            report.errors.append(f"{document.id}: {exc}")
+            report.errors.append(f"{document.id}: falha na remoção do backend remoto")
             continue
 
-        if not removed:
-            # O arquivo já não estava lá. O registro precisa refletir isso do
-            # mesmo jeito: o que importa para quem consulta é que o binário não
-            # existe mais, e não quem o removeu primeiro.
+        if status == "missing":
             report.already_missing += 1
 
         document.purged_at = moment

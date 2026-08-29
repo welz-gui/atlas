@@ -199,6 +199,10 @@ class StorageBackend(ABC):
     def delete(self, key: str) -> bool:
         """Remove o objeto. Devolve falso se já não existia."""
 
+    @abstractmethod
+    def delete_bulk(self, keys: list[str]) -> dict[str, str]:
+        """Remove múltiplos objetos. Retorna o status de cada um: 'deleted', 'missing' ou 'error'."""
+
     def read(self, key: str) -> bytes:
         with self.open(key) as handle:
             return handle.read()
@@ -249,6 +253,16 @@ class LocalStorage(StorageBackend):
             return True
         except FileNotFoundError:
             return False
+
+    def delete_bulk(self, keys: list[str]) -> dict[str, str]:
+        results = {}
+        for key in keys:
+            try:
+                deleted = self.delete(key)
+                results[key] = "deleted" if deleted else "missing"
+            except Exception:
+                results[key] = "error"
+        return results
 
     def describe(self) -> str:
         return f"local:{self.root}"
@@ -325,6 +339,33 @@ class S3Storage(StorageBackend):
             return False
         self.client.delete_object(Bucket=self.bucket, Key=self._object_key(key))
         return True
+
+    def delete_bulk(self, keys: list[str]) -> dict[str, str]:
+        results = {}
+        for i in range(0, len(keys), 1000):
+            batch = keys[i:i+1000]
+            # Map object keys back to original keys safely
+            key_map = {self._object_key(k): k for k in batch}
+            try:
+                response = self.client.delete_objects(
+                    Bucket=self.bucket,
+                    Delete={
+                        'Objects': [{'Key': k} for k in key_map.keys()],
+                        'Quiet': False
+                    }
+                )
+                for deleted in response.get('Deleted', []):
+                    obj_key = deleted.get('Key', '')
+                    if obj_key in key_map:
+                        results[key_map[obj_key]] = "deleted"
+                for error in response.get('Errors', []):
+                    obj_key = error.get('Key', '')
+                    if obj_key in key_map:
+                        results[key_map[obj_key]] = "error"
+            except Exception:
+                for k in batch:
+                    results[k] = "error"
+        return results
 
     def describe(self) -> str:
         return f"s3:{self.bucket}/{self.prefix}"
