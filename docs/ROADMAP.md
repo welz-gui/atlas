@@ -4,16 +4,17 @@ Documento vivo. Consolida o **roadmap estratégico** do plano (§9 e §10 de
 [`PLANO_DE_IMPLEMENTACAO_v2.md`](PLANO_DE_IMPLEMENTACAO_v2.md)) com o **estado
 real do código** e o **caminho de execução** de cada estágio.
 
-- Última atualização: **2026-08-17**
-- Base avaliada: `master` em `8676206`, espelhada em
+- Última atualização: **2026-08-29**
+- Base avaliada: `master` em `188a98f`, espelhada em
   [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
   estágios foi levantado em `7dc50d2` e continua valendo, com uma exceção
   registrada abaixo: o **Estágio 6 deixou de ser "nada construído"**.
 - **A Fase D está encerrada, exceto pelo D3** — que nunca foi de engenharia.
   Ver o registro adiante.
-- Suíte: **353 casos de backend** (eram 199 em `7dc50d2`) e **15 de frontend**.
-  Mais 13 de integração e 6 de RLS, que só rodam na CI porque exigem Postgres,
-  MinIO e clamd. Reproduz em ~90 s:
+- Suíte: **441 casos de backend** (eram 199 em `7dc50d2`) e **21 de
+  frontend** (3 arquivos, incluindo o primeiro teste de componente do
+  projeto). Mais 13 de integração e 6 de RLS, que só rodam na CI porque
+  exigem Postgres, MinIO e clamd. Reproduz em ~3 min:
   `backend/.venv/Scripts/python -m pytest tests/ -q`.
 - **Cinco portões** rodam a cada push e a cada PR
   (`.github/workflows/ci.yml`): suíte de backend, migrations construídas e
@@ -239,7 +240,7 @@ Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
 ## Estado atual em uma página
 
-**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 353 testes; RLS ativa, MFA
+**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 441 testes; RLS ativa, MFA
 por TOTP, log em JSON com correlação e sondas de vida e prontidão):
 
 ```
@@ -265,8 +266,9 @@ app/
 **Frontend** (Next.js 14 App Router + TypeScript + Tailwind + TanStack Query):
 `/login`, `/`, `/projects`, `/approvals`, `/catalog`, `/protocol`,
 `/documents`, `/plan`, `/daily-log`, `/ai`, `/portal`. PWA com service worker e
-fila offline. Quinze testes, todos sobre o cliente HTTP e a camada de consulta —
-componentes e telas seguem sem cobertura.
+fila offline. Vinte e um testes em três arquivos: cliente HTTP, camada de
+consulta, e um primeiro componente (`ErrorBanner`) — o resto das telas segue
+sem cobertura.
 
 **Mapa dos estágios:**
 
@@ -1342,6 +1344,66 @@ um sem escolher nenhum. Suíte: 353 → 367.
 si. Depende de decisão e de conta, não de código — e, como o D3, não é
 engenharia que o trava.
 
+### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-08-29)
+
+Um agente externo (Jules, do Google) abriu duas levas de PRs contra o
+repositório — 30 na primeira, 42 na segunda — do tipo "code health": remoção
+de import morto, refator de função complexa, teste de caminho de erro,
+correção de N+1, e algumas de segurança. Nenhuma foi mesclada às cegas por CI
+verde; cada uma foi lida contra o código real antes de decidir. O que isso
+revelou vale mais do que qualquer regra individual corrigida:
+
+**Achados que se confirmaram reais:**
+
+- **CORS com `allow_credentials=True`** sem que a aplicação jamais usasse
+  cookie — a autenticação é 100% por `Authorization: Bearer`. Desligado; sem
+  efeito observável, porque o navegador só manda credencial cross-origin se o
+  cliente pedir, e o cliente nunca pedia;
+- **`/health/ready` vazava o texto cru da exceção** (`f"{type(exc).__name__}:
+  {exc}"`) num endpoint sem autenticação — o oitavo achado da família "afirma
+  sem apurar", desta vez ao contrário: apurava demais, para quem não deveria
+  ver;
+- **senha de demonstração hardcoded** em `seed.py` e
+  `stage0_concierge_seed.py`, visível a qualquer um que lesse o repositório;
+- **SSRF no coletor**: `fetch_source` não conferia o esquema da URL antes de
+  buscar — um índice malicioso podia apontar para `file://` ou outro esquema;
+- **`refetchOnReconnect: true` não fazia o que o comentário ao lado dizia.**
+  Com `staleTime` de 30 s, uma queda de rede mais curta que isso não disparava
+  refetch — o técnico de campo voltava da queda vendo dado potencialmente
+  velho, exatamente o cenário que o comentário original dizia resolver. Trocado
+  para `"always"`.
+
+**Padrões que se repetiram e mudaram como a revisão foi feita:**
+
+- **PRs em cacho mirando a mesma linha.** Em dois casos (segredo de MFA em
+  `auth.py`, lote de rascunhos em `ai/service.py`) três PRs propunham o mesmo
+  fix de N+1 com pequenas variações — só a mais completa foi mesclada, as
+  outras fechadas como superadas. Em outros seis casos (`test_deps.py`,
+  `test_observabilidade.py`, `test_regulatory_engine.py` duas vezes,
+  `test_documents.py`), várias PRs criavam o **mesmo arquivo novo** ou
+  apendiam no **mesmo ponto** cobrindo funções diferentes sem sobreposição
+  real — nenhuma mesclava sozinha sem descartar as outras, então cada cluster
+  foi reescrito à mão como uma PR só, com o melhor de cada uma;
+- **framing de segurança/performance inflado.** "SQL injection" na string de
+  conexão do SQLite cujo único componente variável é o caminho do próprio
+  código-fonte, não entrada de usuário; "path traversal" numa função chamada
+  só internamente, sempre com o mesmo argumento padrão. As correções foram
+  aceitas como *hardening* honesto — o comentário do código diz isso agora —
+  não como "vulnerabilidade corrigida";
+- **PRs com arquivo de benchmark solto na raiz do backend**, um deles
+  literalmente não executável fora de um ambiente montado à mão. Rejeitadas
+  inteiras ou refeitas sem o lixo;
+- **uma "otimização" que enfraquecia uma garantia documentada**: um pool de
+  workers concorrentes em `flushOutbox()` (fila offline) que precisava de
+  código extra só para conter a corrida que a própria concorrência introduzia,
+  contra um volume de itens (poucos por sessão de campo) que não justificava o
+  risco. Rejeitada.
+
+Resultado: **21 PRs mescladas na primeira leva, 21 na segunda** (16 diretas +
+5 reescritas), **25 fechadas** na segunda leva sozinha, com comentário
+explicando o motivo em cada uma. Suíte: 367 → 441 (backend), 15 → 21
+(frontend, +1 arquivo — o primeiro teste de componente do projeto).
+
 ---
 
 # Fase D — Liberação do Estágio 1 (encerrada, exceto o D3)
@@ -1460,7 +1522,7 @@ vazia.
 
 | Dívida | Impacto | Onde |
 |---|---|---|
-| Teste de frontend só no cliente HTTP | `lib/api.test.ts` trava o I13 e roda na CI; componentes e telas seguem sem cobertura | `frontend/` |
+| Frontend quase sem teste de componente | Um só (`ErrorBanner`, via Testing Library); o resto das telas segue sem cobertura | `frontend/` |
 | Sem cofre de segredos | `repr` não vaza, backend `file` já é compatível com um cofre externo e a rotação de `SECRET_KEY` não derruba MFA; falta o cofre em si, com rotação automática e auditoria de acesso | acompanha a escolha do provedor |
 | Sem métricas, rastreamento nem alerta | O log estruturado existe e alimenta os três; falta para onde mandá-los | acompanha a escolha do provedor |
 | **Sem provedor de hospedagem** | A imagem e a composição existem; o ambiente, não | `docker-compose.prod.yml` |
