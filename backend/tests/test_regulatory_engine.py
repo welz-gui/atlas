@@ -315,3 +315,50 @@ def test_evaluate_project_without_version_raises_409(
         response.json()["detail"]
         == "O empreendimento não possui nenhuma versão de projeto para analisar."
     )
+
+
+def test_get_project_validations_devolve_a_analise_mais_recente(
+    client, engineer_headers, seeded_catalog
+):
+    projeto = _criar_projeto(client, engineer_headers, "Validações — com análise")
+    client.post(f"/api/v1/projects/{projeto['id']}/evaluate", headers=engineer_headers)
+
+    response = client.get(
+        f"/api/v1/projects/{projeto['id']}/validations", headers=engineer_headers
+    )
+
+    assert response.status_code == 200
+    validacoes = response.json()
+    assert len(validacoes) > 0
+    assert "lajeado_recuo_frontal_z2" in {v["rule_id"] for v in validacoes}
+
+
+def test_get_project_validations_sem_analise_devolve_lista_vazia(
+    client, engineer_headers, db_session, seeded_catalog
+):
+    """Sem AnalysisRun, a lista é vazia — não é erro, é a ausência de dado (I1).
+
+    `POST /projects` já dispara `RegulatoryEngine.evaluate_project` com
+    `trigger="project_created"` — por isso é preciso apagar o AnalysisRun
+    resultante para exercitar de fato o caminho "sem análise".
+    """
+    projeto = _criar_projeto(client, engineer_headers, "Validações — sem análise")
+    db_session.query(AnalysisRun).filter_by(project_id=projeto["id"]).delete()
+    db_session.commit()
+
+    response = client.get(
+        f"/api/v1/projects/{projeto['id']}/validations", headers=engineer_headers
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_get_project_validations_projeto_inexistente_responde_404(
+    client, engineer_headers
+):
+    response = client.get(
+        f"/api/v1/projects/{uuid.uuid4()}/validations", headers=engineer_headers
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Empreendimento não encontrado."
