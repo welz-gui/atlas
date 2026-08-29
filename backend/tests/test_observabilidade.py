@@ -186,3 +186,76 @@ def test_banco_fora_do_ar_derruba_a_prontidao(client, monkeypatch):
     assert resposta.json()["status"] == "indisponivel"
     # E a sonda de vida continua respondendo: o processo está de pé.
     assert client.get("/api/v1/health").status_code == 200
+
+
+def test_check_database_captura_excecao(monkeypatch):
+    """O detalhe da exceção não escapa para a resposta (§12) — só o rótulo genérico."""
+    from sqlalchemy.orm import Session
+
+    from app.api.v1.endpoints.health import _check_database
+
+    def falha(*args, **kwargs):
+        raise Exception("erro forçado, com detalhe que não deve aparecer")
+
+    monkeypatch.setattr(Session, "execute", falha)
+
+    assert _check_database() == {"status": "falhou", "detail": "banco de dados indisponível"}
+
+
+def test_check_storage_captura_excecao(monkeypatch):
+    import app.services.storage
+    from app.api.v1.endpoints.health import _check_storage
+
+    def falha():
+        raise RuntimeError("erro forçado")
+
+    monkeypatch.setattr(app.services.storage, "get_storage", falha)
+
+    assert _check_storage() == {"status": "falhou", "detail": "armazenamento indisponível"}
+
+
+def test_fila_fora_do_ar_e_reportada_sem_derrubar_a_prontidao(client, monkeypatch):
+    """A fila não é essencial (`ESSENTIAL = ("database",)`): falha aparece, mas não derruba 200."""
+    from app.workers import queue
+
+    def falha():
+        raise RuntimeError("erro forçado")
+
+    monkeypatch.setattr(queue, "get_queue", falha)
+
+    resposta = client.get("/api/v1/health/ready")
+
+    assert resposta.status_code == 200
+    componente = resposta.json()["components"]["queue"]
+    assert componente["status"] == "falhou"
+    assert componente["detail"] == "fila indisponível"
+
+
+def test_antivirus_indisponivel_por_excecao(client, monkeypatch):
+    """Exceção ao consultar o clamd — distinto de 'desligado por configuração'."""
+    from app.core.config import settings
+    from app.services.antivirus import ClamAVScanner
+
+    monkeypatch.setattr(settings, "ANTIVIRUS_BACKEND", "clamav")
+    monkeypatch.setattr(
+        ClamAVScanner, "_version", lambda self: (_ for _ in ()).throw(RuntimeError("simulado"))
+    )
+
+    componente = client.get("/api/v1/health/ready").json()["components"]["antivirus"]
+
+    assert componente["status"] == "falhou"
+    assert componente["detail"] == "antivírus indisponível"
+
+
+def test_antivirus_daemon_nao_responde_ao_version(client, monkeypatch):
+    """Sem exceção, mas sem versão — o clamd está de pé mas não respondeu."""
+    from app.core.config import settings
+    from app.services.antivirus import ClamAVScanner
+
+    monkeypatch.setattr(settings, "ANTIVIRUS_BACKEND", "clamav")
+    monkeypatch.setattr(ClamAVScanner, "_version", lambda self: None)
+
+    componente = client.get("/api/v1/health/ready").json()["components"]["antivirus"]
+
+    assert componente["status"] == "falhou"
+    assert componente["detail"] == "clamd não respondeu ao VERSION."
