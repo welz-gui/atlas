@@ -260,9 +260,10 @@ def ai_metrics(db: Session, organization_id: str) -> dict[str, Any]:
         .filter(AnalysisRun.organization_id == organization_id)
         .count()
     )
-    projects = (
-        db.query(Project).filter(Project.organization_id == organization_id).count()
+    projects_list = (
+        db.query(Project).filter(Project.organization_id == organization_id).all()
     )
+    projects = len(projects_list)
 
     # -- Rascunhos de regra: aceitação e correção humana -------------------
     # O catálogo é **global por jurisdição**, não por organização (I4 — fonte
@@ -273,9 +274,7 @@ def ai_metrics(db: Session, organization_id: str) -> dict[str, Any]:
     jurisdictions = applicable_jurisdictions(
         {
             p.city_ibge
-            for p in db.query(Project)
-            .filter(Project.organization_id == organization_id)
-            .all()
+            for p in projects_list
             if p.city_ibge
         }
     )
