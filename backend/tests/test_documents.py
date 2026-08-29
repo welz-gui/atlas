@@ -349,3 +349,43 @@ def test_extracao_de_documento_sem_texto_nao_inventa_valores(
     assert body["status"] == "nao_verificavel"
     assert all(value is None for value in body["extracted_parameters"].values())
     assert body["warnings"]
+
+
+def test_download_documento_desaparecido_responde_404(
+    client, engineer_headers, project, upload_dir
+):
+    """Binário sumiu do armazenamento sem explicação — incidente, não rotina (§8.3)."""
+    from app.services.storage import get_storage
+
+    documento = _upload(client, engineer_headers, project["id"], "planta.pdf").json()
+
+    storage = get_storage()
+    storage.delete(documento["file_path"])
+
+    response = client.get(
+        f"/api/v1/documents/{documento['id']}/download", headers=engineer_headers
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Arquivo não encontrado no armazenamento."
+
+
+def test_extracao_arquivo_ausente_no_storage_responde_410(
+    client, engineer_headers, project, upload_dir
+):
+    """Distinto do 404 do download: aqui o documento é sabidamente inextraível."""
+    from app.services.storage import get_storage
+
+    documento = _upload(
+        client, engineer_headers, project["id"], "prancha.pdf", b"%PDF-1.4 sem texto"
+    ).json()
+
+    storage = get_storage()
+    storage.delete(documento["file_path"])
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/documents/{documento['id']}/extract",
+        headers=engineer_headers,
+    )
+
+    assert response.status_code == 410
+    assert "armazenamento" in response.json()["detail"].lower()
