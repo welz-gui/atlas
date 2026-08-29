@@ -38,7 +38,9 @@ def retention_deadline(
 
     `None` significa guardar indefinidamente — que é o comportamento padrão.
     """
-    days = settings.OBSOLETE_RETENTION_DAYS if retention_days is None else retention_days
+    days = (
+        settings.OBSOLETE_RETENTION_DAYS if retention_days is None else retention_days
+    )
     if days <= 0:
         return None
     return obsolete_at + timedelta(days=days)
@@ -85,14 +87,11 @@ def eligible_documents(
     significa guardar, não significa 'expurgar agora'.
     """
     moment = now or datetime.utcnow()
-    query = (
-        db.query(Document)
-        .filter(
-            Document.status == DocumentState.OBSOLETO,
-            Document.purged_at.is_(None),
-            Document.retention_until.isnot(None),
-            Document.retention_until <= moment,
-        )
+    query = db.query(Document).filter(
+        Document.status == DocumentState.OBSOLETO,
+        Document.purged_at.is_(None),
+        Document.retention_until.isnot(None),
+        Document.retention_until <= moment,
     )
     if organization_id:
         query = query.filter(Document.organization_id == organization_id)
@@ -212,22 +211,30 @@ def purge_expired_ai_interactions(
     if organization_id:
         query = query.filter(AIInteraction.organization_id == organization_id)
 
-    for interaction in query.order_by(AIInteraction.created_at).all():
-        report.examined += 1
-        report.record_ids.append(interaction.id)
-        if dry_run:
-            continue
+    records = (
+        query.with_entities(AIInteraction.id).order_by(AIInteraction.created_at).all()
+    )
+    if not records:
+        return report
 
+    report.examined = len(records)
+    report.record_ids = [r.id for r in records]
+
+    if not dry_run:
         # A pergunta some; o hash dela permanece. Duas consultas idênticas
         # continuam reconhecíveis como idênticas sem que o texto exista.
-        interaction.prompt = ""
-        interaction.response_text = None
-        interaction.response_json = None
-        interaction.content_purged_at = moment
-        report.purged += 1
-
-    if not dry_run and report.purged:
+        query.update(
+            {
+                AIInteraction.prompt: "",
+                AIInteraction.response_text: None,
+                AIInteraction.response_json: None,
+                AIInteraction.content_purged_at: moment,
+            },
+            synchronize_session=False,
+        )
         db.commit()
+        report.purged = report.examined
+
     return report
 
 
