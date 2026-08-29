@@ -39,7 +39,7 @@ export function createQueryClient(): QueryClient {
         refetchOnWindowFocus: false,
         // Reconectar, sim: o técnico de campo perde e recupera rede o tempo
         // todo, e é justamente aí que a tela está desatualizada (§3.7).
-        refetchOnReconnect: true,
+        refetchOnReconnect: "always",
       },
       mutations: {
         // Escrita não se repete sozinha. O que garante segurança contra
