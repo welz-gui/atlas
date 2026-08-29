@@ -278,6 +278,9 @@ def fetch_source(
     ver `app.regulatory.robots`. Sem ele, cada chamada relê o arquivo, o que só
     faz sentido em uso avulso.
     """
+    if urlparse(url).scheme not in {"http", "https"}:
+        raise ValueError("Apenas URLs HTTP e HTTPS são permitidas.")
+
     portao = gate or RobotsGate()
     policy = portao.check(url)
     portao.wait(url, policy)
