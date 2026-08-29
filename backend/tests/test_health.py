@@ -33,3 +33,15 @@ def test_liveness_responde(client):
 def test_liveness_dispensa_autenticacao(client):
     """Um orquestrador consulta a sonda sem credencial."""
     assert client.get("/api/v1/health").status_code == 200
+
+
+def test_root_endpoint(client):
+    """Testa o endpoint raiz do sistema."""
+    response = client.get("/")
+    assert response.status_code == 200
+    corpo = response.json()
+
+    assert corpo["name"] == settings.PROJECT_NAME
+    assert corpo["docs"] == "/docs"
+    assert corpo["version"] == settings.VERSION
+    assert corpo["message"] == "Atlas System Operational"
