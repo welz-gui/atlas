@@ -25,7 +25,7 @@ app = FastAPI(
         "Atlas — plataforma para aprovação, planejamento, execução e gestão de "
         "empreendimentos. Todos os endpoints de negócio exigem autenticação "
         "Bearer e operam restritos à organização do usuário."
-    )
+    ),
 )
 
 # CORS Middleware
@@ -56,6 +56,35 @@ app.add_middleware(
     ],
 )
 
+
+def _log_failure(request, inicio: float) -> None:
+    logger.exception(
+        "Requisição falhou",
+        extra={
+            "method": request.method,
+            "path": request.url.path,
+            "duration_ms": round((time.perf_counter() - inicio) * 1000, 1),
+            "organization_id": current_organization_id(),
+        },
+    )
+
+
+def _log_success(request, response, inicio: float) -> None:
+    duracao = round((time.perf_counter() - inicio) * 1000, 1)
+    nivel = logging.ERROR if response.status_code >= 500 else logging.INFO
+    logger.log(
+        nivel,
+        "Requisição atendida",
+        extra={
+            "method": request.method,
+            "path": request.url.path,
+            "status": response.status_code,
+            "duration_ms": duracao,
+            "organization_id": current_organization_id(),
+        },
+    )
+
+
 @app.middleware("http")
 async def observability(request, call_next):
     """Correlaciona e registra cada requisição (§12 — observabilidade).
@@ -77,35 +106,15 @@ async def observability(request, call_next):
         response = await call_next(request)
     except Exception:
         # Exceção não tratada precisa deixar rastro antes de virar 500 genérico.
-        logger.exception(
-            "Requisição falhou",
-            extra={
-                "method": request.method,
-                "path": request.url.path,
-                "duration_ms": round((time.perf_counter() - inicio) * 1000, 1),
-                "organization_id": current_organization_id(),
-            },
-        )
+        _log_failure(request, inicio)
         reset_request_id(token)
         raise
 
-    duracao = round((time.perf_counter() - inicio) * 1000, 1)
     response.headers["X-Request-Id"] = request_id
 
     # 5xx é problema nosso; 4xx é do pedido. O nível reflete isso, para que
     # alerta futuro possa filtrar por severidade sem ler mensagem.
-    nivel = logging.ERROR if response.status_code >= 500 else logging.INFO
-    logger.log(
-        nivel,
-        "Requisição atendida",
-        extra={
-            "method": request.method,
-            "path": request.url.path,
-            "status": response.status_code,
-            "duration_ms": duracao,
-            "organization_id": current_organization_id(),
-        },
-    )
+    _log_success(request, response, inicio)
 
     reset_request_id(token)
     return response
@@ -132,15 +141,18 @@ async def tenant_scope(request, call_next):
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
+
 @app.get("/")
 def root():
     return {
         "name": settings.PROJECT_NAME,
         "docs": "/docs",
         "version": settings.VERSION,
-        "message": "Atlas System Operational"
+        "message": "Atlas System Operational",
     }
+
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
