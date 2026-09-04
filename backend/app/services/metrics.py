@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, and_
 
 from app.models.domain import (
@@ -155,6 +155,7 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
 
         latest_runs_list = (
             db.query(AnalysisRun)
+            .options(joinedload(AnalysisRun.validations))
             .join(
                 subquery,
                 and_(
