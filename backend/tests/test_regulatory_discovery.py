@@ -168,3 +168,8 @@ def test_leismunicipais_entra_sem_www():
     """
     source = SOURCES["BR-RS-4311403"][0]
     assert "leismunicipais.com.br" in source.allowed_hosts
+
+def test_extract_candidates_empty_or_invalid_html():
+    source = SOURCES["BR-RS-4311403"][0]
+    assert extract_candidates("", source) == []
+    assert extract_candidates("<invalid>html</invalid>", source) == []
