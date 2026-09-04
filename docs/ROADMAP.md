@@ -4,17 +4,17 @@ Documento vivo. Consolida o **roadmap estratégico** do plano (§9 e §10 de
 [`PLANO_DE_IMPLEMENTACAO_v2.md`](PLANO_DE_IMPLEMENTACAO_v2.md)) com o **estado
 real do código** e o **caminho de execução** de cada estágio.
 
-- Última atualização: **2026-08-29**
-- Base avaliada: `master` em `188a98f`, espelhada em
+- Última atualização: **2026-09-04**
+- Base avaliada: `master` em `af163ce`, espelhada em
   [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
   estágios foi levantado em `7dc50d2` e continua valendo, com uma exceção
   registrada abaixo: o **Estágio 6 deixou de ser "nada construído"**.
 - **A Fase D está encerrada, exceto pelo D3** — que nunca foi de engenharia.
   Ver o registro adiante.
-- Suíte: **441 casos de backend** (eram 199 em `7dc50d2`) e **21 de
-  frontend** (3 arquivos, incluindo o primeiro teste de componente do
-  projeto). Mais 13 de integração e 6 de RLS, que só rodam na CI porque
-  exigem Postgres, MinIO e clamd. Reproduz em ~3 min:
+- Suíte: **452 casos de backend** (eram 199 em `7dc50d2`) e **39 de
+  frontend** (4 arquivos, incluindo componentes — `ErrorBanner`, `StatusChip`,
+  `EmptyState`, `OfflineBar`). Mais 13 de integração e 6 de RLS, que só rodam
+  na CI porque exigem Postgres, MinIO e clamd. Reproduz em ~3 min:
   `backend/.venv/Scripts/python -m pytest tests/ -q`.
 - **Cinco portões** rodam a cada push e a cada PR
   (`.github/workflows/ci.yml`): suíte de backend, migrations construídas e
@@ -240,7 +240,7 @@ Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
 ## Estado atual em uma página
 
-**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 441 testes; RLS ativa, MFA
+**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 452 testes; RLS ativa, MFA
 por TOTP, log em JSON com correlação e sondas de vida e prontidão):
 
 ```
@@ -266,9 +266,9 @@ app/
 **Frontend** (Next.js 14 App Router + TypeScript + Tailwind + TanStack Query):
 `/login`, `/`, `/projects`, `/approvals`, `/catalog`, `/protocol`,
 `/documents`, `/plan`, `/daily-log`, `/ai`, `/portal`. PWA com service worker e
-fila offline. Vinte e um testes em três arquivos: cliente HTTP, camada de
-consulta, e um primeiro componente (`ErrorBanner`) — o resto das telas segue
-sem cobertura.
+fila offline. Trinta e nove testes em quatro arquivos: cliente HTTP, camada de
+consulta, e componentes (`ErrorBanner`, `StatusChip`, `EmptyState`,
+`OfflineBar`) — o resto das telas segue sem cobertura.
 
 **Mapa dos estágios:**
 
@@ -1344,14 +1344,14 @@ um sem escolher nenhum. Suíte: 353 → 367.
 si. Depende de decisão e de conta, não de código — e, como o D3, não é
 engenharia que o trava.
 
-### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-08-29)
+### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-09-04)
 
-Um agente externo (Jules, do Google) abriu duas levas de PRs contra o
-repositório — 30 na primeira, 42 na segunda — do tipo "code health": remoção
-de import morto, refator de função complexa, teste de caminho de erro,
-correção de N+1, e algumas de segurança. Nenhuma foi mesclada às cegas por CI
-verde; cada uma foi lida contra o código real antes de decidir. O que isso
-revelou vale mais do que qualquer regra individual corrigida:
+Um agente externo (Jules, do Google) abriu três levas de PRs contra o
+repositório — 30, 42 e 24 — do tipo "code health": remoção de import morto,
+refator de função complexa, teste de caminho de erro, correção de N+1, e
+algumas de segurança. Nenhuma foi mesclada às cegas por CI verde; cada uma foi
+lida contra o código real antes de decidir. O que isso revelou vale mais do
+que qualquer regra individual corrigida:
 
 **Achados que se confirmaram reais:**
 
@@ -1371,7 +1371,19 @@ revelou vale mais do que qualquer regra individual corrigida:
   Com `staleTime` de 30 s, uma queda de rede mais curta que isso não disparava
   refetch — o técnico de campo voltava da queda vendo dado potencialmente
   velho, exatamente o cenário que o comentário original dizia resolver. Trocado
-  para `"always"`.
+  para `"always"`;
+- **`joinedload` faltando em `approval_metrics`.** Uma rodada anterior já
+  havia eliminado o N+1 de "buscar a análise mais recente por projeto", mas
+  `latest.validations` continuava lazy — cada leitura dentro do laço de
+  precisão disparava uma consulta por projeto. Achado só na terceira leva,
+  depois de duas rodadas já terem mexido nessa função;
+- **um mock que não mockava nada.** Um teste de `generate_report` mirava o
+  patch em `app.services.storage.get_storage`, mas `tasks.py` importa
+  `get_storage` no topo do módulo — o nome já estava vinculado no namespace
+  antes do teste rodar, e patchear o módulo de origem não alcança quem já
+  importou de lá. O teste passava, mas por acaso: chamava o storage local de
+  verdade, e o PDF mockado media, por coincidência, exatamente os bytes que a
+  asserção esperava. Corrigido para mirar `app.workers.tasks.get_storage`.
 
 **Padrões que se repetiram e mudaram como a revisão foi feita:**
 
@@ -1397,12 +1409,24 @@ revelou vale mais do que qualquer regra individual corrigida:
   workers concorrentes em `flushOutbox()` (fila offline) que precisava de
   código extra só para conter a corrida que a própria concorrência introduzia,
   contra um volume de itens (poucos por sessão de campo) que não justificava o
-  risco. Rejeitada.
+  risco. Rejeitada;
+- **quando a leitura não basta, testar de verdade.** Uma PR movia
+  `from sqlalchemy.orm import Session` para dentro de um bloco
+  `if TYPE_CHECKING:` — sem `from __future__ import annotations` no arquivo,
+  isso quebraria o módulo na importação (a anotação `db: Session` seria
+  avaliada na hora da definição da função, com `Session` indefinido em tempo
+  de execução). O arquivo *tinha* o future import, só não nas primeiras
+  linhas que uma leitura rápida cobre — em vez de confiar na leitura, o fix
+  foi aplicado num arquivo de teste isolado e importado de verdade antes de
+  aceitar.
 
-Resultado: **21 PRs mescladas na primeira leva, 21 na segunda** (16 diretas +
-5 reescritas), **25 fechadas** na segunda leva sozinha, com comentário
-explicando o motivo em cada uma. Suíte: 367 → 441 (backend), 15 → 21
-(frontend, +1 arquivo — o primeiro teste de componente do projeto).
+Resultado: **21 PRs mescladas na primeira leva**; na segunda, **21 mescladas**
+(16 diretas + 5 reescritas) e **25 fechadas**; na terceira, **12 mescladas
+diretamente**, mais **7 refeitas em 4 PRs novas** (mesmo padrão de cachos na
+mesma linha), **1 fechada por duplicar uma já mesclada** e **4 rejeitadas**,
+com comentário explicando o motivo em cada uma. Suíte: 367 → 441 → 452
+(backend), 15 → 21 → 39 (frontend, agora 4 arquivos — o primeiro teste de
+componente do projeto, na segunda leva, virou quatro).
 
 ---
 
@@ -1522,7 +1546,7 @@ vazia.
 
 | Dívida | Impacto | Onde |
 |---|---|---|
-| Frontend quase sem teste de componente | Um só (`ErrorBanner`, via Testing Library); o resto das telas segue sem cobertura | `frontend/` |
+| Frontend quase sem teste de componente | Quatro (`ErrorBanner`, `StatusChip`, `EmptyState`, `OfflineBar`), via Testing Library; o resto das telas segue sem cobertura | `frontend/` |
 | Sem cofre de segredos | `repr` não vaza, backend `file` já é compatível com um cofre externo e a rotação de `SECRET_KEY` não derruba MFA; falta o cofre em si, com rotação automática e auditoria de acesso | acompanha a escolha do provedor |
 | Sem métricas, rastreamento nem alerta | O log estruturado existe e alimenta os três; falta para onde mandá-los | acompanha a escolha do provedor |
 | **Sem provedor de hospedagem** | A imagem e a composição existem; o ambiente, não | `docker-compose.prod.yml` |
