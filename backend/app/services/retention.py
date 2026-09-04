@@ -268,19 +268,27 @@ def purge_expired_job_records(
     if organization_id:
         query = query.filter(JobRecord.organization_id == organization_id)
 
-    for record in query.order_by(JobRecord.queued_at).all():
-        report.examined += 1
-        report.record_ids.append(record.id)
-        if dry_run:
-            continue
+    records = (
+        query.with_entities(JobRecord.id).order_by(JobRecord.queued_at).all()
+    )
+    if not records:
+        return report
 
+    report.examined = len(records)
+    report.record_ids = [r.id for r in records]
+
+    if not dry_run:
         # `payload` é NOT NULL desde a reconciliação do esquema: vazio é vazio,
         # e não ausência de informação.
-        record.payload = {}
-        record.result = None
-        record.content_purged_at = moment
-        report.purged += 1
-
-    if not dry_run and report.purged:
+        query.update(
+            {
+                JobRecord.payload: {},
+                JobRecord.result: None,
+                JobRecord.content_purged_at: moment,
+            },
+            synchronize_session=False,
+        )
         db.commit()
+        report.purged = report.examined
+
     return report
