@@ -8,11 +8,11 @@ import uuid
 from app.core.config import settings
 from app.core.logging import configure_logging, reset_request_id, set_request_id
 from app.core.tenant import current_organization_id
-from app.core.tenant import reset_current_organization, set_current_organization
+from app.core.tenant import reset_current_organization, set_current_organization  # noqa: F401
 
 configure_logging(settings.LOG_LEVEL)
 logger = logging.getLogger("atlas.api")
-from app.api.v1.router import api_router
+from app.api.v1.router import api_router  # noqa: E402
 
 # O esquema é criado por migrations versionadas (alembic upgrade head),
 # não em tempo de import. Ver backend/alembic/ e o README.

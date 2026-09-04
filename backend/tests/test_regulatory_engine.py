@@ -1,10 +1,9 @@
 import uuid
 """Motor de regras: aplicabilidade, veredictos e append-only (§3.4, §3.5)."""
 
-import pytest
 
-from app.models.domain import AnalysisRun, ValidationRecord
-from app.regulatory.catalog import CheckOutcome
+from app.models.domain import AnalysisRun, ValidationRecord  # noqa: E402
+from app.regulatory.catalog import CheckOutcome  # noqa: E402
 
 PARAMS_CONFORMES = {
     "zone": "Z2",
