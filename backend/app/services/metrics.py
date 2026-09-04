@@ -234,6 +234,93 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
 
 # --- IA (§11) ----------------------------------------------------------------
 
+def _calculate_token_metrics(interactions: list[AIInteraction], analyses: int, projects: int) -> dict[str, Any]:
+    # Tokens são somados só onde o provedor os informou. Chamada servida do
+    # cache não gasta token, e chamada sem provedor não tem token nenhum.
+    with_tokens = [
+        i
+        for i in interactions
+        if i.input_tokens is not None or i.output_tokens is not None
+    ]
+    if not with_tokens:
+        return {
+            "input_tokens": None,
+            "output_tokens": None,
+            "tokens_per_analysis": None,
+            "tokens_per_project": None,
+        }
+
+    input_tokens = sum(i.input_tokens or 0 for i in with_tokens)
+    output_tokens = sum(i.output_tokens or 0 for i in with_tokens)
+
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "tokens_per_analysis": (
+            round((input_tokens + output_tokens) / analyses, 1) if analyses else None
+        ),
+        "tokens_per_project": (
+            round((input_tokens + output_tokens) / projects, 1) if projects else None
+        ),
+    }
+
+
+def _get_draft_counts(events: list[RuleValidationEvent], rules: list[RegulatoryRule]) -> tuple[int, int, int]:
+    # Um rascunho aceito é o que saiu de `rascunho_extraido_por_ia` para
+    # `em_validacao`; um recusado é o que foi revogado direto.
+    from_draft = [
+        e for e in events if e.from_state == RuleState.RASCUNHO_EXTRAIDO_POR_IA
+    ]
+    accepted = sum(1 for e in from_draft if e.to_state == RuleState.EM_VALIDACAO)
+    rejected = sum(1 for e in from_draft if e.to_state == RuleState.REVOGADA)
+
+    still_draft = sum(1 for r in rules if r.state == RuleState.RASCUNHO_EXTRAIDO_POR_IA)
+    drafts_total = len(from_draft) + still_draft
+
+    return drafts_total, accepted, rejected
+
+
+def _calculate_draft_metrics(db: Session, projects_list: list[Project]) -> dict[str, Any]:
+    # -- Rascunhos de regra: aceitação e correção humana -------------------
+    # O catálogo é **global por jurisdição**, não por organização (I4 — fonte
+    # legal única). Logo estes números são recortados pelas jurisdições em que
+    # a organização tem projeto, e podem incluir trabalho de validação feito
+    # por outra organização sobre o mesmo município. É o desenho do catálogo,
+    # não um vazamento de tenant: regra não é dado de cliente.
+    jurisdictions = applicable_jurisdictions(
+        {p.city_ibge for p in projects_list if p.city_ibge}
+    )
+    if not jurisdictions:
+        return {
+            "drafts_extracted": None,
+            "drafts_accepted": None,
+            "drafts_rejected": None,
+            "draft_acceptance_percent": None,
+        }
+
+    rules = (
+        db.query(RegulatoryRule)
+        .filter(RegulatoryRule.jurisdiction.in_(jurisdictions))
+        .all()
+    )
+    rule_ids = {r.id for r in rules}
+
+    events = (
+        db.query(RuleValidationEvent)
+        .filter(RuleValidationEvent.rule_id.in_(rule_ids))
+        .all()
+        if rule_ids else []
+    )
+
+    drafts_total, accepted, rejected = _get_draft_counts(events, rules)
+
+    return {
+        "drafts_extracted": drafts_total if drafts_total else None,
+        "drafts_accepted": accepted if drafts_total else None,
+        "drafts_rejected": rejected if drafts_total else None,
+        "draft_acceptance_percent": _percent(accepted, drafts_total),
+    }
+
 
 def ai_metrics(db: Session, organization_id: str) -> dict[str, Any]:
     interactions = (
@@ -246,16 +333,6 @@ def ai_metrics(db: Session, organization_id: str) -> dict[str, Any]:
     cached = sum(1 for i in interactions if i.served_from_cache)
     failed = sum(1 for i in interactions if i.error)
 
-    # Tokens são somados só onde o provedor os informou. Chamada servida do
-    # cache não gasta token, e chamada sem provedor não tem token nenhum.
-    with_tokens = [
-        i
-        for i in interactions
-        if i.input_tokens is not None or i.output_tokens is not None
-    ]
-    input_tokens = sum(i.input_tokens or 0 for i in with_tokens)
-    output_tokens = sum(i.output_tokens or 0 for i in with_tokens)
-
     analyses = (
         db.query(AnalysisRun)
         .filter(AnalysisRun.organization_id == organization_id)
@@ -264,69 +341,15 @@ def ai_metrics(db: Session, organization_id: str) -> dict[str, Any]:
     projects_list = (
         db.query(Project).filter(Project.organization_id == organization_id).all()
     )
-    projects = len(projects_list)
 
-    # -- Rascunhos de regra: aceitação e correção humana -------------------
-    # O catálogo é **global por jurisdição**, não por organização (I4 — fonte
-    # legal única). Logo estes números são recortados pelas jurisdições em que
-    # a organização tem projeto, e podem incluir trabalho de validação feito
-    # por outra organização sobre o mesmo município. É o desenho do catálogo,
-    # não um vazamento de tenant: regra não é dado de cliente.
-    jurisdictions = applicable_jurisdictions(
-        {
-            p.city_ibge
-            for p in projects_list
-            if p.city_ibge
-        }
-    )
-
-    rules = (
-        db.query(RegulatoryRule)
-        .filter(RegulatoryRule.jurisdiction.in_(jurisdictions))
-        .all()
-        if jurisdictions
-        else []
-    )
-    rule_ids = {r.id for r in rules}
-
-    events = (
-        db.query(RuleValidationEvent)
-        .filter(RuleValidationEvent.rule_id.in_(rule_ids))
-        .all()
-        if rule_ids
-        else []
-    )
-
-    # Um rascunho aceito é o que saiu de `rascunho_extraido_por_ia` para
-    # `em_validacao`; um recusado é o que foi revogado direto.
-    from_draft = [
-        e for e in events if e.from_state == RuleState.RASCUNHO_EXTRAIDO_POR_IA
-    ]
-    accepted = sum(1 for e in from_draft if e.to_state == RuleState.EM_VALIDACAO)
-    rejected = sum(1 for e in from_draft if e.to_state == RuleState.REVOGADA)
-
-    still_draft = sum(1 for r in rules if r.state == RuleState.RASCUNHO_EXTRAIDO_POR_IA)
-    drafts_total = len(from_draft) + still_draft
-
-    return {
+    metrics = {
         "interactions": len(interactions),
         "grounded_percent": _percent(grounded, len(interactions)),
         "served_from_cache_percent": _percent(cached, len(interactions)),
         "failed": failed if interactions else None,
-        "input_tokens": input_tokens if with_tokens else None,
-        "output_tokens": output_tokens if with_tokens else None,
-        "tokens_per_analysis": (
-            round((input_tokens + output_tokens) / analyses, 1)
-            if with_tokens and analyses
-            else None
-        ),
-        "tokens_per_project": (
-            round((input_tokens + output_tokens) / projects, 1)
-            if with_tokens and projects
-            else None
-        ),
-        "drafts_extracted": drafts_total if drafts_total else None,
-        "drafts_accepted": accepted if drafts_total else None,
-        "drafts_rejected": rejected if drafts_total else None,
-        "draft_acceptance_percent": _percent(accepted, drafts_total),
     }
+
+    metrics.update(_calculate_token_metrics(interactions, analyses, len(projects_list)))
+    metrics.update(_calculate_draft_metrics(db, projects_list))
+
+    return metrics
