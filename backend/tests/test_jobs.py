@@ -500,3 +500,42 @@ def test_token_de_outra_organizacao_nao_colide(
     )
     assert resposta.status_code == 201
     assert resposta.json()["activities_done"] == "Registro da organização B."
+
+def test_purge_retention_task_execution(db_session, org, monkeypatch):
+    from app.workers.tasks import purge_retention
+    from app.models.domain import JobRecord
+
+    # Mock return value class
+    class MockPurgeReport:
+        dry_run = True
+        examined = 5
+        purged = 2
+        already_missing = 1
+        failed = 0
+        document_ids = ["doc1", "doc2"]
+        errors = []
+
+    # Function to mock the target
+    def mock_purge_expired_documents(db, organization_id, dry_run):
+        assert organization_id == org.id
+        assert dry_run is True
+        return MockPurgeReport()
+
+    monkeypatch.setattr(
+        "app.workers.tasks.purge_expired_documents",
+        mock_purge_expired_documents
+    )
+
+    record = JobRecord(organization_id=org.id, payload={"dry_run": True})
+
+    result = purge_retention(db_session, record)
+
+    assert result == {
+        "dry_run": True,
+        "examined": 5,
+        "purged": 2,
+        "already_missing": 1,
+        "failed": 0,
+        "document_ids": ["doc1", "doc2"],
+        "errors": [],
+    }
