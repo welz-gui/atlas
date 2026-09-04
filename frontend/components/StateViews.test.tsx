@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { ErrorBanner } from "./StateViews";
+import { ErrorBanner, EmptyState } from "./StateViews";
 import { ApiError } from "@/lib/api";
 
 describe("ErrorBanner", () => {
@@ -55,5 +55,31 @@ describe("ErrorBanner", () => {
     render(<ErrorBanner error={error} />);
 
     expect(screen.queryByRole("button", { name: /tentar novamente/i })).not.toBeInTheDocument();
+  });
+});
+
+
+describe("EmptyState", () => {
+  it("renders title and description correctly", () => {
+    render(<EmptyState title="No Items" description="There are no items to display." />);
+
+    expect(screen.getByText("No Items")).toBeInTheDocument();
+    expect(screen.getByText("There are no items to display.")).toBeInTheDocument();
+  });
+
+  it("renders action node correctly when provided", () => {
+    const actionButton = <button>Create Item</button>;
+    render(<EmptyState title="Empty" description="Nothing here." action={actionButton} />);
+
+    expect(screen.getByText("Empty")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Item" })).toBeInTheDocument();
+  });
+
+  it("renders correctly without an action node", () => {
+    render(<EmptyState title="Empty" description="Nothing here." />);
+
+    expect(screen.getByText("Empty")).toBeInTheDocument();
+    // In this specific component test context, since no button is passed, we check there's no button
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 });
