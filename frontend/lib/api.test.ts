@@ -21,7 +21,14 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, fetchProjects, login, setToken } from "./api";
+import {
+  ApiError,
+  fetchProjects,
+  login,
+  setToken,
+  setUnauthorizedHandler,
+  updateProjectIdentity,
+} from "./api";
 
 const TOKEN = "token-de-teste";
 
@@ -132,5 +139,52 @@ describe("request — o contrato do cliente HTTP", () => {
     // E a chamada seguinte já vai autenticada com o token recém-obtido.
     const [, initMe] = (global.fetch as any).mock.calls[1];
     expect(initMe.headers).toMatchObject({ Authorization: "Bearer novo" });
+  });
+
+  it("chama onUnauthorized em erro 401", async () => {
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    (global.fetch as any).mockResolvedValueOnce(respostaErro(401, "Token inválido"));
+
+    await expect(fetchProjects()).rejects.toMatchObject({ status: 401 });
+
+    expect(handler).toHaveBeenCalled();
+
+    setUnauthorizedHandler(null);
+  });
+});
+
+describe("updateProjectIdentity", () => {
+  beforeEach(() => {
+    global.fetch = vi.fn();
+    setToken(TOKEN);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    setToken(null);
+  });
+
+  it("chama a API com PATCH, URL correta e payload no corpo", async () => {
+    const id = "123";
+    const payload = { name: "Novo Nome" };
+    const projeto = { id, name: "Novo Nome" };
+
+    (global.fetch as any).mockResolvedValueOnce(respostaOk(projeto));
+
+    await expect(updateProjectIdentity(id, payload)).resolves.toEqual(projeto);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining(`/projects/${id}`),
+      expect.objectContaining({
+        method: "PATCH",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TOKEN}`,
+        }),
+        body: JSON.stringify(payload),
+      })
+    );
   });
 });
