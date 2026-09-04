@@ -3,8 +3,8 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { ErrorBanner } from "./StateViews";
-import { ApiError } from "@/lib/api";
+import { ErrorBanner, StatusChip } from "./StateViews";
+import { ApiError, CheckStatus } from "@/lib/api";
 
 describe("ErrorBanner", () => {
   it("renders standard Error object correctly", () => {
@@ -55,5 +55,38 @@ describe("ErrorBanner", () => {
     render(<ErrorBanner error={error} />);
 
     expect(screen.queryByRole("button", { name: /tentar novamente/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("StatusChip", () => {
+  it("renders 'conforme' status correctly", () => {
+    render(<StatusChip status="conforme" />);
+    expect(screen.getByText("Conforme")).toBeInTheDocument();
+  });
+
+  it("renders 'nao_conforme' status correctly", () => {
+    render(<StatusChip status="nao_conforme" />);
+    expect(screen.getByText("Não conforme (bloqueio)")).toBeInTheDocument();
+  });
+
+  it("renders 'atencao' status correctly", () => {
+    render(<StatusChip status="atencao" />);
+    expect(screen.getByText("Atenção (alerta)")).toBeInTheDocument();
+  });
+
+  it("renders 'nao_aplicavel' status correctly", () => {
+    render(<StatusChip status="nao_aplicavel" />);
+    expect(screen.getByText("Não aplicável")).toBeInTheDocument();
+  });
+
+  it("renders 'nao_verificavel' status correctly", () => {
+    render(<StatusChip status="nao_verificavel" />);
+    expect(screen.getByText("Não verificável")).toBeInTheDocument();
+  });
+
+  it("renders fallback 'nao_aplicavel' for unknown status", () => {
+    // @ts-expect-error - testing invalid input
+    render(<StatusChip status="unknown_status" />);
+    expect(screen.getByText("Não aplicável")).toBeInTheDocument();
   });
 });
