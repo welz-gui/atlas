@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 from sqlalchemy.orm import Session
 
 from app.models.domain import Project, ProjectVersion, ProjectVersionState, User
+from app.schemas.domain import ProjectParameters
 
 #: Campos que compõem a fotografia da versão.
 VERSION_FIELDS = (
@@ -32,7 +33,8 @@ VERSION_FIELDS = (
 )
 
 
-def version_content_hash(values: Dict[str, Any]) -> str:
+def version_content_hash(parameters: ProjectParameters) -> str:
+    values = parameters.model_dump()
     canonical = json.dumps(
         {k: values.get(k) for k in sorted(VERSION_FIELDS)},
         sort_keys=True,
@@ -45,18 +47,19 @@ def version_content_hash(values: Dict[str, Any]) -> str:
 def create_version(
     db: Session,
     project: Project,
-    values: Dict[str, Any],
+    parameters: ProjectParameters,
     user: Optional[User] = None,
     state: str = ProjectVersionState.ESTUDO_PRELIMINAR,
     change_reason: Optional[str] = None,
     change_origin: str = "cadastro_manual",
     commit: bool = True,
 ) -> ProjectVersion:
-    """Cria a próxima versão do projeto a partir de `values`."""
+    """Cria a próxima versão do projeto a partir de `parameters`."""
     previous = project.current_version
     next_number = (previous.version_number + 1) if previous else 1
 
-    payload = {field: values.get(field) for field in VERSION_FIELDS}
+    params_dict = parameters.model_dump()
+    payload = {field: params_dict.get(field) for field in VERSION_FIELDS}
 
     version = ProjectVersion(
         organization_id=project.organization_id,
@@ -65,7 +68,7 @@ def create_version(
         state=state,
         change_reason=change_reason,
         change_origin=change_origin,
-        content_hash=version_content_hash(payload),
+        content_hash=version_content_hash(parameters),
         created_by_id=user.id if user else None,
         # Numéricos: None é significativo (não informado) e vai como está.
         lot_area=payload["lot_area"],
@@ -95,7 +98,7 @@ def create_version(
 def derive_next_version(
     db: Session,
     project: Project,
-    updates: Dict[str, Any],
+    updates: ProjectParameters,
     user: Optional[User] = None,
     change_reason: Optional[str] = None,
     change_origin: str = "cadastro_manual",
@@ -109,12 +112,13 @@ def derive_next_version(
     base: Dict[str, Any] = (
         {field: getattr(current, field) for field in VERSION_FIELDS} if current else {}
     )
-    base.update({k: v for k, v in updates.items() if k in VERSION_FIELDS})
+    base.update({k: v for k, v in updates.model_dump(exclude_unset=True).items() if k in VERSION_FIELDS})
+    new_params = ProjectParameters.model_validate(base)
 
     return create_version(
         db,
         project,
-        base,
+        new_params,
         user=user,
         state=state or (current.state if current else ProjectVersionState.ESTUDO_PRELIMINAR),
         change_reason=change_reason,

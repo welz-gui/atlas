@@ -36,6 +36,7 @@ from sqlalchemy import inspect
 
 from app.core.database import SessionLocal, engine
 from app.core.security import hash_password
+from app.schemas.domain import ProjectParameters
 from app.models.domain import (
     Organization,
     User,
@@ -275,7 +276,7 @@ def run_stage0_seed():
                 project_versions.create_version(
                     db,
                     proj,
-                    sc["params"],
+                    ProjectParameters(**sc["params"]),
                     user=analista,
                     change_reason=f"Cadastro de Pré-análise Concierge #{index}",
                     commit=False,

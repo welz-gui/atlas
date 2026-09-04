@@ -17,7 +17,6 @@ O que estes testes travam:
 
 from datetime import datetime
 
-import pytest
 
 from app.models.domain import DailyLog, DailyLogState
 from app.services import daily_log_signature as assinatura

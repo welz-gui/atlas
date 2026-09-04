@@ -17,6 +17,7 @@ from app.schemas.domain import (
     ProjectCreate,
     ProjectResponse,
     ProjectUpdate,
+    ProjectParameters,
     ProjectVersionCreate,
     ProjectVersionResponse,
     VersionStateChange,
@@ -59,7 +60,7 @@ def create_project(
     project_versions.create_version(
         db,
         project,
-        payload.model_dump(),
+        ProjectParameters.model_validate(payload.model_dump()),
         user=user,
         change_reason="Cadastro inicial do empreendimento.",
         commit=False,
@@ -137,7 +138,9 @@ def create_version(
             detail=f"Estado inválido. Válidos: {', '.join(sorted(ProjectVersionState.ALL))}",
         )
 
-    updates = payload.model_dump(exclude_unset=True, exclude={"change_reason", "state"})
+    updates_dict = payload.model_dump(exclude_unset=True, exclude={"change_reason", "state"})
+    updates = ProjectParameters(**updates_dict)
+
     version = project_versions.derive_next_version(
         db,
         project,

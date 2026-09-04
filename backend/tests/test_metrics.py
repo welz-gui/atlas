@@ -6,7 +6,6 @@ falsos negativos críticos" — ela não tem a informação, e o portão não po
 atravessado por isso.
 """
 
-import pytest
 
 from tests.conftest import auth_headers, make_org, make_user
 from app.models.domain import UserRole

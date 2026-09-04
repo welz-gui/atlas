@@ -10,13 +10,9 @@ from datetime import datetime
 import pytest
 
 from app.models.domain import (
-    AnalysisRun,
-    Document,
-    DocumentState,
     EAPItem,
     RegulatoryRule,
     UserRole,
-    ValidationRecord,
 )
 from app.regulatory.catalog import RuleState
 from tests.conftest import auth_headers, make_org, make_user
