@@ -14,6 +14,7 @@ from sqlalchemy import inspect
 
 from app.core.database import SessionLocal, engine
 from app.core.security import hash_password
+from app.schemas.domain import ProjectParameters
 from app.models.domain import (
     DailyLog,
     Document,
@@ -149,7 +150,7 @@ def _seed_projects(db, org, engineer):
     project_versions.create_version(
         db,
         project1,
-        dict(
+        ProjectParameters(
             zone="Z2",
             building_type="residencial_unifamiliar",
             lot_area=450.0,
@@ -168,7 +169,7 @@ def _seed_projects(db, org, engineer):
     project_versions.create_version(
         db,
         project2,
-        dict(
+        ProjectParameters(
             zone="Z2",
             building_type="residencial_unifamiliar",
             lot_area=360.0,
@@ -187,7 +188,7 @@ def _seed_projects(db, org, engineer):
     project_versions.create_version(
         db,
         project3,
-        dict(zone="Z2", building_type="residencial_unifamiliar"),
+        ProjectParameters(zone="Z2", building_type="residencial_unifamiliar"),
         user=engineer,
         change_reason="Cadastro inicial, sem medidas.",
         commit=False,

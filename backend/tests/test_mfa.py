@@ -12,14 +12,12 @@ O que estes testes protegem, em ordem de importância:
    para removê-lo, e o fator seria decorativo.
 """
 
-from datetime import datetime
 
 import pyotp
-import pytest
 
 from app.core import mfa
 from app.core.security import MFA_REQUIRED_PERMISSIONS
-from app.models.domain import MFARecoveryCode, User
+from app.models.domain import MFARecoveryCode
 
 
 def _enroll(client, headers):
