@@ -21,7 +21,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, fetchProjects, login, setToken } from "./api";
+import { ApiError, fetchProjects, login, setToken, setUnauthorizedHandler } from "./api";
 
 const TOKEN = "token-de-teste";
 
@@ -132,5 +132,21 @@ describe("request — o contrato do cliente HTTP", () => {
     // E a chamada seguinte já vai autenticada com o token recém-obtido.
     const [, initMe] = (global.fetch as any).mock.calls[1];
     expect(initMe.headers).toMatchObject({ Authorization: "Bearer novo" });
+  });
+
+  it("chama onUnauthorized em erro 401", async () => {
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    (global.fetch as any).mockResolvedValueOnce(
+      respostaErro(401, "Token inválido")
+    );
+
+    await expect(fetchProjects()).rejects.toMatchObject({ status: 401 });
+
+    expect(handler).toHaveBeenCalled();
+
+    // Limpa o estado
+    setUnauthorizedHandler(null);
   });
 });
