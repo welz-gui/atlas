@@ -28,9 +28,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -110,20 +111,20 @@ antes de ser conferida e publicada por uma pessoa.\
 @dataclass
 class AssistantResponse:
     answer: str
-    law_citations: List[str] = field(default_factory=list)
-    suggested_actions: List[str] = field(default_factory=list)
-    matched_rules: List[str] = field(default_factory=list)
+    law_citations: list[str] = field(default_factory=list)
+    suggested_actions: list[str] = field(default_factory=list)
+    matched_rules: list[str] = field(default_factory=list)
     disclaimer: str = DISCLAIMER
     is_ai_generated: bool = False
     method: str = "busca_por_palavra_chave_no_catalogo"
-    model: Optional[str] = None
+    model: str | None = None
     grounded: bool = True
-    warnings: List[str] = field(default_factory=list)
-    interaction_id: Optional[str] = None
+    warnings: list[str] = field(default_factory=list)
+    interaction_id: str | None = None
     served_from_cache: bool = False
 
 
-def _request_hash(prompt: str, rule_keys: Sequence[str], model: Optional[str]) -> str:
+def _request_hash(prompt: str, rule_keys: Sequence[str], model: str | None) -> str:
     """Identidade da pergunta: texto, contexto recuperado e modelo.
 
     O catálogo entra pelo conteúdo das regras, não só pelas chaves: uma regra
@@ -137,7 +138,7 @@ def _request_hash(prompt: str, rule_keys: Sequence[str], model: Optional[str]) -
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _context_signature(retrieved: Sequence[RetrievedRule]) -> List[str]:
+def _context_signature(retrieved: Sequence[RetrievedRule]) -> list[str]:
     """Assinatura das regras entregues, sensível ao conteúdo.
 
     Inclui estado, limite e validador: quando qualquer um deles muda, a
@@ -153,10 +154,10 @@ def _context_signature(retrieved: Sequence[RetrievedRule]) -> List[str]:
 
 def _lookup_cache(
     db: Session, organization_id: str, request_hash: str
-) -> Optional[AIInteraction]:
+) -> AIInteraction | None:
     if settings.AI_CACHE_HOURS <= 0:
         return None
-    cutoff = datetime.utcnow() - timedelta(hours=settings.AI_CACHE_HOURS)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=settings.AI_CACHE_HOURS)
     return (
         db.query(AIInteraction)
         .filter(
@@ -171,44 +172,48 @@ def _lookup_cache(
     )
 
 
+@dataclass
+class RecordParams:
+    organization_id: str
+    purpose: str
+    prompt: str
+    request_hash: str
+    retrieved_keys: Sequence[str]
+    user: User | None = None
+    project: Project | None = None
+    cited_keys: Sequence[str] = field(default_factory=list)
+    result: AIResult | None = None
+    response_json: dict | None = None
+    grounded: bool = True
+    served_from_cache: bool = False
+    provider_name: str = "none"
+
+
 def _record(
     db: Session,
-    *,
-    organization_id: str,
-    user: Optional[User],
-    project: Optional[Project],
-    purpose: str,
-    prompt: str,
-    request_hash: str,
-    retrieved_keys: Sequence[str],
-    cited_keys: Sequence[str] = (),
-    result: Optional[AIResult] = None,
-    response_json: Optional[dict] = None,
-    grounded: bool = True,
-    served_from_cache: bool = False,
-    provider_name: str = "none",
+    params: RecordParams
 ) -> AIInteraction:
     """Grava a proveniência. Chamado em todos os caminhos, inclusive nas falhas."""
     interaction = AIInteraction(
-        organization_id=organization_id,
-        project_id=project.id if project else None,
-        purpose=purpose,
-        provider=result.provider if result else provider_name,
-        model=result.model if result else None,
-        prompt=prompt,
-        request_hash=request_hash,
-        retrieved_rule_keys=list(retrieved_keys),
-        cited_rule_keys=list(cited_keys),
-        response_text=result.text if result else None,
-        response_json=response_json,
-        stop_reason=result.stop_reason if result else None,
-        input_tokens=result.input_tokens if result else None,
-        output_tokens=result.output_tokens if result else None,
-        latency_ms=result.latency_ms if result else None,
-        grounded=grounded,
-        served_from_cache=served_from_cache,
-        error=result.error if result else None,
-        created_by_id=user.id if user else None,
+        organization_id=params.organization_id,
+        project_id=params.project.id if params.project else None,
+        purpose=params.purpose,
+        provider=params.result.provider if params.result else params.provider_name,
+        model=params.result.model if params.result else None,
+        prompt=params.prompt,
+        request_hash=params.request_hash,
+        retrieved_rule_keys=list(params.retrieved_keys),
+        cited_rule_keys=list(params.cited_keys),
+        response_text=params.result.text if params.result else None,
+        response_json=params.response_json,
+        stop_reason=params.result.stop_reason if params.result else None,
+        input_tokens=params.result.input_tokens if params.result else None,
+        output_tokens=params.result.output_tokens if params.result else None,
+        latency_ms=params.result.latency_ms if params.result else None,
+        grounded=params.grounded,
+        served_from_cache=params.served_from_cache,
+        error=params.result.error if params.result else None,
+        created_by_id=params.user.id if params.user else None,
     )
     db.add(interaction)
     db.commit()
@@ -220,7 +225,7 @@ def _record(
 # Resposta determinística — o piso, não o improviso
 # =============================================================================
 
-def _unvalidated_warning(rules: Sequence[Rule]) -> Optional[str]:
+def _unvalidated_warning(rules: Sequence[Rule]) -> str | None:
     pendentes = [r for r in rules if not r.is_publishable]
     if not pendentes:
         return None
@@ -235,14 +240,14 @@ def _unvalidated_warning(rules: Sequence[Rule]) -> Optional[str]:
 def _format_retrieved_rules(
     retrieved: Sequence[RetrievedRule],
     municipality: str,
-    statuses: Dict[str, str],
-) -> Tuple[List[str], List[str], List[str]]:
-    lines: List[str] = [
-        f"O catálogo regulatório do Atlas para {municipality} registra os "
-        f"seguintes parâmetros relacionados à sua consulta:"
+    statuses: dict[str, str],
+) -> tuple[list[str], list[str], list[str]]:
+    lines: list[str] = [
+        (f"O catálogo regulatório do Atlas para {municipality} registra os "
+        f"seguintes parâmetros relacionados à sua consulta:")
     ]
-    citations: List[str] = []
-    actions: List[str] = []
+    citations: list[str] = []
+    actions: list[str] = []
 
     for item in retrieved:
         rule = item.rule
@@ -279,11 +284,11 @@ def _format_missing_rules(
     catalog: RegulatoryCatalog,
     jurisdiction: str,
     municipality: str,
-) -> Tuple[List[str], List[str], List[str]]:
+) -> tuple[list[str], list[str], list[str]]:
     disponiveis = catalog.for_jurisdiction(jurisdiction)
-    lines: List[str] = [
-        f"Não encontrei no catálogo de {municipality} nenhum parâmetro "
-        f"correspondente a '{query}'."
+    lines: list[str] = [
+        (f"Não encontrei no catálogo de {municipality} nenhum parâmetro "
+        f"correspondente a '{query}'.")
     ]
     if disponiveis:
         lines.append(
@@ -291,13 +296,13 @@ def _format_missing_rules(
             + "; ".join(rule.title for rule in disponiveis)
             + "."
         )
-    citations: List[str] = [
-        f"Catálogo regulatório de {municipality} "
-        f"(versão {catalog.version_for(jurisdiction)})"
+    citations: list[str] = [
+        (f"Catálogo regulatório de {municipality} "
+        f"(versão {catalog.version_for(jurisdiction)})")
     ]
-    actions: List[str] = [
-        "Reformule a consulta usando um dos parâmetros cadastrados, ou solicite "
-        "o cadastro da norma faltante ao responsável pelo catálogo."
+    actions: list[str] = [
+        ("Reformule a consulta usando um dos parâmetros cadastrados, ou solicite "
+        "o cadastro da norma faltante ao responsável pelo catálogo.")
     ]
     return lines, citations, actions
 
@@ -308,8 +313,8 @@ def deterministic_answer(
     catalog: RegulatoryCatalog,
     jurisdiction: str,
     municipality: str,
-    statuses: Optional[Dict[str, str]] = None,
-    project: Optional[Project] = None,
+    statuses: dict[str, str] | None = None,
+    project: Project | None = None,
 ) -> AssistantResponse:
     """Resposta montada a partir do catálogo, sem modelo de linguagem.
 
@@ -332,7 +337,7 @@ def deterministic_answer(
     # O aviso de regra não validada faz parte da resposta, não de um rodapé
     # que a interface possa deixar de mostrar (§7.5).
     aviso = _unvalidated_warning([item.rule for item in retrieved])
-    warnings: List[str] = []
+    warnings: list[str] = []
     if aviso:
         warnings.append(aviso)
         lines.append("")
@@ -367,16 +372,16 @@ def deterministic_answer(
 def _return_baseline(
     db: Session,
     user: User,
-    project: Optional[Project],
+    project: Project | None,
     query: str,
     baseline: AssistantResponse,
     request_hash: str,
     retrieved_keys: Sequence[str],
     cited_keys: Sequence[str],
     provider_name: str,
-    warning: Optional[str] = None,
-    result: Optional[AIResult] = None,
-    response_json: Optional[dict] = None,
+    warning: str | None = None,
+    result: AIResult | None = None,
+    response_json: dict | None = None,
     grounded: bool = True,
 ) -> AssistantResponse:
     """Devolve a resposta determinística com a proveniência gravada.
@@ -392,18 +397,20 @@ def _return_baseline(
 
     baseline.interaction_id = _record(
         db,
-        organization_id=user.organization_id,
-        user=user,
-        project=project,
-        purpose="consulta_normativa",
-        prompt=query,
-        request_hash=request_hash,
-        retrieved_keys=retrieved_keys,
-        cited_keys=cited_keys,
-        provider_name=provider_name,
-        result=result,
-        response_json=response_json,
-        grounded=grounded,
+        RecordParams(
+            organization_id=user.organization_id,
+            user=user,
+            project=project,
+            purpose="consulta_normativa",
+            prompt=query,
+            request_hash=request_hash,
+            retrieved_keys=retrieved_keys,
+            cited_keys=cited_keys,
+            provider_name=provider_name,
+            result=result,
+            response_json=response_json,
+            grounded=grounded,
+        )
     ).id
     return baseline
 
@@ -412,9 +419,9 @@ def ask(
     db: Session,
     query: str,
     user: User,
-    project: Optional[Project] = None,
-    statuses: Optional[Dict[str, str]] = None,
-    provider: Optional[AIProvider] = None,
+    project: Project | None = None,
+    statuses: dict[str, str] | None = None,
+    provider: AIProvider | None = None,
 ) -> AssistantResponse:
     """Responde a uma consulta normativa, com proveniência registrada."""
     jurisdiction = project.city_ibge if project else "BR-RS-4311403"
@@ -560,7 +567,7 @@ def ask(
     regras_citadas = [item.rule for item in retrieved if item.rule.rule_id in citadas]
     citacoes = [f"{r.title} — {r.source.citation()}" for r in regras_citadas]
 
-    warnings: List[str] = []
+    warnings: list[str] = []
     aviso = _unvalidated_warning(regras_citadas)
     if aviso:
         warnings.append(aviso)
@@ -579,21 +586,23 @@ def ask(
 
     interaction = _record(
         db,
-        organization_id=user.organization_id,
-        user=user,
-        project=project,
-        purpose="consulta_normativa",
-        prompt=query,
-        request_hash=request_hash,
-        retrieved_keys=retrieved_keys,
-        cited_keys=citadas,
-        result=result,
-        response_json={
-            k: v
-            for k, v in resposta.__dict__.items()
-            if k not in {"interaction_id", "served_from_cache"}
-        },
-        grounded=True,
+        RecordParams(
+            organization_id=user.organization_id,
+            user=user,
+            project=project,
+            purpose="consulta_normativa",
+            prompt=query,
+            request_hash=request_hash,
+            retrieved_keys=retrieved_keys,
+            cited_keys=citadas,
+            result=result,
+            response_json={
+                k: v
+                for k, v in resposta.__dict__.items()
+                if k not in {"interaction_id", "served_from_cache"}
+            },
+            grounded=True,
+        )
     )
     resposta.interaction_id = interaction.id
     return resposta
@@ -605,15 +614,15 @@ def ask(
 
 @dataclass
 class DraftResult:
-    created_rule_ids: List[str] = field(default_factory=list)
-    drafts: List[Dict[str, Any]] = field(default_factory=list)
-    notes: Optional[str] = None
-    interaction_id: Optional[str] = None
-    error: Optional[str] = None
+    created_rule_ids: list[str] = field(default_factory=list)
+    drafts: list[dict[str, Any]] = field(default_factory=list)
+    notes: str | None = None
+    interaction_id: str | None = None
+    error: str | None = None
 
 
 def _draft_to_rule(
-    draft: RuleDraft, jurisdiction: str, document: Optional[RegulatoryDocument]
+    draft: RuleDraft, jurisdiction: str, document: RegulatoryDocument | None
 ) -> RegulatoryRule:
     """Converte o rascunho em linha do catálogo — sempre em estado de rascunho.
 
@@ -621,7 +630,7 @@ def _draft_to_rule(
     marcar a fonte como conferida, porque `is_verified` exige documento **e**
     artigo validados por pessoa (§7.5).
     """
-    applies_to: Dict[str, Any] = {}
+    applies_to: dict[str, Any] = {}
     if draft.zones:
         applies_to["zone"] = draft.zones
     if draft.building_types:
@@ -666,10 +675,10 @@ def _process_draft_batch(
     jurisdiction: str,
     user: User,
     result: AIResult,
-    document: Optional[RegulatoryDocument],
-) -> List[str]:
+    document: RegulatoryDocument | None,
+) -> list[str]:
     """Processa o lote de rascunhos retornando os IDs das regras criadas."""
-    criadas: List[str] = []
+    criadas: list[str] = []
 
     draft_keys = [draft.rule_key for draft in batch.drafts]
     existentes = (
@@ -725,8 +734,8 @@ def extract_rule_drafts(
     legal_text: str,
     jurisdiction: str,
     user: User,
-    document: Optional[RegulatoryDocument] = None,
-    provider: Optional[AIProvider] = None,
+    document: RegulatoryDocument | None = None,
+    provider: AIProvider | None = None,
 ) -> DraftResult:
     """Propõe regras a partir de texto legal — como rascunho, sempre.
 
@@ -746,14 +755,16 @@ def extract_rule_drafts(
             ),
             interaction_id=_record(
                 db,
-                organization_id=user.organization_id,
-                user=user,
-                project=None,
-                purpose="extracao_de_regra",
-                prompt=legal_text[:4000],
-                request_hash=request_hash,
-                retrieved_keys=[],
-                provider_name=engine.name,
+                RecordParams(
+                    organization_id=user.organization_id,
+                    user=user,
+                    project=None,
+                    purpose="extracao_de_regra",
+                    prompt=legal_text[:4000],
+                    request_hash=request_hash,
+                    retrieved_keys=[],
+                    provider_name=engine.name,
+                )
             ).id,
         )
 
@@ -770,14 +781,16 @@ def extract_rule_drafts(
             error=result.error or "O modelo não produziu rascunhos.",
             interaction_id=_record(
                 db,
-                organization_id=user.organization_id,
-                user=user,
-                project=None,
-                purpose="extracao_de_regra",
-                prompt=legal_text[:4000],
-                request_hash=request_hash,
-                retrieved_keys=[],
-                result=result,
+                RecordParams(
+                    organization_id=user.organization_id,
+                    user=user,
+                    project=None,
+                    purpose="extracao_de_regra",
+                    prompt=legal_text[:4000],
+                    request_hash=request_hash,
+                    retrieved_keys=[],
+                    result=result,
+                )
             ).id,
         )
 
@@ -786,16 +799,18 @@ def extract_rule_drafts(
 
     interaction = _record(
         db,
-        organization_id=user.organization_id,
-        user=user,
-        project=None,
-        purpose="extracao_de_regra",
-        prompt=legal_text[:4000],
-        request_hash=request_hash,
-        retrieved_keys=[],
-        cited_keys=[d.rule_key for d in batch.drafts],
-        result=result,
-        response_json=batch.model_dump(),
+        RecordParams(
+            organization_id=user.organization_id,
+            user=user,
+            project=None,
+            purpose="extracao_de_regra",
+            prompt=legal_text[:4000],
+            request_hash=request_hash,
+            retrieved_keys=[],
+            cited_keys=[d.rule_key for d in batch.drafts],
+            result=result,
+            response_json=batch.model_dump(),
+        )
     )
 
     return DraftResult(
