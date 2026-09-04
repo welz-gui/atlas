@@ -168,14 +168,22 @@ def test_upload_http_exception_aborta_escrita(
     def mock_commit(*args, **kwargs):
         raise HTTPException(status_code=500, detail="Mocked HTTP exception")
 
+    abort_called = False
+    original_abort = StorageWriter.abort
+
+    def mock_abort(self, *args, **kwargs):
+        nonlocal abort_called
+        abort_called = True
+        return original_abort(self, *args, **kwargs)
+
     monkeypatch.setattr(StorageWriter, "commit", mock_commit)
+    monkeypatch.setattr(StorageWriter, "abort", mock_abort)
 
     response = _upload(client, engineer_headers, project["id"], "planta.pdf", b"qualquer")
 
     assert response.status_code == 500
     assert response.json()["detail"] == "Mocked HTTP exception"
-    # The abort is tested implicitly by making sure the file isn't created in the storage dir
-    assert list(upload_dir.iterdir()) == []
+    assert abort_called is True
 
 
 
@@ -187,14 +195,22 @@ def test_upload_erro_inesperado_aborta_escrita(
     def mock_commit(*args, **kwargs):
         raise RuntimeError("Erro inesperado no sistema de arquivos")
 
+    abort_called = False
+    original_abort = StorageWriter.abort
+
+    def mock_abort(self, *args, **kwargs):
+        nonlocal abort_called
+        abort_called = True
+        return original_abort(self, *args, **kwargs)
+
     monkeypatch.setattr(StorageWriter, "commit", mock_commit)
+    monkeypatch.setattr(StorageWriter, "abort", mock_abort)
 
     with pytest.raises(RuntimeError) as exc_info:
         _upload(client, engineer_headers, project["id"], "planta.pdf", b"qualquer")
 
     assert "Erro inesperado" in str(exc_info.value)
-    # The abort is tested implicitly by making sure the file isn't created in the storage dir
-    assert list(upload_dir.iterdir()) == []
+    assert abort_called is True
 
 
 def test_cliente_nao_faz_upload(client, db_session, org, project, upload_dir):
