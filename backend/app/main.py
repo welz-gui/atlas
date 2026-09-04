@@ -8,7 +8,7 @@ import uuid
 from app.core.config import settings
 from app.core.logging import configure_logging, reset_request_id, set_request_id
 from app.core.tenant import current_organization_id
-from app.core.tenant import reset_current_organization, set_current_organization
+from app.core.tenant import organization_scope
 
 configure_logging(settings.LOG_LEVEL)
 logger = logging.getLogger("atlas.api")
@@ -123,11 +123,8 @@ async def tenant_scope(request, call_next):
     herdaria a organização anterior, que é precisamente o vazamento que a RLS
     existe para impedir.
     """
-    token = set_current_organization(None)
-    try:
+    with organization_scope(None):
         return await call_next(request)
-    finally:
-        reset_current_organization(token)
 
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
