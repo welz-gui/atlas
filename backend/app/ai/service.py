@@ -720,68 +720,57 @@ def _process_draft_batch(
     return criadas
 
 
-def extract_rule_drafts(
-    db: Session,
-    legal_text: str,
-    jurisdiction: str,
-    user: User,
-    document: Optional[RegulatoryDocument] = None,
-    provider: Optional[AIProvider] = None,
+def _handle_unavailable_provider(
+    db: Session, user: User, engine: AIProvider, legal_text: str, request_hash: str
 ) -> DraftResult:
-    """Propõe regras a partir de texto legal — como rascunho, sempre.
-
-    O resultado entra na fila de validação humana (§7.5). Regra com `rule_key`
-    já existente na jurisdição é ignorada: sobrescrever cadastro publicado a
-    partir de saída de modelo seria alterar a base legal sem que ninguém
-    tivesse conferido.
-    """
-    engine = provider or get_provider()
-    request_hash = _request_hash(legal_text, [jurisdiction], getattr(engine, "model", None))
-
-    if not engine.available:
-        return DraftResult(
-            error=(
-                "Nenhum provedor de modelo configurado. A extração de rascunhos exige "
-                "AI_PROVIDER configurado; o cadastro manual continua disponível."
-            ),
-            interaction_id=_record(
-                db,
-                organization_id=user.organization_id,
-                user=user,
-                project=None,
-                purpose="extracao_de_regra",
-                prompt=legal_text[:4000],
-                request_hash=request_hash,
-                retrieved_keys=[],
-                provider_name=engine.name,
-            ).id,
-        )
-
-    result = engine.complete(
-        system=f"Extração de regras urbanísticas para a jurisdição {jurisdiction}.",
-        prompt=f"TEXTO LEGAL:\n\n{legal_text}",
-        output_model=RuleDraftBatch,
-        max_tokens=8192,
-        cacheable_prefix=EXTRACTION_POLICY,
+    return DraftResult(
+        error=(
+            "Nenhum provedor de modelo configurado. A extração de rascunhos exige "
+            "AI_PROVIDER configurado; o cadastro manual continua disponível."
+        ),
+        interaction_id=_record(
+            db,
+            organization_id=user.organization_id,
+            user=user,
+            project=None,
+            purpose="extracao_de_regra",
+            prompt=legal_text[:4000],
+            request_hash=request_hash,
+            retrieved_keys=[],
+            provider_name=engine.name,
+        ).id,
     )
 
-    if not result.ok:
-        return DraftResult(
-            error=result.error or "O modelo não produziu rascunhos.",
-            interaction_id=_record(
-                db,
-                organization_id=user.organization_id,
-                user=user,
-                project=None,
-                purpose="extracao_de_regra",
-                prompt=legal_text[:4000],
-                request_hash=request_hash,
-                retrieved_keys=[],
-                result=result,
-            ).id,
-        )
 
-    batch: RuleDraftBatch = result.parsed  # type: ignore[assignment]
+def _handle_failed_extraction(
+    db: Session, user: User, result: AIResult, legal_text: str, request_hash: str
+) -> DraftResult:
+    return DraftResult(
+        error=result.error or "O modelo não produziu rascunhos.",
+        interaction_id=_record(
+            db,
+            organization_id=user.organization_id,
+            user=user,
+            project=None,
+            purpose="extracao_de_regra",
+            prompt=legal_text[:4000],
+            request_hash=request_hash,
+            retrieved_keys=[],
+            result=result,
+        ).id,
+    )
+
+
+def _handle_successful_extraction(
+    db: Session,
+    user: User,
+    result: AIResult,
+    batch: RuleDraftBatch,
+    jurisdiction: str,
+    legal_text: str,
+    request_hash: str,
+    document: Optional[RegulatoryDocument] = None,
+) -> DraftResult:
     criadas = _process_draft_batch(db, batch, jurisdiction, user, result, document)
 
     interaction = _record(
@@ -803,4 +792,42 @@ def extract_rule_drafts(
         drafts=[d.model_dump() for d in batch.drafts],
         notes=batch.notes,
         interaction_id=interaction.id,
+    )
+
+
+def extract_rule_drafts(
+    db: Session,
+    legal_text: str,
+    jurisdiction: str,
+    user: User,
+    document: Optional[RegulatoryDocument] = None,
+    provider: Optional[AIProvider] = None,
+) -> DraftResult:
+    """Propõe regras a partir de texto legal — como rascunho, sempre.
+
+    O resultado entra na fila de validação humana (§7.5). Regra com `rule_key`
+    já existente na jurisdição é ignorada: sobrescrever cadastro publicado a
+    partir de saída de modelo seria alterar a base legal sem que ninguém
+    tivesse conferido.
+    """
+    engine = provider or get_provider()
+    request_hash = _request_hash(legal_text, [jurisdiction], getattr(engine, "model", None))
+
+    if not engine.available:
+        return _handle_unavailable_provider(db, user, engine, legal_text, request_hash)
+
+    result = engine.complete(
+        system=f"Extração de regras urbanísticas para a jurisdição {jurisdiction}.",
+        prompt=f"TEXTO LEGAL:\n\n{legal_text}",
+        output_model=RuleDraftBatch,
+        max_tokens=8192,
+        cacheable_prefix=EXTRACTION_POLICY,
+    )
+
+    if not result.ok:
+        return _handle_failed_extraction(db, user, result, legal_text, request_hash)
+
+    batch: RuleDraftBatch = result.parsed  # type: ignore[assignment]
+    return _handle_successful_extraction(
+        db, user, result, batch, jurisdiction, legal_text, request_hash, document
     )
