@@ -408,6 +408,112 @@ def _return_baseline(
     return baseline
 
 
+def _process_model_response(
+    db: Session,
+    user: User,
+    project: Optional[Project],
+    query: str,
+    baseline: AssistantResponse,
+    request_hash: str,
+    retrieved: Sequence[RetrievedRule],
+    retrieved_keys: Sequence[str],
+    engine: AIProvider,
+    result: AIResult,
+) -> AssistantResponse:
+    parsed: AssistantAnswer = result.parsed  # type: ignore[assignment]
+
+    # Conferência: chave citada que não estava no contexto é descartada.
+    permitidas = set(retrieved_keys)
+    citadas = [key for key in parsed.cited_rule_keys if key in permitidas]
+    inventadas = [key for key in parsed.cited_rule_keys if key not in permitidas]
+    grounded = not inventadas and parsed.answered_from_context
+
+    if inventadas:
+        return _return_baseline(
+            db=db,
+            user=user,
+            project=project,
+            query=query,
+            baseline=baseline,
+            request_hash=request_hash,
+            retrieved_keys=retrieved_keys,
+            cited_keys=citadas,
+            provider_name=engine.name,
+            warning=(
+                "A resposta do modelo referenciou regra fora do catálogo consultado e foi "
+                "substituída pela consulta determinística."
+            ),
+            result=result,
+            response_json=parsed.model_dump(),
+            grounded=False,
+        )
+
+    if not parsed.answered_from_context:
+        # O próprio modelo disse que o contexto não bastava. Melhor entregar o
+        # que o catálogo tem do que uma resposta que ele mesmo não sustenta.
+        return _return_baseline(
+            db=db,
+            user=user,
+            project=project,
+            query=query,
+            baseline=baseline,
+            request_hash=request_hash,
+            retrieved_keys=retrieved_keys,
+            cited_keys=citadas,
+            provider_name=engine.name,
+            warning=(
+                "O modelo indicou que o catálogo não sustenta uma resposta completa para "
+                "esta consulta."
+            ),
+            result=result,
+            response_json=parsed.model_dump(),
+            grounded=True,
+        )
+
+    # A citação legal é resolvida pelo Atlas, a partir do catálogo — nunca pelo
+    # texto que o modelo escreveu.
+    regras_citadas = [item.rule for item in retrieved if item.rule.rule_id in citadas]
+    citacoes = [f"{r.title} — {r.source.citation()}" for r in regras_citadas]
+
+    warnings: List[str] = []
+    aviso = _unvalidated_warning(regras_citadas)
+    if aviso:
+        warnings.append(aviso)
+
+    resposta = AssistantResponse(
+        answer=parsed.answer,
+        law_citations=citacoes,
+        suggested_actions=list(parsed.suggested_actions),
+        matched_rules=citadas,
+        is_ai_generated=True,
+        method="modelo_de_linguagem_sobre_catalogo",
+        model=result.model,
+        grounded=grounded,
+        warnings=warnings,
+    )
+
+    interaction = _record(
+        db,
+        organization_id=user.organization_id,
+        user=user,
+        project=project,
+        purpose="consulta_normativa",
+        prompt=query,
+        request_hash=request_hash,
+        retrieved_keys=retrieved_keys,
+        cited_keys=citadas,
+        result=result,
+        response_json={
+            k: v
+            for k, v in resposta.__dict__.items()
+            if k not in {"interaction_id", "served_from_cache"}
+        },
+        grounded=True,
+    )
+    resposta.interaction_id = interaction.id
+    return resposta
+
+
 def ask(
     db: Session,
     query: str,
@@ -505,98 +611,18 @@ def ask(
             result=result,
         )
 
-    parsed: AssistantAnswer = result.parsed  # type: ignore[assignment]
-
-    # Conferência: chave citada que não estava no contexto é descartada.
-    permitidas = set(retrieved_keys)
-    citadas = [key for key in parsed.cited_rule_keys if key in permitidas]
-    inventadas = [key for key in parsed.cited_rule_keys if key not in permitidas]
-    grounded = not inventadas and parsed.answered_from_context
-
-    if inventadas:
-        return _return_baseline(
-            db=db,
-            user=user,
-            project=project,
-            query=query,
-            baseline=baseline,
-            request_hash=request_hash,
-            retrieved_keys=retrieved_keys,
-            cited_keys=citadas,
-            provider_name=engine.name,
-            warning=(
-                "A resposta do modelo referenciou regra fora do catálogo consultado e foi "
-                "substituída pela consulta determinística."
-            ),
-            result=result,
-            response_json=parsed.model_dump(),
-            grounded=False,
-        )
-
-    if not parsed.answered_from_context:
-        # O próprio modelo disse que o contexto não bastava. Melhor entregar o
-        # que o catálogo tem do que uma resposta que ele mesmo não sustenta.
-        return _return_baseline(
-            db=db,
-            user=user,
-            project=project,
-            query=query,
-            baseline=baseline,
-            request_hash=request_hash,
-            retrieved_keys=retrieved_keys,
-            cited_keys=citadas,
-            provider_name=engine.name,
-            warning=(
-                "O modelo indicou que o catálogo não sustenta uma resposta completa para "
-                "esta consulta."
-            ),
-            result=result,
-            response_json=parsed.model_dump(),
-            grounded=True,
-        )
-
-    # A citação legal é resolvida pelo Atlas, a partir do catálogo — nunca pelo
-    # texto que o modelo escreveu.
-    regras_citadas = [item.rule for item in retrieved if item.rule.rule_id in citadas]
-    citacoes = [f"{r.title} — {r.source.citation()}" for r in regras_citadas]
-
-    warnings: List[str] = []
-    aviso = _unvalidated_warning(regras_citadas)
-    if aviso:
-        warnings.append(aviso)
-
-    resposta = AssistantResponse(
-        answer=parsed.answer,
-        law_citations=citacoes,
-        suggested_actions=list(parsed.suggested_actions),
-        matched_rules=citadas,
-        is_ai_generated=True,
-        method="modelo_de_linguagem_sobre_catalogo",
-        model=result.model,
-        grounded=grounded,
-        warnings=warnings,
-    )
-
-    interaction = _record(
-        db,
-        organization_id=user.organization_id,
+    return _process_model_response(
+        db=db,
         user=user,
         project=project,
-        purpose="consulta_normativa",
-        prompt=query,
+        query=query,
+        baseline=baseline,
         request_hash=request_hash,
+        retrieved=retrieved,
         retrieved_keys=retrieved_keys,
-        cited_keys=citadas,
+        engine=engine,
         result=result,
-        response_json={
-            k: v
-            for k, v in resposta.__dict__.items()
-            if k not in {"interaction_id", "served_from_cache"}
-        },
-        grounded=True,
     )
-    resposta.interaction_id = interaction.id
-    return resposta
 
 
 # =============================================================================
