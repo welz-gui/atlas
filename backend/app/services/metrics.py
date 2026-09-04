@@ -69,31 +69,8 @@ def _parse_date(raw: Optional[str]) -> Optional[date]:
 # --- Aprovação (§11) ---------------------------------------------------------
 
 
-def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
-    projects = (
-        db.query(Project).filter(Project.organization_id == organization_id).all()
-    )
-    project_ids = [p.id for p in projects]
-
-    processes = (
-        db.query(ProtocolProcess)
-        .filter(ProtocolProcess.organization_id == organization_id)
-        .all()
-    )
-    process_ids = [p.id for p in processes]
-
-    requirements = (
-        db.query(ProtocolRequirement)
-        .filter(ProtocolRequirement.organization_id == organization_id)
-        .all()
-        if process_ids
-        else []
-    )
-
-    # -- Ciclos de notificação -------------------------------------------
-    # Cada volta do órgão é uma transição para `notificado`. Um processo que
-    # foi notificado duas vezes custou dois ciclos ao cliente.
-    notification_events = (
+def _calculate_notification_metrics(db: Session, organization_id: str, process_ids: list[str]) -> int:
+    return (
         db.query(ProtocolEvent)
         .filter(
             ProtocolEvent.organization_id == organization_id,
@@ -104,9 +81,8 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
         else 0
     )
 
-    # -- Dias até alvará --------------------------------------------------
-    # Só processos decididos e aprovados entram. Processo em andamento não
-    # tem duração; tem duração parcial, que é outra coisa.
+
+def _calculate_duration_metrics(processes: list[ProtocolProcess]) -> tuple[list[float], int]:
     durations: list[float] = []
     approved = 0
     for process in processes:
@@ -117,27 +93,17 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
         decided = _parse_date(process.decided_at)
         if submitted and decided and decided >= submitted:
             durations.append((decided - submitted).days)
+    return durations, approved
 
-    # -- Recall de bloqueios e falsos negativos críticos -------------------
-    # Só exigência vinculada a regra entra: exigência documental que nenhuma
-    # regra poderia prever não é falha do motor.
+
+def _calculate_recall_metrics(requirements: list[ProtocolRequirement]) -> tuple[list[ProtocolRequirement], int, int]:
     linked = [r for r in requirements if r.linked_rule_key]
     predicted = sum(1 for r in linked if r.was_predicted)
     false_negatives = sum(1 for r in linked if r.was_predicted is False)
+    return linked, predicted, false_negatives
 
-    # -- Precisão ---------------------------------------------------------
-    # Do que o motor apontou, quanto o órgão confirmou. O denominador é o
-    # conjunto de pares (projeto, regra) apontados na análise mais recente de
-    # cada projeto que chegou a protocolar.
-    protocolled_project_ids = {p.project_id for p in processes}
-    required_pairs = {
-        (process.project_id, r.linked_rule_key)
-        for process in processes
-        for r in requirements
-        if r.process_id == process.id and r.linked_rule_key
-    }
 
-    # -- Fetch latest AnalysisRuns for all projects --
+def _get_latest_runs_by_project(db: Session, organization_id: str, project_ids: list[str]) -> dict[str, AnalysisRun]:
     latest_runs_by_project = {}
     if project_ids:
         subquery = (
@@ -166,6 +132,17 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
             .all()
         )
         latest_runs_by_project = {run.project_id: run for run in latest_runs_list}
+    return latest_runs_by_project
+
+
+def _calculate_precision_metrics(processes: list[ProtocolProcess], requirements: list[ProtocolRequirement], latest_runs_by_project: dict[str, AnalysisRun]) -> tuple[int, int]:
+    protocolled_project_ids = {p.project_id for p in processes}
+    required_pairs = {
+        (process.project_id, r.linked_rule_key)
+        for process in processes
+        for r in requirements
+        if r.process_id == process.id and r.linked_rule_key
+    }
 
     flagged_pairs: set[tuple[str, str]] = set()
     for project_id in protocolled_project_ids:
@@ -177,10 +154,10 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
                 flagged_pairs.add((project_id, record.rule_id))
 
     confirmed = len(flagged_pairs & required_pairs)
+    return confirmed, len(flagged_pairs)
 
-    # -- Não verificáveis --------------------------------------------------
-    # Sobre todas as análises mais recentes, não só as protocoladas: mede
-    # quanto do projeto o sistema não consegue avaliar por falta de dado.
+
+def _calculate_unverifiable_metrics(project_ids: list[str], latest_runs_by_project: dict[str, AnalysisRun]) -> tuple[int, int]:
     total_checks = 0
     unverifiable = 0
     for project_id in project_ids:
@@ -189,11 +166,10 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
             continue
         total_checks += latest.total_checks
         unverifiable += latest.nao_verificavel_count
+    return total_checks, unverifiable
 
-    # -- Cobertura do catálogo --------------------------------------------
-    # Regra publicável sobre total, nas jurisdições em que a organização tem
-    # projeto. É a medida do progresso do D3, e é o que decide se um laudo
-    # pode ser entregue.
+
+def _calculate_catalog_metrics(db: Session, projects: list[Project]) -> tuple[int, int, int]:
     jurisdictions = applicable_jurisdictions(
         {p.city_ibge for p in projects if p.city_ibge}
     )
@@ -209,6 +185,38 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
         for r in rules
         if r.state == RuleState.VIGENTE and r.validated_by_id is not None
     )
+    return len(jurisdictions) if jurisdictions else 0, len(rules), publishable
+
+
+def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
+    projects = (
+        db.query(Project).filter(Project.organization_id == organization_id).all()
+    )
+    project_ids = [p.id for p in projects]
+
+    processes = (
+        db.query(ProtocolProcess)
+        .filter(ProtocolProcess.organization_id == organization_id)
+        .all()
+    )
+    process_ids = [p.id for p in processes]
+
+    requirements = (
+        db.query(ProtocolRequirement)
+        .filter(ProtocolRequirement.organization_id == organization_id)
+        .all()
+        if process_ids
+        else []
+    )
+
+    notification_events = _calculate_notification_metrics(db, organization_id, process_ids)
+    durations, approved = _calculate_duration_metrics(processes)
+    linked, predicted, false_negatives = _calculate_recall_metrics(requirements)
+
+    latest_runs_by_project = _get_latest_runs_by_project(db, organization_id, project_ids)
+    confirmed, flagged_pairs_count = _calculate_precision_metrics(processes, requirements, latest_runs_by_project)
+    total_checks, unverifiable = _calculate_unverifiable_metrics(project_ids, latest_runs_by_project)
+    jurisdictions_len, rules_len, publishable = _calculate_catalog_metrics(db, projects)
 
     return {
         "projects": len(projects),
@@ -223,12 +231,13 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
         "requirements_linked_to_rules": len(linked) if process_ids else None,
         "blocking_recall_percent": _percent(predicted, len(linked)),
         "critical_false_negatives": false_negatives if linked else None,
-        "precision_percent": _percent(confirmed, len(flagged_pairs)),
+        "precision_percent": _percent(confirmed, flagged_pairs_count),
         "unverifiable_percent": _percent(unverifiable, total_checks),
-        "catalog_rules": len(rules) if jurisdictions else None,
-        "catalog_publishable_rules": publishable if jurisdictions else None,
-        "catalog_coverage_percent": _percent(publishable, len(rules)),
+        "catalog_rules": rules_len if jurisdictions_len else None,
+        "catalog_publishable_rules": publishable if jurisdictions_len else None,
+        "catalog_coverage_percent": _percent(publishable, rules_len),
     }
+
 
 
 # --- IA (§11) ----------------------------------------------------------------
