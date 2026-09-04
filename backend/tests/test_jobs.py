@@ -500,3 +500,112 @@ def test_token_de_outra_organizacao_nao_colide(
     )
     assert resposta.status_code == 201
     assert resposta.json()["activities_done"] == "Registro da organização B."
+
+# =============================================================================
+# Executores do worker (§6.7) - Testes unitários para `generate_report`
+# =============================================================================
+
+def test_generate_report_missing_project_id(db_session, org):
+    from app.workers.tasks import generate_report
+    record = JobRecord(
+        id="job-unit-1",
+        organization_id=org.id,
+        job_type=JobType.GERACAO_LAUDO,
+        payload={}
+    )
+    with pytest.raises(ValueError, match="payload.project_id é obrigatório."):
+        generate_report(db_session, record)
+
+
+def test_generate_report_project_not_found(db_session, org):
+    from app.workers.tasks import generate_report
+    record = JobRecord(
+        id="job-unit-2",
+        organization_id=org.id,
+        job_type=JobType.GERACAO_LAUDO,
+        payload={"project_id": "missing-project-id"}
+    )
+    with pytest.raises(LookupError, match="Empreendimento 'missing-project-id' não encontrado na organização do trabalho."):
+        generate_report(db_session, record)
+
+
+def test_generate_report_run_not_found(db_session, org):
+    from app.models.domain import Project
+    from app.workers.tasks import generate_report
+    project = Project(id="proj-unit-1", organization_id=org.id, name="Test")
+    db_session.add(project)
+    db_session.commit()
+
+    record = JobRecord(
+        id="job-unit-3",
+        organization_id=org.id,
+        job_type=JobType.GERACAO_LAUDO,
+        payload={"project_id": "proj-unit-1", "analysis_run_id": "missing-run-id"}
+    )
+    with pytest.raises(LookupError, match="Análise 'missing-run-id' não pertence a este empreendimento."):
+        generate_report(db_session, record)
+
+
+def test_generate_report_no_run_found(db_session, org):
+    from app.models.domain import Project
+    from app.workers.tasks import generate_report
+    project = Project(id="proj-unit-2", organization_id=org.id, name="Test2")
+    db_session.add(project)
+    db_session.commit()
+
+    record = JobRecord(
+        id="job-unit-4",
+        organization_id=org.id,
+        job_type=JobType.GERACAO_LAUDO,
+        payload={"project_id": "proj-unit-2"}
+    )
+    with pytest.raises(ValueError, match="Nenhuma análise registrada para este empreendimento; não há o que emitir."):
+        generate_report(db_session, record)
+
+
+def test_generate_report_success(db_session, org):
+    from unittest.mock import patch, MagicMock
+    from app.models.domain import Project, AnalysisRun
+    from app.workers.tasks import generate_report
+    project = Project(id="proj-unit-3", organization_id=org.id, name="Test3")
+    db_session.add(project)
+
+    run = AnalysisRun(id="run-unit-3", project_id=project.id, organization_id=org.id, project_version_number=1,
+                      jurisdiction="BR-SP", catalog_version="1.0", engine_version="1.0", trigger="manual",
+                      total_checks=1, conforme_count=1, nao_conforme_count=0, atencao_count=0, nao_verificavel_count=0,
+                      is_publishable=True, content_hash="hash")
+    db_session.add(run)
+    db_session.commit()
+
+    record = JobRecord(
+        id="job-unit-5",
+        organization_id=org.id,
+        job_type=JobType.GERACAO_LAUDO,
+        payload={"project_id": "proj-unit-3"}
+    )
+
+    with patch("app.services.report_builder.build_report") as mock_build_report:
+        mock_build_report.return_value = (b"mock pdf bytes", "test_report.pdf", "mock-sha")
+        with patch("app.services.storage.get_storage") as mock_get_storage:
+            mock_storage = MagicMock()
+            mock_get_storage.return_value = mock_storage
+            mock_writer_cm = MagicMock()
+            mock_storage.writer.return_value = mock_writer_cm
+            mock_writer = mock_writer_cm.__enter__.return_value
+
+            mock_stored = MagicMock()
+            mock_stored.key = "test_key.pdf"
+            mock_stored.backend = "local"
+            mock_stored.size_bytes = 14
+            mock_writer.result = mock_stored
+
+            with patch("app.services.storage.build_key", return_value="test_key.pdf"):
+                result = generate_report(db_session, record)
+
+                assert result["analysis_run_id"] == "run-unit-3"
+                assert result["storage_key"] == "test_key.pdf"
+                assert result["storage_backend"] == "local"
+                assert result["filename"] == "test_report.pdf"
+                assert result["size_bytes"] == 14
+                assert result["sha256"] == "mock-sha"
+                assert result["is_publishable"] is True
