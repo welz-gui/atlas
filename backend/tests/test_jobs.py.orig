@@ -701,10 +701,6 @@ def test_missing_handler_for_job(db_session, org):
     assert resultado.status == JobStatus.FALHOU
     assert f"Nenhum executor registrado para '{job_type}'" in resultado.error
 
-    # Cleanup global state
-    if job_type in HANDLERS:
-        del HANDLERS[job_type]
-
 def test_missing_error_test_queue_job_execution(db_session, org):
     """
     Testing exception handling in the queue consumer requires raising an exception
@@ -733,7 +729,3 @@ def test_missing_error_test_queue_job_execution(db_session, org):
     assert resultado.status == JobStatus.ENFILEIRADO # Since max attempts is 3 and attempts is 1
     assert "ValueError: Something went wrong in task" in resultado.error
     assert resultado.finished_at is not None
-
-    # Cleanup global state
-    if "teste_exception_queue" in HANDLERS:
-        del HANDLERS["teste_exception_queue"]
