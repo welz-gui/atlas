@@ -52,6 +52,62 @@ def _to_response(row: RegulatoryRule) -> RegulatoryRuleResponse:
     return payload
 
 
+def _check_state_transition(current_state: str, target_state: str) -> None:
+    allowed = ALLOWED_TRANSITIONS.get(current_state, set())
+    if target_state not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Transição não permitida: '{current_state}' → '{target_state}'. "
+                f"A partir de '{current_state}', os destinos possíveis são: "
+                f"{', '.join(sorted(allowed)) or 'nenhum (estado terminal)'}."
+            ),
+        )
+
+
+def _apply_publish_action(
+    db: Session, row: RegulatoryRule, payload: RuleValidationRequest, user: User
+) -> None:
+    source_document_id = payload.source_document_id or row.source_document_id
+    source_article = payload.source_article or row.source_article
+
+    if not source_document_id:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Para publicar uma regra é obrigatório vincular o documento "
+                "regulatório de origem (source_document_id)."
+            ),
+        )
+    document = (
+        db.query(RegulatoryDocument)
+        .filter(RegulatoryDocument.id == source_document_id)
+        .first()
+    )
+    if not document:
+        raise HTTPException(
+            status_code=422, detail="Documento regulatório não encontrado."
+        )
+    if not source_article:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Para publicar uma regra é obrigatório informar o artigo conferido "
+                "no texto legal (source_article). Sem artigo, a fonte permanece "
+                "não verificada e a regra não pode ser vigente."
+            ),
+        )
+
+    row.source_document_id = source_document_id
+    row.source_article = source_article
+    row.source_document_label = document.title
+    row.validated_by_id = user.id
+    row.validated_by_name = user.name
+    row.validated_at = datetime.utcnow()
+    if payload.effective_from:
+        row.effective_from = payload.effective_from
+
+
 # --- Regras ------------------------------------------------------------------
 
 @router.get("/catalog/rules", response_model=List[RegulatoryRuleResponse])
@@ -136,58 +192,12 @@ def validate_rule(
             detail=f"Ação inválida. Válidas: {', '.join(sorted(ACTION_TARGET_STATE))}",
         )
 
-    allowed = ALLOWED_TRANSITIONS.get(row.state, set())
-    if target_state not in allowed:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Transição não permitida: '{row.state}' → '{target_state}'. "
-                f"A partir de '{row.state}', os destinos possíveis são: "
-                f"{', '.join(sorted(allowed)) or 'nenhum (estado terminal)'}."
-            ),
-        )
+    _check_state_transition(row.state, target_state)
 
     previous_state = row.state
 
     if target_state == RuleState.VIGENTE:
-        source_document_id = payload.source_document_id or row.source_document_id
-        source_article = payload.source_article or row.source_article
-
-        if not source_document_id:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "Para publicar uma regra é obrigatório vincular o documento "
-                    "regulatório de origem (source_document_id)."
-                ),
-            )
-        document = (
-            db.query(RegulatoryDocument)
-            .filter(RegulatoryDocument.id == source_document_id)
-            .first()
-        )
-        if not document:
-            raise HTTPException(
-                status_code=422, detail="Documento regulatório não encontrado."
-            )
-        if not source_article:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "Para publicar uma regra é obrigatório informar o artigo conferido "
-                    "no texto legal (source_article). Sem artigo, a fonte permanece "
-                    "não verificada e a regra não pode ser vigente."
-                ),
-            )
-
-        row.source_document_id = source_document_id
-        row.source_article = source_article
-        row.source_document_label = document.title
-        row.validated_by_id = user.id
-        row.validated_by_name = user.name
-        row.validated_at = datetime.utcnow()
-        if payload.effective_from:
-            row.effective_from = payload.effective_from
+        _apply_publish_action(db, row, payload, user)
     else:
         # Sair de vigente retira a validação: a regra deixa de ser publicável.
         row.validated_by_id = None
