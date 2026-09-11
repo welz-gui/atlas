@@ -280,10 +280,12 @@ def activate_mfa(
     db.execute(delete(MFARecoveryCode).where(MFARecoveryCode.user_id == user.id))
 
     codigos = mfa.generate_recovery_codes()
-    for codigo in codigos:
-        db.add(
+    db.add_all(
+        [
             MFARecoveryCode(user_id=user.id, code_hash=mfa.hash_recovery_code(codigo))
-        )
+            for codigo in codigos
+        ]
+    )
     db.commit()
 
     return MFAActivateResponse(
