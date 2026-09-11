@@ -514,7 +514,6 @@ def _process_model_response(
     return resposta
 
 
-
 def _ask_model(
     db: Session,
     query: str,
@@ -592,6 +591,7 @@ def _ask_model(
         result=result,
     )
 
+
 def ask(
     db: Session,
     query: str,
@@ -651,6 +651,7 @@ def ask(
         municipality=municipality,
         jurisdiction=jurisdiction,
     )
+
 
 # =============================================================================
 # Extração de rascunhos de regra
