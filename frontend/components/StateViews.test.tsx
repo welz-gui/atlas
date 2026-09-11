@@ -113,4 +113,9 @@ describe("EmptyState", () => {
     expect(screen.getByText("Empty")).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
+  it("renders container classes correctly", () => {
+    const { container } = render(<EmptyState title="Empty" description="Nothing here." />);
+    expect(container.firstChild).toHaveClass("flex", "flex-col", "items-center", "text-center");
+  });
+
 });
