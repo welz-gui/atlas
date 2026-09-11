@@ -43,8 +43,6 @@ from app.workers.registry import HANDLERS
 logger = logging.getLogger("atlas.workers")
 
 
-
-
 def worker_identity() -> str:
     return f"{socket.gethostname()}:{os.getpid()}"
 
