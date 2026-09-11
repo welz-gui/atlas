@@ -330,7 +330,7 @@ def document_qrcode(
     com a prancha impressa em obra possa conferir se ainda é a versão vigente.
     """
     import qrcode
-    import qrcode.image.svg
+    from qrcode.image.svg import SvgImage
 
     document = get_scoped_or_404(db, Document, document_id, user, "Documento")
 
@@ -338,7 +338,7 @@ def document_qrcode(
         f"{settings.PUBLIC_BASE_URL}/verificar/documento/{document.id}"
         f"?v={document.version}&s={document.status}&h={(document.hash_sha256 or '')[:16]}"
     )
-    image = qrcode.make(payload, image_factory=qrcode.image.svg.SvgImage)
+    image = qrcode.make(payload, image_factory=SvgImage)
     buffer = io.BytesIO()
     image.save(buffer)
 
