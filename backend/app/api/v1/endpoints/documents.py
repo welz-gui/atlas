@@ -10,7 +10,7 @@ documento e de contar a verdade sobre o que aconteceu com o arquivo.
 import io
 import os
 import re
-import urllib.parse
+from urllib.parse import unquote
 
 from fastapi import (
     APIRouter,
@@ -59,7 +59,7 @@ def secure_filename(filename: str) -> str:
     if not filename:
         return ""
     # Decodifica caracteres URL-encoded (ex: %22 vira ", %2e%2e%2f vira ../)
-    filename = urllib.parse.unquote(filename)
+    filename = unquote(filename)
     # Trata separadores de diretório do Windows, mesmo rodando em Linux
     filename = filename.replace("\\", "/")
     filename = os.path.basename(filename)
