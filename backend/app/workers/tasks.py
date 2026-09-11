@@ -19,7 +19,7 @@ from app.services.pdf_parser import PDFPlanParser
 from app.services.regulatory_engine import RegulatoryEngine
 from app.services.retention import purge_expired_documents
 from app.services.storage import ObjectNotFound, get_storage
-from app.workers.queue import register
+from app.workers.registry import register
 
 
 def _scoped_project(db: Session, record: JobRecord, project_id: str) -> Project:

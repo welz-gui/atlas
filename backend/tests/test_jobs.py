@@ -15,13 +15,13 @@ import pytest
 from app.core.config import settings
 from app.models.domain import JobRecord, JobStatus, JobType
 from app.workers import queue as queue_module
+from app.workers.registry import register
+from app.workers.registry import HANDLERS
 from app.workers.queue import (
-    HANDLERS,
     InlineQueue,
     QueueBackend,
     enqueue,
     get_queue,
-    register,
     run_job,
 )
 

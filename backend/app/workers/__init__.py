@@ -4,3 +4,5 @@
 - `tasks` — os executores de cada tipo de trabalho;
 - `worker` — o processo que consome a fila.
 """
+
+from app.workers import tasks as tasks
