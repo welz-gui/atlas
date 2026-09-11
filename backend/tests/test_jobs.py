@@ -674,3 +674,28 @@ def test_generate_report_success(db_session, org):
     assert result["sha256"] == "mock-sha"
     assert result["is_publishable"] is True
     mock_storage.writer.assert_called_once_with("test_key.pdf")
+
+
+def test_run_job_sem_executor_registrado_vira_falha(db_session, org):
+    """Um job_type sem handler não pode ficar preso em `executando` — falha
+
+    de forma explícita, com o motivo no registro (o cenário testado em
+    `run_job`'s early-return, distinto de uma falha *durante* a execução).
+    """
+    job_type = "tipo_sem_executor_algum"
+    assert job_type not in HANDLERS
+
+    record = JobRecord(
+        organization_id=org.id,
+        job_type=job_type,
+        payload={},
+        status=JobStatus.ENFILEIRADO,
+    )
+    db_session.add(record)
+    db_session.commit()
+
+    resultado = run_job(db_session, record.id)
+
+    assert resultado.status == JobStatus.FALHOU
+    assert resultado.error == f"Nenhum executor registrado para '{job_type}'."
+    assert resultado.finished_at is not None
