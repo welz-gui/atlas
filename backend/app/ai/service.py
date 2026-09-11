@@ -514,52 +514,19 @@ def _process_model_response(
     return resposta
 
 
-def ask(
+def _ask_model(
     db: Session,
     query: str,
     user: User,
-    project: Optional[Project] = None,
-    statuses: Optional[Dict[str, str]] = None,
-    provider: Optional[AIProvider] = None,
+    project: Optional[Project],
+    baseline: AssistantResponse,
+    retrieved: Sequence[RetrievedRule],
+    retrieved_keys: Sequence[str],
+    engine: AIProvider,
+    request_hash: str,
+    municipality: str,
+    jurisdiction: str,
 ) -> AssistantResponse:
-    """Responde a uma consulta normativa, com proveniência registrada."""
-    jurisdiction = project.city_ibge if project else "BR-RS-4311403"
-    municipality = project.city_name if project else "Lajeado"
-
-    catalog = RegulatoryCatalog.from_db(db, jurisdiction)
-    candidatas = catalog.for_jurisdiction(jurisdiction)
-    retrieved = retrieve(query, candidatas)
-    retrieved_keys = [item.rule.rule_id for item in retrieved]
-
-    engine = provider or get_provider()
-    baseline = deterministic_answer(
-        query, retrieved, catalog, jurisdiction, municipality, statuses, project
-    )
-
-    if not engine.available:
-        return _return_baseline(
-            db=db,
-            user=user,
-            project=project,
-            query=query,
-            baseline=baseline,
-            request_hash=_request_hash(query, _context_signature(retrieved), None),
-            retrieved_keys=retrieved_keys,
-            cited_keys=retrieved_keys,
-            provider_name=engine.name,
-        )
-
-    request_hash = _request_hash(
-        query, _context_signature(retrieved), getattr(engine, "model", None)
-    )
-
-    cached = _lookup_cache(db, user.organization_id, request_hash)
-    if cached and cached.response_json:
-        resposta = AssistantResponse(**cached.response_json)
-        resposta.interaction_id = cached.id
-        resposta.served_from_cache = True
-        return resposta
-
     if not retrieved:
         # Sem contexto não se pergunta ao modelo: seria convidá-lo a preencher
         # a lacuna com conhecimento próprio, que é exatamente o que a política
@@ -622,6 +589,67 @@ def ask(
         retrieved_keys=retrieved_keys,
         engine=engine,
         result=result,
+    )
+
+
+def ask(
+    db: Session,
+    query: str,
+    user: User,
+    project: Optional[Project] = None,
+    statuses: Optional[Dict[str, str]] = None,
+    provider: Optional[AIProvider] = None,
+) -> AssistantResponse:
+    """Responde a uma consulta normativa, com proveniência registrada."""
+    jurisdiction = project.city_ibge if project else "BR-RS-4311403"
+    municipality = project.city_name if project else "Lajeado"
+
+    catalog = RegulatoryCatalog.from_db(db, jurisdiction)
+    candidatas = catalog.for_jurisdiction(jurisdiction)
+    retrieved = retrieve(query, candidatas)
+    retrieved_keys = [item.rule.rule_id for item in retrieved]
+
+    engine = provider or get_provider()
+    baseline = deterministic_answer(
+        query, retrieved, catalog, jurisdiction, municipality, statuses, project
+    )
+
+    if not engine.available:
+        return _return_baseline(
+            db=db,
+            user=user,
+            project=project,
+            query=query,
+            baseline=baseline,
+            request_hash=_request_hash(query, _context_signature(retrieved), None),
+            retrieved_keys=retrieved_keys,
+            cited_keys=retrieved_keys,
+            provider_name=engine.name,
+        )
+
+    request_hash = _request_hash(
+        query, _context_signature(retrieved), getattr(engine, "model", None)
+    )
+
+    cached = _lookup_cache(db, user.organization_id, request_hash)
+    if cached and cached.response_json:
+        resposta = AssistantResponse(**cached.response_json)
+        resposta.interaction_id = cached.id
+        resposta.served_from_cache = True
+        return resposta
+
+    return _ask_model(
+        db=db,
+        query=query,
+        user=user,
+        project=project,
+        baseline=baseline,
+        retrieved=retrieved,
+        retrieved_keys=retrieved_keys,
+        engine=engine,
+        request_hash=request_hash,
+        municipality=municipality,
+        jurisdiction=jurisdiction,
     )
 
 
