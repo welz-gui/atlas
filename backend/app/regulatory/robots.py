@@ -230,6 +230,9 @@ class RobotsGate:
     def __init__(
         self,
         loader: Callable[[str], RobotsPolicy] = load_policy,
+        # O sleeper usa time.sleep porque RobotsGate roda estritamente em workers
+        # assíncronos que são, na verdade, processos síncronos dedicados (ou em
+        # threadpool no FastAPI). Não há bloqueio do event loop principal.
         sleeper: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -259,7 +262,13 @@ class RobotsGate:
         return policy
 
     def wait(self, url: str, policy: RobotsPolicy) -> None:
-        """Aguarda o que faltar do intervalo desde a última busca ao host."""
+        """Aguarda o que faltar do intervalo desde a última busca ao host.
+
+        Nota de desempenho: esta função é intencionalmente síncrona. Ela
+        bloqueia a thread atual com `time.sleep`, mas como é executada
+        apenas dentro do contexto de workers em background (ou threadpool),
+        isso é seguro e não causa regressões no event loop principal.
+        """
         origem = policy.origin
         anterior = self._last_request.get(origem)
         agora = self._clock()
