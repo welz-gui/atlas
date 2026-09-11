@@ -31,30 +31,16 @@ import traceback
 from abc import ABC, abstractmethod
 from datetime import datetime
 from functools import lru_cache
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.tenant import organization_scope
 from app.models.domain import JobRecord, JobStatus, User
+from app.workers.registry import HANDLERS
 
 logger = logging.getLogger("atlas.workers")
-
-#: Handlers registrados por tipo de trabalho. Preenchido por
-#: `app.workers.tasks`, que é importado ao final deste módulo para evitar
-#: dependência circular.
-HANDLERS: Dict[str, Callable[[Session, JobRecord], Dict[str, Any]]] = {}
-
-
-def register(job_type: str):
-    """Decorador que liga um tipo de trabalho ao seu executor."""
-
-    def wrapper(func):
-        HANDLERS[job_type] = func
-        return func
-
-    return wrapper
 
 
 def worker_identity() -> str:
@@ -308,5 +294,3 @@ def run_job(db: Session, job_id: str) -> JobRecord:
     return record
 
 
-# Importado por último: `tasks` depende de `register`, definido acima.
-from app.workers import tasks  # noqa: E402,F401

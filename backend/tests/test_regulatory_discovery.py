@@ -2,7 +2,7 @@
 
 from app.models.domain import JobType, RegulatoryDocument, RegulatoryDocumentState
 from app.regulatory.discovery import SOURCES, discover_applicable_regulations, discover_regulations, extract_candidates
-from app.workers.queue import HANDLERS
+from app.workers.registry import HANDLERS
 
 
 HTML = """
