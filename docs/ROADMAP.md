@@ -4,14 +4,14 @@ Documento vivo. Consolida o **roadmap estratégico** do plano (§9 e §10 de
 [`PLANO_DE_IMPLEMENTACAO_v2.md`](PLANO_DE_IMPLEMENTACAO_v2.md)) com o **estado
 real do código** e o **caminho de execução** de cada estágio.
 
-- Última atualização: **2026-09-04**
-- Base avaliada: `master` em `af163ce`, espelhada em
+- Última atualização: **2026-09-11**
+- Base avaliada: `master` em `b8796c0`, espelhada em
   [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
   estágios foi levantado em `7dc50d2` e continua valendo, com uma exceção
   registrada abaixo: o **Estágio 6 deixou de ser "nada construído"**.
 - **A Fase D está encerrada, exceto pelo D3** — que nunca foi de engenharia.
   Ver o registro adiante.
-- Suíte: **452 casos de backend** (eram 199 em `7dc50d2`) e **39 de
+- Suíte: **453 casos de backend** (eram 199 em `7dc50d2`) e **40 de
   frontend** (4 arquivos, incluindo componentes — `ErrorBanner`, `StatusChip`,
   `EmptyState`, `OfflineBar`). Mais 13 de integração e 6 de RLS, que só rodam
   na CI porque exigem Postgres, MinIO e clamd. Reproduz em ~3 min:
@@ -222,7 +222,7 @@ delas falhar, pare e conserte antes de continuar a construir.
 
 | Worktree | Branch | PR | Situação |
 |---|---|---|---|
-| `worktrees/roadmap` | `docs/roadmap-estado-atual` | — | 🟨 A frente que trouxe esta atualização. |
+| `worktrees/roadmap-update-4` | `docs/atualiza-roadmap-quarta-leva` | — | 🟨 A frente que trouxe esta atualização. |
 
 Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
@@ -240,7 +240,7 @@ Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
 ## Estado atual em uma página
 
-**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 452 testes; RLS ativa, MFA
+**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 453 testes; RLS ativa, MFA
 por TOTP, log em JSON com correlação e sondas de vida e prontidão):
 
 ```
@@ -266,7 +266,7 @@ app/
 **Frontend** (Next.js 14 App Router + TypeScript + Tailwind + TanStack Query):
 `/login`, `/`, `/projects`, `/approvals`, `/catalog`, `/protocol`,
 `/documents`, `/plan`, `/daily-log`, `/ai`, `/portal`. PWA com service worker e
-fila offline. Trinta e nove testes em quatro arquivos: cliente HTTP, camada de
+fila offline. Quarenta testes em quatro arquivos: cliente HTTP, camada de
 consulta, e componentes (`ErrorBanner`, `StatusChip`, `EmptyState`,
 `OfflineBar`) — o resto das telas segue sem cobertura.
 
@@ -1344,10 +1344,10 @@ um sem escolher nenhum. Suíte: 353 → 367.
 si. Depende de decisão e de conta, não de código — e, como o D3, não é
 engenharia que o trava.
 
-### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-09-04)
+### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-09-11)
 
-Um agente externo (Jules, do Google) abriu três levas de PRs contra o
-repositório — 30, 42 e 24 — do tipo "code health": remoção de import morto,
+Um agente externo (Jules, do Google) abriu quatro levas de PRs contra o
+repositório — 30, 42, 24 e 7 — do tipo "code health": remoção de import morto,
 refator de função complexa, teste de caminho de erro, correção de N+1, e
 algumas de segurança. Nenhuma foi mesclada às cegas por CI verde; cada uma foi
 lida contra o código real antes de decidir. O que isso revelou vale mais do
@@ -1383,7 +1383,16 @@ que qualquer regra individual corrigida:
   antes do teste rodar, e patchear o módulo de origem não alcança quem já
   importou de lá. O teste passava, mas por acaso: chamava o storage local de
   verdade, e o PDF mockado media, por coincidência, exatamente os bytes que a
-  asserção esperava. Corrigido para mirar `app.workers.tasks.get_storage`.
+  asserção esperava. Corrigido para mirar `app.workers.tasks.get_storage`;
+- **import circular de verdade, na quarta leva.** `app/workers/queue.py`
+  definia `HANDLERS`/`register` e importava `tasks` **por último**, comentado
+  como "para evitar dependência circular" — porque `tasks.py` precisa de
+  `register`, que só existe depois que `queue.py` termina de carregar. A PR
+  extraiu os dois para `app/workers/registry.py`, um módulo sem dependência de
+  nenhum dos dois lados, e ambos passaram a importar dali. O workaround
+  desaparece em vez de ser documentado com mais cuidado — a melhor PR desta
+  leva, mesclada direto depois de só normalizar espaçamento PEP8 que a geração
+  automática deixou torto.
 
 **Padrões que se repetiram e mudaram como a revisão foi feita:**
 
@@ -1418,15 +1427,36 @@ que qualquer regra individual corrigida:
   de execução). O arquivo *tinha* o future import, só não nas primeiras
   linhas que uma leitura rápida cobre — em vez de confiar na leitura, o fix
   foi aplicado num arquivo de teste isolado e importado de verdade antes de
-  aceitar.
+  aceitar;
+- **uma leva pode quebrar a si mesma.** Na quarta leva, duas PRs de teste
+  (`test_jobs.py`, `test_workers_tasks.py`) importavam `register` de
+  `app.workers.queue` — válido no início do dia, mas a PR do import circular
+  (item acima), **da mesma leva**, moveu `register` para
+  `app.workers.registry` e `queue.py` deixou de reexportá-lo. Nenhuma das
+  duas citava a outra; a quebra só aparece em quem lê as duas junto com o
+  código atual, não em quem lê cada PR isolada contra a CI (que roda contra a
+  base de cada uma, não contra o que as PRs irmãs estão prestes a mudar). Uma
+  delas também trazia `test_jobs.py.orig` — 731 linhas, cópia íntegra do
+  arquivo original — versionado por engano; a outra duplicava por inteiro
+  cobertura já mesclada numa leva anterior. As duas fechadas; o único teste
+  com valor real de uma delas foi reescrito à mão com os imports corretos.
 
 Resultado: **21 PRs mescladas na primeira leva**; na segunda, **21 mescladas**
 (16 diretas + 5 reescritas) e **25 fechadas**; na terceira, **12 mescladas
 diretamente**, mais **7 refeitas em 4 PRs novas** (mesmo padrão de cachos na
 mesma linha), **1 fechada por duplicar uma já mesclada** e **4 rejeitadas**,
-com comentário explicando o motivo em cada uma. Suíte: 367 → 441 → 452
-(backend), 15 → 21 → 39 (frontend, agora 4 arquivos — o primeiro teste de
-componente do projeto, na segunda leva, virou quatro).
+com comentário explicando o motivo em cada uma; na quarta, **9 das 11
+mescladas** (duas — a extração `_ask_model` e o import circular — com
+espaçamento PEP8 corrigido antes do merge) e **2 fechadas**, com o único
+teste aproveitável de uma delas reescrito numa PR própria (a décima mesclada
+da leva). Suíte: 367 → 441 → 452 → 453 (backend), 15 → 21 → 39 → 40
+(frontend, 4 arquivos desde a segunda leva).
+
+**Pendência sem solução de código:** branches de PRs já mescladas ou fechadas
+continuam reaparecendo em `origin` depois de apagadas — inclusive branches de
+PRs tão antigas quanto #4–#26. O Jules aparenta manter acesso de push ao
+repositório para além da vida do PR que abriu. Não há correção do lado do
+código; a correção é revogar ou reconfigurar o acesso do Jules no GitHub.
 
 ---
 
