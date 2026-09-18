@@ -35,7 +35,7 @@ from app.api.deps import (
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.domain import Document, DocumentState, User
-from app.schemas.domain import DocumentResponse, ExtractionResponse, PurgeReportResponse
+from app.schemas.domain import DocumentResponse, DocumentUpload, ExtractionResponse, PurgeReportResponse
 from app.services.antivirus import ScanResult, get_scanner
 from app.services.pdf_parser import PDFPlanParser
 from app.services.retention import mark_obsolete, purge_expired_documents
@@ -147,17 +147,14 @@ def _process_upload_file(file: UploadFile, extension: str) -> tuple[StoredObject
 )
 def upload_document(
     project_id: str,
-    title: str = Form(...),
-    category: str = Form("projeto_arquitetonico"),
-    version: str = Form("v1.0"),
-    supersedes_id: str | None = Form(None),
+    payload: DocumentUpload = Depends(DocumentUpload.as_form),
     file: UploadFile = File(...),
     user: User = Depends(require_permission("document:write")),
     db: Session = Depends(get_db),
 ):
     project = get_project_or_404(db, project_id, user)
 
-    superseded = _get_superseded_document(db, user, project_id, supersedes_id)
+    superseded = _get_superseded_document(db, user, project_id, payload.supersedes_id)
 
     # O nome enviado pelo cliente é tratado como dado hostil: dele só se
     # aproveita a extensão, e ainda assim contra uma allowlist. A chave no
@@ -180,9 +177,9 @@ def upload_document(
         organization_id=user.organization_id,
         project_id=project_id,
         project_version_id=project.current_version.id if project.current_version else None,
-        title=title,
-        category=category,
-        version=version,
+        title=payload.title,
+        category=payload.category,
+        version=payload.version,
         file_path=stored.key,
         storage_backend=stored.backend,
         original_filename=original_filename or None,
