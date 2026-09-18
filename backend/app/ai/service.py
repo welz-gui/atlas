@@ -107,6 +107,7 @@ antes de ser conferida e publicada por uma pessoa.\
 # Resultado do assistente
 # =============================================================================
 
+
 @dataclass
 class AssistantResponse:
     answer: str
@@ -121,6 +122,17 @@ class AssistantResponse:
     warnings: List[str] = field(default_factory=list)
     interaction_id: Optional[str] = None
     served_from_cache: bool = False
+
+
+@dataclass
+class QueryContext:
+    query: str
+    retrieved: Sequence[RetrievedRule]
+    catalog: RegulatoryCatalog
+    jurisdiction: str
+    municipality: str
+    statuses: Optional[Dict[str, str]] = None
+    project: Optional[Project] = None
 
 
 def _request_hash(prompt: str, rule_keys: Sequence[str], model: Optional[str]) -> str:
@@ -220,6 +232,7 @@ def _record(
 # Resposta determinística — o piso, não o improviso
 # =============================================================================
 
+
 def _unvalidated_warning(rules: Sequence[Rule]) -> Optional[str]:
     pendentes = [r for r in rules if not r.is_publishable]
     if not pendentes:
@@ -251,7 +264,9 @@ def _format_retrieved_rules(
             if rule.check
             else "verificação documental (não derivável de parâmetros numéricos)"
         )
-        pendente = "" if rule.is_publishable else " — regra ainda não validada tecnicamente"
+        pendente = (
+            "" if rule.is_publishable else " — regra ainda não validada tecnicamente"
+        )
         linha = f"• {rule.title}: {limite}{pendente}."
         if rule.rule_id in statuses:
             linha += (
@@ -303,13 +318,7 @@ def _format_missing_rules(
 
 
 def deterministic_answer(
-    query: str,
-    retrieved: Sequence[RetrievedRule],
-    catalog: RegulatoryCatalog,
-    jurisdiction: str,
-    municipality: str,
-    statuses: Optional[Dict[str, str]] = None,
-    project: Optional[Project] = None,
+    context: QueryContext,
 ) -> AssistantResponse:
     """Resposta montada a partir do catálogo, sem modelo de linguagem.
 
@@ -318,31 +327,31 @@ def deterministic_answer(
     consolo: é a garantia de que o sistema continua dizendo apenas o que está
     cadastrado.
     """
-    statuses = statuses or {}
+    statuses = context.statuses or {}
 
-    if retrieved:
+    if context.retrieved:
         lines, citations, actions = _format_retrieved_rules(
-            retrieved, municipality, statuses
+            context.retrieved, context.municipality, statuses
         )
     else:
         lines, citations, actions = _format_missing_rules(
-            query, catalog, jurisdiction, municipality
+            context.query, context.catalog, context.jurisdiction, context.municipality
         )
 
     # O aviso de regra não validada faz parte da resposta, não de um rodapé
     # que a interface possa deixar de mostrar (§7.5).
-    aviso = _unvalidated_warning([item.rule for item in retrieved])
+    aviso = _unvalidated_warning([item.rule for item in context.retrieved])
     warnings: List[str] = []
     if aviso:
         warnings.append(aviso)
         lines.append("")
         lines.append(f"Atenção: {aviso}")
 
-    if project:
-        version = project.current_version
+    if context.project:
+        version = context.project.current_version
         lines.append("")
         lines.append(
-            f"Empreendimento em contexto: '{project.name}' — {municipality}, "
+            f"Empreendimento em contexto: '{context.project.name}' — {context.municipality}, "
             f"zona {version.zone if version else '—'}, "
             f"lote {(version.lot_area if version else None) or 'não informado'} m², "
             f"área construída {(version.built_area if version else None) or 'não informado'} m²."
@@ -352,7 +361,7 @@ def deterministic_answer(
         answer="\n".join(lines),
         law_citations=citations,
         suggested_actions=actions,
-        matched_rules=[item.rule.rule_id for item in retrieved],
+        matched_rules=[item.rule.rule_id for item in context.retrieved],
         is_ai_generated=False,
         method="busca_por_palavra_chave_no_catalogo",
         warnings=warnings,
@@ -610,9 +619,16 @@ def ask(
     retrieved_keys = [item.rule.rule_id for item in retrieved]
 
     engine = provider or get_provider()
-    baseline = deterministic_answer(
-        query, retrieved, catalog, jurisdiction, municipality, statuses, project
+    context = QueryContext(
+        query=query,
+        retrieved=retrieved,
+        catalog=catalog,
+        jurisdiction=jurisdiction,
+        municipality=municipality,
+        statuses=statuses,
+        project=project,
     )
+    baseline = deterministic_answer(context)
 
     if not engine.available:
         return _return_baseline(
@@ -657,6 +673,7 @@ def ask(
 # Extração de rascunhos de regra
 # =============================================================================
 
+
 @dataclass
 class DraftResult:
     created_rule_ids: List[str] = field(default_factory=list)
@@ -695,7 +712,9 @@ def _draft_to_rule(
         jurisdiction=jurisdiction,
         title=draft.title,
         state=RuleState.RASCUNHO_EXTRAIDO_POR_IA,
-        severity=draft.severity if draft.severity in {"bloqueio", "alerta"} else "alerta",
+        severity=draft.severity
+        if draft.severity in {"bloqueio", "alerta"}
+        else "alerta",
         applies_to=applies_to,
         check=check,
         requires_manual_review=check is None,
@@ -865,7 +884,9 @@ def extract_rule_drafts(
     tivesse conferido.
     """
     engine = provider or get_provider()
-    request_hash = _request_hash(legal_text, [jurisdiction], getattr(engine, "model", None))
+    request_hash = _request_hash(
+        legal_text, [jurisdiction], getattr(engine, "model", None)
+    )
 
     if not engine.available:
         return _handle_unavailable_provider(db, user, engine, legal_text, request_hash)
