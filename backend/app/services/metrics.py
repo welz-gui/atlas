@@ -220,10 +220,16 @@ def _catalog_metrics(
         if jurisdictions
         else []
     )
-    publishable = sum(
-        1
-        for r in rules
-        if r.state == RuleState.VIGENTE and r.validated_by_id is not None
+    publishable = (
+        db.query(RegulatoryRule.id)
+        .filter(
+            RegulatoryRule.jurisdiction.in_(jurisdictions),
+            RegulatoryRule.state == RuleState.VIGENTE,
+            RegulatoryRule.validated_by_id.isnot(None)
+        )
+        .count()
+        if jurisdictions
+        else 0
     )
     return rules, publishable, jurisdictions
 
