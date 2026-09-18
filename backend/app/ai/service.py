@@ -34,7 +34,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy.orm import Session
 
-from app.ai.provider import AIProvider, AIResult, get_provider
+from app.ai.provider import AIProvider, AIResult, AIRequest, get_provider
 from app.ai.retrieval import RetrievedRule, format_context, retrieve
 from app.ai.schemas import AssistantAnswer, RuleDraft, RuleDraftBatch
 from app.core.config import settings
@@ -555,10 +555,12 @@ def _ask_model(
     )
 
     result = engine.complete(
-        system=f"Consulta normativa para {municipality}.",
-        prompt=prompt,
-        output_model=AssistantAnswer,
-        cacheable_prefix=ASSISTANT_POLICY,
+        AIRequest(
+            system=f"Consulta normativa para {municipality}.",
+            prompt=prompt,
+            output_model=AssistantAnswer,
+            cacheable_prefix=ASSISTANT_POLICY,
+        )
     )
 
     if not result.ok:
@@ -871,11 +873,13 @@ def extract_rule_drafts(
         return _handle_unavailable_provider(db, user, engine, legal_text, request_hash)
 
     result = engine.complete(
-        system=f"Extração de regras urbanísticas para a jurisdição {jurisdiction}.",
-        prompt=f"TEXTO LEGAL:\n\n{legal_text}",
-        output_model=RuleDraftBatch,
-        max_tokens=8192,
-        cacheable_prefix=EXTRACTION_POLICY,
+        AIRequest(
+            system=f"Extração de regras urbanísticas para a jurisdição {jurisdiction}.",
+            prompt=f"TEXTO LEGAL:\n\n{legal_text}",
+            output_model=RuleDraftBatch,
+            max_tokens=8192,
+            cacheable_prefix=EXTRACTION_POLICY,
+        )
     )
 
     if not result.ok:
