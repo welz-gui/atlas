@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
@@ -17,6 +18,13 @@ from app.models.domain import AnalysisRun, Project, ProjectVersion, User, Valida
 from app.regulatory.catalog import CheckOutcome, RegulatoryCatalog, Rule
 
 ENGINE_VERSION = "2.0.0"
+
+@dataclass
+class EvaluationConfig:
+    trigger: str = "manual"
+    user: Optional[User] = None
+    version: Optional[ProjectVersion] = None
+
 
 #: Parâmetros da versão expostos às regras.
 PARAM_FIELDS = (
@@ -107,16 +115,15 @@ class RegulatoryEngine:
         cls,
         db: Session,
         project: Project,
-        trigger: str = "manual",
-        user: Optional[User] = None,
-        version: Optional[ProjectVersion] = None,
+        config: Optional[EvaluationConfig] = None,
     ) -> AnalysisRun:
         """Executa o catálogo sobre uma versão do projeto e persiste a análise.
 
         Sem versão explícita, avalia a versão vigente. Análises anteriores
         permanecem intactas.
         """
-        target = version or project.current_version
+        config = config or EvaluationConfig()
+        target = config.version or project.current_version
         if target is None:
             raise ValueError(
                 "O empreendimento não possui nenhuma versão de projeto para analisar."
@@ -143,7 +150,7 @@ class RegulatoryEngine:
             jurisdiction=jurisdiction,
             catalog_version=catalog_version,
             engine_version=ENGINE_VERSION,
-            trigger=trigger,
+            trigger=config.trigger,
             total_checks=len(results),
             conforme_count=sum(1 for r in results if r["status"] == CheckOutcome.CONFORME),
             nao_conforme_count=sum(
@@ -159,7 +166,7 @@ class RegulatoryEngine:
             content_hash=cls._content_hash(
                 project, target, params, results, catalog_version
             ),
-            requested_by_id=user.id if user else None,
+            requested_by_id=config.user.id if config.user else None,
         )
         db.add(run)
         db.flush()

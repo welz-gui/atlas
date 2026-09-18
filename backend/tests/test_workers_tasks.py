@@ -1,7 +1,7 @@
 import pytest
 from app.workers.tasks import run_analysis
-from app.models.domain import JobRecord, JobType, Project, ProjectVersion, User
-from app.services.regulatory_engine import RegulatoryEngine
+from app.models.domain import JobRecord, JobType, Project, ProjectVersion
+from app.services.regulatory_engine import RegulatoryEngine, EvaluationConfig
 from unittest.mock import MagicMock
 
 def test_run_analysis_no_project_id():
@@ -48,9 +48,11 @@ def test_run_analysis_success(db_session, monkeypatch, project):
     mock_eval.assert_called_once_with(
         db_session,
         project_db,
-        trigger="assincrono",
-        user=None,
-        version=None
+        config=EvaluationConfig(
+            trigger="assincrono",
+            user=None,
+            version=None
+        )
     )
 
 def test_run_analysis_with_version_and_user(db_session, monkeypatch, project, engineer):
@@ -88,9 +90,11 @@ def test_run_analysis_with_version_and_user(db_session, monkeypatch, project, en
     mock_eval.assert_called_once_with(
         db_session,
         project_db,
-        trigger="sync",
-        user=engineer,
-        version=version
+        config=EvaluationConfig(
+            trigger="sync",
+            user=engineer,
+            version=version
+        )
     )
 
 def test_run_analysis_invalid_version(db_session, project):
@@ -106,4 +110,4 @@ def test_run_analysis_invalid_version(db_session, project):
     )
 
     with pytest.raises(LookupError, match="Versão 'invalid_id' não pertence a este projeto."):
-        run_analysis(db_session, record)
+        result = run_analysis(db_session, record)

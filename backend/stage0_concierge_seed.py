@@ -52,7 +52,7 @@ from app.models.domain import (
 from app.regulatory.catalog import CheckOutcome, RuleState
 from app.regulatory.importer import import_seed_catalog
 from app.services import project_versions
-from app.services.regulatory_engine import RegulatoryEngine
+from app.services.regulatory_engine import RegulatoryEngine, EvaluationConfig
 
 DEMO_PASSWORD = os.getenv("DEMO_PASSWORD", secrets.token_urlsafe(16))
 
@@ -286,7 +286,7 @@ def run_stage0_seed():
             # Executa a pré-análise pelo motor regulatório
             db.refresh(proj)
             run = RegulatoryEngine.evaluate_project(
-                db, proj, trigger=f"concierge_v{index}", user=analista
+                db, proj, config=EvaluationConfig(trigger=f"concierge_v{index}", user=analista)
             )
 
             # Regras que o motor de fato apontou nesta análise. É daqui que sai

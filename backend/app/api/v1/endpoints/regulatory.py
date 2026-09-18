@@ -12,7 +12,7 @@ from app.schemas.domain import (
     RegulatoryAnalysisReport,
     ValidationRecordResponse,
 )
-from app.services.regulatory_engine import RegulatoryEngine
+from app.services.regulatory_engine import RegulatoryEngine, EvaluationConfig
 from app.services.report_builder import build_report
 
 router = APIRouter()
@@ -45,7 +45,7 @@ def evaluate_project_rules(
     """Executa o catálogo sobre a versão vigente e registra uma nova análise."""
     project = get_project_or_404(db, project_id, user)
     try:
-        run = RegulatoryEngine.evaluate_project(db, project, trigger="manual", user=user)
+        run = RegulatoryEngine.evaluate_project(db, project, config=EvaluationConfig(trigger="manual", user=user))
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return _to_report(run)
