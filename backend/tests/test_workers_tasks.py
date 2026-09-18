@@ -1,6 +1,6 @@
 import pytest
 from app.workers.tasks import run_analysis
-from app.models.domain import JobRecord, JobType, Project, ProjectVersion, User
+from app.models.domain import JobRecord, JobType, Project, ProjectVersion
 from app.services.regulatory_engine import RegulatoryEngine
 from unittest.mock import MagicMock
 

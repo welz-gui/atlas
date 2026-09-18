@@ -32,6 +32,7 @@ from app.models.domain import (
 )
 from app.regulatory.importer import import_seed_catalog
 from app.services import project_versions
+from app.services.project_versions import VersionMetadata
 from app.services.regulatory_engine import RegulatoryEngine
 
 DEMO_PASSWORD = os.getenv("DEMO_PASSWORD", secrets.token_urlsafe(16))
@@ -189,9 +190,11 @@ def _seed_projects(db, org, engineer):
         db,
         project3,
         ProjectParameters(zone="Z2", building_type="residencial_unifamiliar"),
-        user=engineer,
-        change_reason="Cadastro inicial, sem medidas.",
-        commit=False,
+        metadata=VersionMetadata(
+            user=engineer,
+            change_reason="Cadastro inicial, sem medidas.",
+            commit=False,
+        ),
     )
     db.commit()
 

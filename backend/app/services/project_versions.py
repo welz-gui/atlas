@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -17,6 +18,14 @@ from sqlalchemy.orm import Session
 
 from app.models.domain import Project, ProjectVersion, ProjectVersionState, User
 from app.schemas.domain import ProjectParameters
+
+@dataclass
+class VersionMetadata:
+    user: Optional[User] = None
+    state: Optional[str] = None
+    change_reason: Optional[str] = None
+    change_origin: str = "cadastro_manual"
+    commit: bool = True
 
 #: Campos que compõem a fotografia da versão.
 VERSION_FIELDS = (
@@ -48,11 +57,7 @@ def create_version(
     db: Session,
     project: Project,
     parameters: ProjectParameters,
-    user: Optional[User] = None,
-    state: str = ProjectVersionState.ESTUDO_PRELIMINAR,
-    change_reason: Optional[str] = None,
-    change_origin: str = "cadastro_manual",
-    commit: bool = True,
+    metadata: Optional[VersionMetadata] = None,
 ) -> ProjectVersion:
     """Cria a próxima versão do projeto a partir de `parameters`."""
     previous = project.current_version
@@ -61,15 +66,19 @@ def create_version(
     params_dict = parameters.model_dump()
     payload = {field: params_dict.get(field) for field in VERSION_FIELDS}
 
+    metadata = metadata or VersionMetadata()
+    if metadata.state is None:
+        metadata.state = ProjectVersionState.ESTUDO_PRELIMINAR
+
     version = ProjectVersion(
         organization_id=project.organization_id,
         project_id=project.id,
         version_number=next_number,
-        state=state,
-        change_reason=change_reason,
-        change_origin=change_origin,
+        state=metadata.state,
+        change_reason=metadata.change_reason,
+        change_origin=metadata.change_origin,
         content_hash=version_content_hash(parameters),
-        created_by_id=user.id if user else None,
+        created_by_id=metadata.user.id if metadata.user else None,
         # Numéricos: None é significativo (não informado) e vai como está.
         lot_area=payload["lot_area"],
         built_area=payload["built_area"],
@@ -87,7 +96,7 @@ def create_version(
         version.building_type = payload["building_type"]
 
     db.add(version)
-    if commit:
+    if metadata.commit:
         db.commit()
         db.refresh(version)
     else:
@@ -99,10 +108,7 @@ def derive_next_version(
     db: Session,
     project: Project,
     updates: ProjectParameters,
-    user: Optional[User] = None,
-    change_reason: Optional[str] = None,
-    change_origin: str = "cadastro_manual",
-    state: Optional[str] = None,
+    metadata: Optional[VersionMetadata] = None,
 ) -> ProjectVersion:
     """Cria uma versão nova copiando a atual e aplicando `updates`.
 
@@ -115,14 +121,14 @@ def derive_next_version(
     base.update({k: v for k, v in updates.model_dump(exclude_unset=True).items() if k in VERSION_FIELDS})
     new_params = ProjectParameters.model_validate(base)
 
+    metadata = metadata or VersionMetadata()
+    if metadata.state is None:
+        metadata.state = current.state if current else ProjectVersionState.ESTUDO_PRELIMINAR
     return create_version(
         db,
         project,
         new_params,
-        user=user,
-        state=state or (current.state if current else ProjectVersionState.ESTUDO_PRELIMINAR),
-        change_reason=change_reason,
-        change_origin=change_origin,
+        metadata=metadata,
     )
 
 
