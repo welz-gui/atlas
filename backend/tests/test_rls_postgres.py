@@ -22,6 +22,8 @@ nada.
 import os
 import uuid
 
+import os
+import secrets
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import ProgrammingError
@@ -39,8 +41,8 @@ pytestmark = pytest.mark.skipif(
     reason="A RLS só existe no Postgres; no SQLite a política é inerte.",
 )
 
-APP_ROLE = "atlas_app_rls_test"
-APP_PASSWORD = "rls-test"
+APP_ROLE = os.environ.get("TEST_RLS_ROLE", "atlas_app_rls_test")
+APP_PASSWORD = os.environ.get("TEST_RLS_PASSWORD", secrets.token_hex(16))
 
 
 @pytest.fixture(scope="module")
@@ -56,6 +58,8 @@ def restricted_url():
                 BEGIN
                     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{APP_ROLE}') THEN
                         CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{APP_PASSWORD}';
+                    ELSE
+                        ALTER ROLE {APP_ROLE} PASSWORD '{APP_PASSWORD}';
                     END IF;
                 END
                 $$
