@@ -123,6 +123,23 @@ class AssistantResponse:
     served_from_cache: bool = False
 
 
+
+@dataclass
+class RecordParams:
+    organization_id: str
+    purpose: str
+    prompt: str
+    request_hash: str
+    retrieved_keys: Sequence[str]
+    user: Optional[User] = None
+    project: Optional[Project] = None
+    cited_keys: Sequence[str] = ()
+    result: Optional[AIResult] = None
+    response_json: Optional[dict] = None
+    grounded: bool = True
+    served_from_cache: bool = False
+    provider_name: str = "none"
+
 def _request_hash(prompt: str, rule_keys: Sequence[str], model: Optional[str]) -> str:
     """Identidade da pergunta: texto, contexto recuperado e modelo.
 
@@ -171,44 +188,28 @@ def _lookup_cache(
     )
 
 
-def _record(
-    db: Session,
-    *,
-    organization_id: str,
-    user: Optional[User],
-    project: Optional[Project],
-    purpose: str,
-    prompt: str,
-    request_hash: str,
-    retrieved_keys: Sequence[str],
-    cited_keys: Sequence[str] = (),
-    result: Optional[AIResult] = None,
-    response_json: Optional[dict] = None,
-    grounded: bool = True,
-    served_from_cache: bool = False,
-    provider_name: str = "none",
-) -> AIInteraction:
+def _record(db: Session, params: RecordParams) -> AIInteraction:
     """Grava a proveniência. Chamado em todos os caminhos, inclusive nas falhas."""
     interaction = AIInteraction(
-        organization_id=organization_id,
-        project_id=project.id if project else None,
-        purpose=purpose,
-        provider=result.provider if result else provider_name,
-        model=result.model if result else None,
-        prompt=prompt,
-        request_hash=request_hash,
-        retrieved_rule_keys=list(retrieved_keys),
-        cited_rule_keys=list(cited_keys),
-        response_text=result.text if result else None,
-        response_json=response_json,
-        stop_reason=result.stop_reason if result else None,
-        input_tokens=result.input_tokens if result else None,
-        output_tokens=result.output_tokens if result else None,
-        latency_ms=result.latency_ms if result else None,
-        grounded=grounded,
-        served_from_cache=served_from_cache,
-        error=result.error if result else None,
-        created_by_id=user.id if user else None,
+        organization_id=params.organization_id,
+        project_id=params.project.id if params.project else None,
+        purpose=params.purpose,
+        provider=params.result.provider if params.result else params.provider_name,
+        model=params.result.model if params.result else None,
+        prompt=params.prompt,
+        request_hash=params.request_hash,
+        retrieved_rule_keys=list(params.retrieved_keys),
+        cited_rule_keys=list(params.cited_keys),
+        response_text=params.result.text if params.result else None,
+        response_json=params.response_json,
+        stop_reason=params.result.stop_reason if params.result else None,
+        input_tokens=params.result.input_tokens if params.result else None,
+        output_tokens=params.result.output_tokens if params.result else None,
+        latency_ms=params.result.latency_ms if params.result else None,
+        grounded=params.grounded,
+        served_from_cache=params.served_from_cache,
+        error=params.result.error if params.result else None,
+        created_by_id=params.user.id if params.user else None,
     )
     db.add(interaction)
     db.commit()
@@ -392,18 +393,20 @@ def _return_baseline(
 
     baseline.interaction_id = _record(
         db,
-        organization_id=user.organization_id,
-        user=user,
-        project=project,
-        purpose="consulta_normativa",
-        prompt=query,
-        request_hash=request_hash,
-        retrieved_keys=retrieved_keys,
-        cited_keys=cited_keys,
-        provider_name=provider_name,
-        result=result,
-        response_json=response_json,
-        grounded=grounded,
+        RecordParams(
+            organization_id=user.organization_id,
+            user=user,
+            project=project,
+            purpose="consulta_normativa",
+            prompt=query,
+            request_hash=request_hash,
+            retrieved_keys=retrieved_keys,
+            cited_keys=cited_keys,
+            provider_name=provider_name,
+            result=result,
+            response_json=response_json,
+            grounded=grounded,
+        )
     ).id
     return baseline
 
@@ -494,21 +497,23 @@ def _process_model_response(
 
     interaction = _record(
         db,
-        organization_id=user.organization_id,
-        user=user,
-        project=project,
-        purpose="consulta_normativa",
-        prompt=query,
-        request_hash=request_hash,
-        retrieved_keys=retrieved_keys,
-        cited_keys=citadas,
-        result=result,
-        response_json={
-            k: v
-            for k, v in resposta.__dict__.items()
-            if k not in {"interaction_id", "served_from_cache"}
-        },
-        grounded=True,
+        RecordParams(
+            organization_id=user.organization_id,
+            user=user,
+            project=project,
+            purpose="consulta_normativa",
+            prompt=query,
+            request_hash=request_hash,
+            retrieved_keys=retrieved_keys,
+            cited_keys=citadas,
+            result=result,
+            response_json={
+                k: v
+                for k, v in resposta.__dict__.items()
+                if k not in {"interaction_id", "served_from_cache"}
+            },
+            grounded=True,
+        )
     )
     resposta.interaction_id = interaction.id
     return resposta
@@ -784,14 +789,16 @@ def _handle_unavailable_provider(
         ),
         interaction_id=_record(
             db,
-            organization_id=user.organization_id,
-            user=user,
-            project=None,
-            purpose="extracao_de_regra",
-            prompt=legal_text[:4000],
-            request_hash=request_hash,
-            retrieved_keys=[],
-            provider_name=engine.name,
+            RecordParams(
+                organization_id=user.organization_id,
+                user=user,
+                project=None,
+                purpose="extracao_de_regra",
+                prompt=legal_text[:4000],
+                request_hash=request_hash,
+                retrieved_keys=[],
+                provider_name=engine.name,
+            )
         ).id,
     )
 
@@ -803,14 +810,16 @@ def _handle_failed_extraction(
         error=result.error or "O modelo não produziu rascunhos.",
         interaction_id=_record(
             db,
-            organization_id=user.organization_id,
-            user=user,
-            project=None,
-            purpose="extracao_de_regra",
-            prompt=legal_text[:4000],
-            request_hash=request_hash,
-            retrieved_keys=[],
-            result=result,
+            RecordParams(
+                organization_id=user.organization_id,
+                user=user,
+                project=None,
+                purpose="extracao_de_regra",
+                prompt=legal_text[:4000],
+                request_hash=request_hash,
+                retrieved_keys=[],
+                result=result,
+            )
         ).id,
     )
 
@@ -829,16 +838,18 @@ def _handle_successful_extraction(
 
     interaction = _record(
         db,
-        organization_id=user.organization_id,
-        user=user,
-        project=None,
-        purpose="extracao_de_regra",
-        prompt=legal_text[:4000],
-        request_hash=request_hash,
-        retrieved_keys=[],
-        cited_keys=[d.rule_key for d in batch.drafts],
-        result=result,
-        response_json=batch.model_dump(),
+        RecordParams(
+            organization_id=user.organization_id,
+            user=user,
+            project=None,
+            purpose="extracao_de_regra",
+            prompt=legal_text[:4000],
+            request_hash=request_hash,
+            retrieved_keys=[],
+            cited_keys=[d.rule_key for d in batch.drafts],
+            result=result,
+            response_json=batch.model_dump(),
+        )
     )
 
     return DraftResult(
