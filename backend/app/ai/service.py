@@ -108,6 +108,18 @@ antes de ser conferida e publicada por uma pessoa.\
 # =============================================================================
 
 @dataclass
+class AskContext:
+    db: Session
+    user: User
+    project: Optional[Project]
+    query: str
+    baseline: AssistantResponse
+    request_hash: str
+    retrieved: Sequence[RetrievedRule]
+    retrieved_keys: Sequence[str]
+
+
+@dataclass
 class AssistantResponse:
     answer: str
     law_citations: List[str] = field(default_factory=list)
@@ -365,13 +377,7 @@ def deterministic_answer(
 
 
 def _return_baseline(
-    db: Session,
-    user: User,
-    project: Optional[Project],
-    query: str,
-    baseline: AssistantResponse,
-    request_hash: str,
-    retrieved_keys: Sequence[str],
+    ctx: AskContext,
     cited_keys: Sequence[str],
     provider_name: str,
     warning: Optional[str] = None,
@@ -388,55 +394,42 @@ def _return_baseline(
     `_record`. Só o que muda entre eles são os argumentos.
     """
     if warning:
-        baseline.warnings.append(warning)
+        ctx.baseline.warnings.append(warning)
 
-    baseline.interaction_id = _record(
-        db,
-        organization_id=user.organization_id,
-        user=user,
-        project=project,
+    ctx.baseline.interaction_id = _record(
+        ctx.db,
+        organization_id=ctx.user.organization_id,
+        user=ctx.user,
+        project=ctx.project,
         purpose="consulta_normativa",
-        prompt=query,
-        request_hash=request_hash,
-        retrieved_keys=retrieved_keys,
+        prompt=ctx.query,
+        request_hash=ctx.request_hash,
+        retrieved_keys=ctx.retrieved_keys,
         cited_keys=cited_keys,
         provider_name=provider_name,
         result=result,
         response_json=response_json,
         grounded=grounded,
     ).id
-    return baseline
+    return ctx.baseline
 
 
 def _process_model_response(
-    db: Session,
-    user: User,
-    project: Optional[Project],
-    query: str,
-    baseline: AssistantResponse,
-    request_hash: str,
-    retrieved: Sequence[RetrievedRule],
-    retrieved_keys: Sequence[str],
+    ctx: AskContext,
     engine: AIProvider,
     result: AIResult,
 ) -> AssistantResponse:
     parsed: AssistantAnswer = result.parsed  # type: ignore[assignment]
 
     # Conferência: chave citada que não estava no contexto é descartada.
-    permitidas = set(retrieved_keys)
+    permitidas = set(ctx.retrieved_keys)
     citadas = [key for key in parsed.cited_rule_keys if key in permitidas]
     inventadas = [key for key in parsed.cited_rule_keys if key not in permitidas]
     grounded = not inventadas and parsed.answered_from_context
 
     if inventadas:
         return _return_baseline(
-            db=db,
-            user=user,
-            project=project,
-            query=query,
-            baseline=baseline,
-            request_hash=request_hash,
-            retrieved_keys=retrieved_keys,
+            ctx=ctx,
             cited_keys=citadas,
             provider_name=engine.name,
             warning=(
@@ -452,13 +445,7 @@ def _process_model_response(
         # O próprio modelo disse que o contexto não bastava. Melhor entregar o
         # que o catálogo tem do que uma resposta que ele mesmo não sustenta.
         return _return_baseline(
-            db=db,
-            user=user,
-            project=project,
-            query=query,
-            baseline=baseline,
-            request_hash=request_hash,
-            retrieved_keys=retrieved_keys,
+            ctx=ctx,
             cited_keys=citadas,
             provider_name=engine.name,
             warning=(
@@ -472,7 +459,7 @@ def _process_model_response(
 
     # A citação legal é resolvida pelo Atlas, a partir do catálogo — nunca pelo
     # texto que o modelo escreveu.
-    regras_citadas = [item.rule for item in retrieved if item.rule.rule_id in citadas]
+    regras_citadas = [item.rule for item in ctx.retrieved if item.rule.rule_id in citadas]
     citacoes = [f"{r.title} — {r.source.citation()}" for r in regras_citadas]
 
     warnings: List[str] = []
@@ -493,14 +480,14 @@ def _process_model_response(
     )
 
     interaction = _record(
-        db,
-        organization_id=user.organization_id,
-        user=user,
-        project=project,
+        ctx.db,
+        organization_id=ctx.user.organization_id,
+        user=ctx.user,
+        project=ctx.project,
         purpose="consulta_normativa",
-        prompt=query,
-        request_hash=request_hash,
-        retrieved_keys=retrieved_keys,
+        prompt=ctx.query,
+        request_hash=ctx.request_hash,
+        retrieved_keys=ctx.retrieved_keys,
         cited_keys=citadas,
         result=result,
         response_json={
@@ -515,30 +502,27 @@ def _process_model_response(
 
 
 def _ask_model(
-    db: Session,
-    query: str,
-    user: User,
-    project: Optional[Project],
-    baseline: AssistantResponse,
-    retrieved: Sequence[RetrievedRule],
-    retrieved_keys: Sequence[str],
+    ctx: AskContext,
     engine: AIProvider,
-    request_hash: str,
     municipality: str,
     jurisdiction: str,
 ) -> AssistantResponse:
-    if not retrieved:
+    if not ctx.retrieved:
         # Sem contexto não se pergunta ao modelo: seria convidá-lo a preencher
         # a lacuna com conhecimento próprio, que é exatamente o que a política
         # proíbe. A resposta determinística já diz que o catálogo não cobre.
+        ctx_empty = AskContext(
+            db=ctx.db,
+            user=ctx.user,
+            project=ctx.project,
+            query=ctx.query,
+            baseline=ctx.baseline,
+            request_hash=ctx.request_hash,
+            retrieved=[],
+            retrieved_keys=[]
+        )
         return _return_baseline(
-            db=db,
-            user=user,
-            project=project,
-            query=query,
-            baseline=baseline,
-            request_hash=request_hash,
-            retrieved_keys=[],
+            ctx=ctx_empty,
             cited_keys=[],
             provider_name=engine.name,
             warning=(
@@ -547,11 +531,11 @@ def _ask_model(
             ),
         )
 
-    contexto = format_context(retrieved)
+    contexto = format_context(ctx.retrieved)
     prompt = (
         f"Município: {municipality} (jurisdição {jurisdiction}).\n\n"
         f"REGRAS DO CATÁLOGO DISPONÍVEIS:\n\n{contexto}\n\n"
-        f"PERGUNTA DO USUÁRIO:\n{query}"
+        f"PERGUNTA DO USUÁRIO:\n{ctx.query}"
     )
 
     result = engine.complete(
@@ -565,28 +549,15 @@ def _ask_model(
         # Falha ou recusa do modelo devolve a resposta determinística — com o
         # motivo à vista, nunca disfarçada de resposta de IA.
         return _return_baseline(
-            db=db,
-            user=user,
-            project=project,
-            query=query,
-            baseline=baseline,
-            request_hash=request_hash,
-            retrieved_keys=retrieved_keys,
-            cited_keys=retrieved_keys,
+            ctx=ctx,
+            cited_keys=ctx.retrieved_keys,
             provider_name=engine.name,
             warning=result.error or "O modelo não respondeu; usando busca no catálogo.",
             result=result,
         )
 
     return _process_model_response(
-        db=db,
-        user=user,
-        project=project,
-        query=query,
-        baseline=baseline,
-        request_hash=request_hash,
-        retrieved=retrieved,
-        retrieved_keys=retrieved_keys,
+        ctx=ctx,
         engine=engine,
         result=result,
     )
@@ -615,15 +586,19 @@ def ask(
     )
 
     if not engine.available:
-        return _return_baseline(
+        ctx = AskContext(
             db=db,
             user=user,
             project=project,
             query=query,
             baseline=baseline,
             request_hash=_request_hash(query, _context_signature(retrieved), None),
-            retrieved_keys=retrieved_keys,
-            cited_keys=retrieved_keys,
+            retrieved=retrieved,
+            retrieved_keys=retrieved_keys
+        )
+        return _return_baseline(
+            ctx=ctx,
+            cited_keys=ctx.retrieved_keys,
             provider_name=engine.name,
         )
 
@@ -638,16 +613,19 @@ def ask(
         resposta.served_from_cache = True
         return resposta
 
-    return _ask_model(
+    ctx = AskContext(
         db=db,
-        query=query,
         user=user,
         project=project,
+        query=query,
         baseline=baseline,
-        retrieved=retrieved,
-        retrieved_keys=retrieved_keys,
-        engine=engine,
         request_hash=request_hash,
+        retrieved=retrieved,
+        retrieved_keys=retrieved_keys
+    )
+    return _ask_model(
+        ctx=ctx,
+        engine=engine,
         municipality=municipality,
         jurisdiction=jurisdiction,
     )
