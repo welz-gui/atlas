@@ -15,8 +15,6 @@ import pytest
 from app.core.config import settings
 from app.models.domain import JobRecord, JobStatus, JobType
 from app.workers import queue as queue_module
-from app.workers.registry import register
-from app.workers.registry import HANDLERS
 from app.workers.queue import (
     InlineQueue,
     QueueBackend,
@@ -24,6 +22,7 @@ from app.workers.queue import (
     get_queue,
     run_job,
 )
+from app.workers.registry import HANDLERS, register
 
 
 class FakeBroker(QueueBackend):
@@ -337,8 +336,8 @@ def test_extracao_de_documento_expurgado_falha(
 
 def test_worker_nao_alcanca_projeto_de_outra_organizacao(db_session, org, project):
     """O worker roda sem `get_current_user`; o isolamento é refeito à mão."""
-    from tests.conftest import make_org, make_user
     from app.models.domain import UserRole
+    from tests.conftest import make_org, make_user
 
     outra = make_org(db_session, "Concorrente S.A.")
     intruso = make_user(db_session, outra, UserRole.OWNER, "intruso-job@atlas-qa.com")
@@ -359,8 +358,8 @@ def test_worker_nao_alcanca_projeto_de_outra_organizacao(db_session, org, projec
 def test_trabalho_de_outra_organizacao_responde_404(
     client, db_session, engineer_headers, project
 ):
-    from tests.conftest import auth_headers, make_org, make_user
     from app.models.domain import UserRole
+    from tests.conftest import auth_headers, make_org, make_user
 
     trabalho = client.post(
         f"/api/v1/projects/{project['id']}/jobs/analysis", headers=engineer_headers
@@ -699,3 +698,14 @@ def test_run_job_sem_executor_registrado_vira_falha(db_session, org):
     assert resultado.status == JobStatus.FALHOU
     assert resultado.error == f"Nenhum executor registrado para '{job_type}'."
     assert resultado.finished_at is not None
+
+def test_reset_queue_cache():
+    import app.workers.queue as queue_module
+    from app.workers.queue import reset_queue_cache
+
+    queue_module._QUEUE = "mock_queue"
+    assert queue_module._QUEUE == "mock_queue"
+
+    reset_queue_cache()
+
+    assert queue_module._QUEUE is None

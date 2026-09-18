@@ -30,7 +30,6 @@ import socket
 import traceback
 from abc import ABC, abstractmethod
 from datetime import datetime
-from functools import lru_cache
 from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
@@ -147,8 +146,14 @@ class RedisQueue(QueueBackend):
 _BACKENDS = {"inline": InlineQueue, "redis": RedisQueue}
 
 
-@lru_cache(maxsize=1)
+_QUEUE = None
+
+
 def get_queue() -> QueueBackend:
+    global _QUEUE
+    if _QUEUE is not None:
+        return _QUEUE
+
     choice = (settings.QUEUE_BACKEND or "inline").strip().lower()
     factory = _BACKENDS.get(choice)
     if factory is None:
@@ -156,11 +161,14 @@ def get_queue() -> QueueBackend:
             f"QUEUE_BACKEND='{choice}' desconhecido. "
             f"Valores aceitos: {', '.join(sorted(_BACKENDS))}."
         )
-    return factory()
+    _QUEUE = factory()
+    return _QUEUE
 
 
 def reset_queue_cache() -> None:
-    get_queue.cache_clear()
+    """Limpa o cache da fila (útil para testes)."""
+    global _QUEUE
+    _QUEUE = None
 
 
 # =============================================================================
