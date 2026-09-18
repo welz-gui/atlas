@@ -68,6 +68,10 @@ INT_PATTERNS: Tuple[Tuple[str, str, str], ...] = (
     ),
 )
 
+_COMPILED_FLOAT_PATTERNS = [(name, re.compile(pattern, re.IGNORECASE), unit) for name, pattern, unit in FLOAT_PATTERNS]
+_COMPILED_INT_PATTERNS = [(name, re.compile(pattern, re.IGNORECASE), unit) for name, pattern, unit in INT_PATTERNS]
+
+
 FIELD_LABELS = {
     "lot_area": "Área do Lote",
     "built_area": "Área Construída",
@@ -139,8 +143,8 @@ class PDFPlanParser:
         evidence: List[str] = []
         warnings: List[str] = []
 
-        for name, pattern, unit in FLOAT_PATTERNS:
-            match = re.search(pattern, haystack, re.IGNORECASE)
+        for name, pattern, unit in _COMPILED_FLOAT_PATTERNS:
+            match = pattern.search(haystack)
             if not match:
                 continue
             value = parse_number(match.group(1))
@@ -164,8 +168,8 @@ class PDFPlanParser:
         evidence: List[str] = []
         warnings: List[str] = []
 
-        for name, pattern, unit in INT_PATTERNS:
-            match = re.search(pattern, haystack, re.IGNORECASE)
+        for name, pattern, unit in _COMPILED_INT_PATTERNS:
+            match = pattern.search(haystack)
             if not match:
                 continue
             try:
