@@ -22,7 +22,7 @@ from app.api.deps import (
 from app.core.database import get_db
 from app.models.domain import Document, JobRecord, JobStatus, JobType, User
 from app.schemas.domain import JobRecordResponse, JobSubmitResponse
-from app.workers.queue import enqueue, get_queue
+from app.workers.queue import JobConfig, enqueue, get_queue
 
 router = APIRouter()
 
@@ -52,13 +52,15 @@ def enqueue_analysis(
     record = enqueue(
         db,
         JobType.ANALISE_REGULATORIA,
-        payload={
-            "project_id": project_id,
-            "project_version_id": project_version_id,
-            "trigger": "assincrono",
-        },
-        user=user,
-        project_id=project_id,
+        config=JobConfig(
+            payload={
+                "project_id": project_id,
+                "project_version_id": project_version_id,
+                "trigger": "assincrono",
+            },
+            user=user,
+            project_id=project_id,
+        ),
     )
     return _submit(db, response, record)
 
@@ -76,9 +78,11 @@ def enqueue_report(
     record = enqueue(
         db,
         JobType.GERACAO_LAUDO,
-        payload={"project_id": project_id, "analysis_run_id": analysis_run_id},
-        user=user,
-        project_id=project_id,
+        config=JobConfig(
+            payload={"project_id": project_id, "analysis_run_id": analysis_run_id},
+            user=user,
+            project_id=project_id,
+        ),
     )
     return _submit(db, response, record)
 
@@ -95,9 +99,11 @@ def enqueue_extraction(
     record = enqueue(
         db,
         JobType.EXTRACAO_DOCUMENTO,
-        payload={"document_id": document.id},
-        user=user,
-        project_id=document.project_id,
+        config=JobConfig(
+            payload={"document_id": document.id},
+            user=user,
+            project_id=document.project_id,
+        ),
     )
     return _submit(db, response, record)
 
@@ -113,8 +119,10 @@ def enqueue_retention_purge(
     record = enqueue(
         db,
         JobType.EXPURGO_RETENCAO,
-        payload={"dry_run": dry_run},
-        user=user,
+        config=JobConfig(
+            payload={"dry_run": dry_run},
+            user=user,
+        ),
     )
     return _submit(db, response, record)
 
@@ -143,9 +151,11 @@ def enqueue_regulatory_discovery(
     record = enqueue(
         db,
         JobType.DESCOBERTA_REGULATORIA,
-        payload={"jurisdiction": target_jurisdiction},
-        user=user,
-        project_id=project.id if project else None,
+        config=JobConfig(
+            payload={"jurisdiction": target_jurisdiction},
+            user=user,
+            project_id=project.id if project else None,
+        ),
     )
     return _submit(db, response, record)
 
