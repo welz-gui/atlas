@@ -58,6 +58,15 @@ class AIResult:
         return self.parsed is not None and not self.refused and self.error is None
 
 
+@dataclass
+class AIRequest:
+    system: str
+    prompt: str
+    output_model: Type[BaseModel]
+    max_tokens: int = 2048
+    cacheable_prefix: Optional[str] = None
+
+
 class AIProvider(ABC):
     name: str
     #: Falso quando não há modelo por trás — o serviço usa isso para escolher
@@ -65,14 +74,7 @@ class AIProvider(ABC):
     available: bool = False
 
     @abstractmethod
-    def complete(
-        self,
-        system: str,
-        prompt: str,
-        output_model: Type[BaseModel],
-        max_tokens: int = 2048,
-        cacheable_prefix: Optional[str] = None,
-    ) -> AIResult:
+    def complete(self, request: AIRequest) -> AIResult:
         ...
 
     def describe(self) -> str:
@@ -85,7 +87,7 @@ class NullProvider(AIProvider):
     name = "none"
     available = False
 
-    def complete(self, system, prompt, output_model, max_tokens=2048, cacheable_prefix=None):
+    def complete(self, request: AIRequest) -> AIResult:
         return AIResult(
             provider=self.name,
             error=(
@@ -141,38 +143,31 @@ class AnthropicProvider(AIProvider):
             )
         return self._client
 
-    def complete(
-        self,
-        system: str,
-        prompt: str,
-        output_model: Type[BaseModel],
-        max_tokens: int = 2048,
-        cacheable_prefix: Optional[str] = None,
-    ) -> AIResult:
+    def complete(self, request: AIRequest) -> AIResult:
         import anthropic
 
         # O prefixo estável (instruções e política) vai num bloco marcado para
         # cache; o que muda a cada consulta fica fora dele.
         system_blocks = []
-        if cacheable_prefix:
+        if request.cacheable_prefix:
             system_blocks.append(
                 {
                     "type": "text",
-                    "text": cacheable_prefix,
+                    "text": request.cacheable_prefix,
                     "cache_control": {"type": "ephemeral"},
                 }
             )
-        system_blocks.append({"type": "text", "text": system})
+        system_blocks.append({"type": "text", "text": request.system})
 
         started = time.monotonic()
         try:
             message = self.client.messages.parse(
                 model=self.model,
-                max_tokens=max_tokens,
+                max_tokens=request.max_tokens,
                 system=system_blocks,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": request.prompt}],
                 thinking={"type": "adaptive"},
-                output_format=output_model,
+                output_format=request.output_model,
             )
         except anthropic.RateLimitError as exc:
             return self._failure("Limite de requisições do provedor atingido.", exc, started)

@@ -13,7 +13,7 @@ from datetime import datetime
 
 import pytest
 
-from app.ai.provider import AIProvider, AIResult, NullProvider
+from app.ai.provider import AIProvider, AIRequest, AIResult, NullProvider
 from app.ai.retrieval import retrieve, tokenize
 from app.ai.schemas import AssistantAnswer, RuleDraft, RuleDraftBatch, RuleDraftCheck
 from app.ai.service import ask, extract_rule_drafts
@@ -35,9 +35,9 @@ class FakeProvider(AIProvider):
         self.refused = refused
         self.calls = []
 
-    def complete(self, system, prompt, output_model, max_tokens=2048, cacheable_prefix=None):
+    def complete(self, request: AIRequest) -> AIResult:
         self.calls.append(
-            {"system": system, "prompt": prompt, "prefix": cacheable_prefix}
+            {"system": request.system, "prompt": request.prompt, "prefix": request.cacheable_prefix}
         )
         return AIResult(
             parsed=self.parsed,
