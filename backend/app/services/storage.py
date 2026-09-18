@@ -378,9 +378,14 @@ class S3Storage(StorageBackend):
 _BACKENDS = {"local": LocalStorage, "s3": S3Storage}
 
 
-@lru_cache(maxsize=1)
+_STORAGE = None
+
 def get_storage() -> StorageBackend:
     """Backend configurado. Cacheado: a escolha não muda em tempo de execução."""
+    global _STORAGE
+    if _STORAGE is not None:
+        return _STORAGE
+
     choice = (settings.STORAGE_BACKEND or "local").strip().lower()
     factory = _BACKENDS.get(choice)
     if factory is None:
@@ -388,9 +393,11 @@ def get_storage() -> StorageBackend:
             f"STORAGE_BACKEND='{choice}' desconhecido. "
             f"Valores aceitos: {', '.join(sorted(_BACKENDS))}."
         )
-    return factory()
+    _STORAGE = factory()
+    return _STORAGE
 
 
 def reset_storage_cache() -> None:
-    """Descarta o backend memorizado — usado por teste ao trocar de configuração."""
-    get_storage.cache_clear()
+    """Limpa o cache do armazenamento (útil para testes)."""
+    global _STORAGE
+    _STORAGE = None

@@ -427,3 +427,10 @@ def test_expurgo_pela_api_e_simulacao_por_padrao(client, db_session, org, upload
     body = response.json()
     assert body["dry_run"] is True
     assert body["retention_enabled"] is False
+
+def test_reset_storage_cache():
+    from app.services import storage
+
+    storage._STORAGE = "dummy_value"
+    storage.reset_storage_cache()
+    assert storage._STORAGE is None
