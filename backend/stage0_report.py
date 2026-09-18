@@ -33,10 +33,9 @@ def generate_stage0_report():
             return
 
         projects = db.query(Project).filter_by(organization_id=org.id).all()
-        regras = db.query(RegulatoryRule).filter_by(jurisdiction="BR-RS-4311403").all()
-
-        regras_vigentes = sum(1 for r in regras if r.state == RuleState.VIGENTE)
-        regras_em_validacao = sum(1 for r in regras if r.state == RuleState.EM_VALIDACAO)
+        regras_vigentes = db.query(RegulatoryRule).filter_by(jurisdiction="BR-RS-4311403", state=RuleState.VIGENTE).count()
+        regras_em_validacao = db.query(RegulatoryRule).filter_by(jurisdiction="BR-RS-4311403", state=RuleState.EM_VALIDACAO).count()
+        total_regras = db.query(RegulatoryRule).filter_by(jurisdiction="BR-RS-4311403").count()
 
         total_projects = len(projects)
         total_analyses = db.query(AnalysisRun).filter(AnalysisRun.project_id.in_([p.id for p in projects])).count()
@@ -73,7 +72,7 @@ def generate_stage0_report():
         print("MÉTRICAS DO CATÁLOGO REGULATÓRIO (Lajeado/RS BR-RS-4311403)")
         print(f"  * Regras Vigentes (Conferidas):    {regras_vigentes}")
         print(f"  * Regras em Validação:            {regras_em_validacao}")
-        print(f"  * Total de Regras no Catálogo:    {len(regras)}")
+        print(f"  * Total de Regras no Catálogo:    {total_regras}")
         print("-" * 70)
         print("MÉTRICAS DE ACURÁCIA PREDITIVA E RECALL (§11 DO PLANO)")
         print(f"  * Exigências Reais Registradas:   {total_reqs}")
