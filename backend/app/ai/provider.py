@@ -38,6 +38,15 @@ class AIUnavailable(RuntimeError):
 
 
 @dataclass
+class AIRequest:
+    system: str
+    prompt: str
+    output_model: Type[BaseModel]
+    max_tokens: int = 2048
+    cacheable_prefix: Optional[str] = None
+
+
+@dataclass
 class AIResult:
     """O que voltou do provedor, antes de qualquer conferência."""
 
@@ -65,15 +74,7 @@ class AIProvider(ABC):
     available: bool = False
 
     @abstractmethod
-    def complete(
-        self,
-        system: str,
-        prompt: str,
-        output_model: Type[BaseModel],
-        max_tokens: int = 2048,
-        cacheable_prefix: Optional[str] = None,
-    ) -> AIResult:
-        ...
+    def complete(self, request: "AIRequest") -> AIResult: ...
 
     def describe(self) -> str:
         return self.name
@@ -85,7 +86,7 @@ class NullProvider(AIProvider):
     name = "none"
     available = False
 
-    def complete(self, system, prompt, output_model, max_tokens=2048, cacheable_prefix=None):
+    def complete(self, request: "AIRequest") -> AIResult:
         return AIResult(
             provider=self.name,
             error=(
@@ -117,7 +118,9 @@ class AnthropicProvider(AIProvider):
 
     name = "anthropic"
 
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None, client=None):
+    def __init__(
+        self, api_key: Optional[str] = None, model: Optional[str] = None, client=None
+    ):
         self.api_key = api_key if api_key is not None else settings.ANTHROPIC_API_KEY
         self.model = model or settings.AI_MODEL
         self._client = client
@@ -141,41 +144,36 @@ class AnthropicProvider(AIProvider):
             )
         return self._client
 
-    def complete(
-        self,
-        system: str,
-        prompt: str,
-        output_model: Type[BaseModel],
-        max_tokens: int = 2048,
-        cacheable_prefix: Optional[str] = None,
-    ) -> AIResult:
+    def complete(self, request: "AIRequest") -> AIResult:
         import anthropic
 
         # O prefixo estável (instruções e política) vai num bloco marcado para
         # cache; o que muda a cada consulta fica fora dele.
         system_blocks = []
-        if cacheable_prefix:
+        if request.cacheable_prefix:
             system_blocks.append(
                 {
                     "type": "text",
-                    "text": cacheable_prefix,
+                    "text": request.cacheable_prefix,
                     "cache_control": {"type": "ephemeral"},
                 }
             )
-        system_blocks.append({"type": "text", "text": system})
+        system_blocks.append({"type": "text", "text": request.system})
 
         started = time.monotonic()
         try:
             message = self.client.messages.parse(
                 model=self.model,
-                max_tokens=max_tokens,
+                max_tokens=request.max_tokens,
                 system=system_blocks,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": request.prompt}],
                 thinking={"type": "adaptive"},
-                output_format=output_model,
+                output_format=request.output_model,
             )
         except anthropic.RateLimitError as exc:
-            return self._failure("Limite de requisições do provedor atingido.", exc, started)
+            return self._failure(
+                "Limite de requisições do provedor atingido.", exc, started
+            )
         except anthropic.APIConnectionError as exc:
             return self._failure("Não foi possível alcançar o provedor.", exc, started)
         except anthropic.APIStatusError as exc:
@@ -183,7 +181,9 @@ class AnthropicProvider(AIProvider):
                 f"O provedor respondeu com erro {exc.status_code}.", exc, started
             )
         except Exception as exc:  # noqa: BLE001 — falha de IA nunca derruba o request
-            return self._failure("Falha inesperada ao consultar o provedor.", exc, started)
+            return self._failure(
+                "Falha inesperada ao consultar o provedor.", exc, started
+            )
 
         latency = int((time.monotonic() - started) * 1000)
         usage = getattr(message, "usage", None)

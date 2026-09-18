@@ -34,7 +34,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy.orm import Session
 
-from app.ai.provider import AIProvider, AIResult, get_provider
+from app.ai.provider import AIProvider, AIRequest, AIResult, get_provider
 from app.ai.retrieval import RetrievedRule, format_context, retrieve
 from app.ai.schemas import AssistantAnswer, RuleDraft, RuleDraftBatch
 from app.core.config import settings
@@ -106,6 +106,7 @@ antes de ser conferida e publicada por uma pessoa.\
 # =============================================================================
 # Resultado do assistente
 # =============================================================================
+
 
 @dataclass
 class AssistantResponse:
@@ -220,6 +221,7 @@ def _record(
 # Resposta determinística — o piso, não o improviso
 # =============================================================================
 
+
 def _unvalidated_warning(rules: Sequence[Rule]) -> Optional[str]:
     pendentes = [r for r in rules if not r.is_publishable]
     if not pendentes:
@@ -251,7 +253,9 @@ def _format_retrieved_rules(
             if rule.check
             else "verificação documental (não derivável de parâmetros numéricos)"
         )
-        pendente = "" if rule.is_publishable else " — regra ainda não validada tecnicamente"
+        pendente = (
+            "" if rule.is_publishable else " — regra ainda não validada tecnicamente"
+        )
         linha = f"• {rule.title}: {limite}{pendente}."
         if rule.rule_id in statuses:
             linha += (
@@ -555,10 +559,12 @@ def _ask_model(
     )
 
     result = engine.complete(
-        system=f"Consulta normativa para {municipality}.",
-        prompt=prompt,
-        output_model=AssistantAnswer,
-        cacheable_prefix=ASSISTANT_POLICY,
+        AIRequest(
+            system=f"Consulta normativa para {municipality}.",
+            prompt=prompt,
+            output_model=AssistantAnswer,
+            cacheable_prefix=ASSISTANT_POLICY,
+        )
     )
 
     if not result.ok:
@@ -657,6 +663,7 @@ def ask(
 # Extração de rascunhos de regra
 # =============================================================================
 
+
 @dataclass
 class DraftResult:
     created_rule_ids: List[str] = field(default_factory=list)
@@ -695,7 +702,9 @@ def _draft_to_rule(
         jurisdiction=jurisdiction,
         title=draft.title,
         state=RuleState.RASCUNHO_EXTRAIDO_POR_IA,
-        severity=draft.severity if draft.severity in {"bloqueio", "alerta"} else "alerta",
+        severity=draft.severity
+        if draft.severity in {"bloqueio", "alerta"}
+        else "alerta",
         applies_to=applies_to,
         check=check,
         requires_manual_review=check is None,
@@ -865,17 +874,21 @@ def extract_rule_drafts(
     tivesse conferido.
     """
     engine = provider or get_provider()
-    request_hash = _request_hash(legal_text, [jurisdiction], getattr(engine, "model", None))
+    request_hash = _request_hash(
+        legal_text, [jurisdiction], getattr(engine, "model", None)
+    )
 
     if not engine.available:
         return _handle_unavailable_provider(db, user, engine, legal_text, request_hash)
 
     result = engine.complete(
-        system=f"Extração de regras urbanísticas para a jurisdição {jurisdiction}.",
-        prompt=f"TEXTO LEGAL:\n\n{legal_text}",
-        output_model=RuleDraftBatch,
-        max_tokens=8192,
-        cacheable_prefix=EXTRACTION_POLICY,
+        AIRequest(
+            system=f"Extração de regras urbanísticas para a jurisdição {jurisdiction}.",
+            prompt=f"TEXTO LEGAL:\n\n{legal_text}",
+            output_model=RuleDraftBatch,
+            max_tokens=8192,
+            cacheable_prefix=EXTRACTION_POLICY,
+        )
     )
 
     if not result.ok:
