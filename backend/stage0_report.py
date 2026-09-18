@@ -52,16 +52,23 @@ def generate_stage0_report():
 
         recall = (predicted_reqs / total_reqs * 100.0) if total_reqs > 0 else 100.0
 
+        from sqlalchemy import func
         # Não verificáveis nos ValidationRecords
-        val_records = db.query(ValidationRecord).filter(
-            ValidationRecord.analysis_run_id.in_(
-                db.query(AnalysisRun.id).filter(AnalysisRun.project_id.in_([p.id for p in projects]))
-            )
+        status_counts = db.query(
+            ValidationRecord.status,
+            func.count(ValidationRecord.id)
+        ).join(
+            AnalysisRun, ValidationRecord.analysis_run_id == AnalysisRun.id
+        ).filter(
+            AnalysisRun.project_id.in_([p.id for p in projects])
+        ).group_by(
+            ValidationRecord.status
         ).all()
 
-        nao_verificaveis = sum(1 for v in val_records if v.status == "nao_verificavel")
-        bloqueios = sum(1 for v in val_records if v.status == "nao_conforme")
-        conformes = sum(1 for v in val_records if v.status == "conforme")
+        counts_dict = dict(status_counts)
+        nao_verificaveis = counts_dict.get("nao_verificavel", 0)
+        bloqueios = counts_dict.get("nao_conforme", 0)
+        conformes = counts_dict.get("conforme", 0)
 
         print("=" * 70)
         print("         ATLAS — RELATÓRIO DE DESEMPENHO DO ESTÁGIO 0 (CONCIERGE)")
