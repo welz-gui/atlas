@@ -1,6 +1,5 @@
 """Empreendimentos e versões de projeto (§8.2, §3.2)."""
 
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -12,6 +11,7 @@ from app.api.deps import (
 )
 from app.core.database import get_db
 from app.models.domain import Organization, Project, ProjectVersionState, User
+from app.services.project_versions import VersionConfig
 from app.schemas.domain import (
     OrganizationResponse,
     ProjectCreate,
@@ -38,7 +38,10 @@ def list_organizations(
 
 # --- Empreendimentos --------------------------------------------------------
 
-@router.post("/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
+
+@router.post(
+    "/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED
+)
 def create_project(
     payload: ProjectCreate,
     user: User = Depends(require_permission("project:write")),
@@ -46,9 +49,16 @@ def create_project(
 ):
     identity = payload.model_dump(
         exclude={
-            "zone", "building_type", "lot_area", "built_area", "floors",
-            "front_setback", "side_setback", "rear_setback",
-            "permeability_rate", "parking_spaces",
+            "zone",
+            "building_type",
+            "lot_area",
+            "built_area",
+            "floors",
+            "front_setback",
+            "side_setback",
+            "rear_setback",
+            "permeability_rate",
+            "parking_spaces",
         }
     )
     project = Project(
@@ -61,9 +71,11 @@ def create_project(
         db,
         project,
         ProjectParameters.model_validate(payload.model_dump()),
-        user=user,
-        change_reason="Cadastro inicial do empreendimento.",
-        commit=False,
+        config=VersionConfig(
+            user=user,
+            change_reason="Cadastro inicial do empreendimento.",
+            commit=False,
+        ),
     )
     db.commit()
     db.refresh(project)
@@ -74,13 +86,17 @@ def create_project(
 
 
 @router.get("/projects", response_model=list[ProjectResponse])
-def list_projects(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def list_projects(
+    user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
     return tenant_query(db, Project, user).all()
 
 
 @router.get("/projects/{project_id}", response_model=ProjectResponse)
 def get_project(
-    project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)
+    project_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     return get_project_or_404(db, project_id, user)
 
@@ -107,9 +123,14 @@ def update_project(
 
 # --- Versões ----------------------------------------------------------------
 
-@router.get("/projects/{project_id}/versions", response_model=list[ProjectVersionResponse])
+
+@router.get(
+    "/projects/{project_id}/versions", response_model=list[ProjectVersionResponse]
+)
 def list_versions(
-    project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)
+    project_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     project = get_project_or_404(db, project_id, user)
     return sorted(project.versions, key=lambda v: v.version_number, reverse=True)
@@ -138,16 +159,20 @@ def create_version(
             detail=f"Estado inválido. Válidos: {', '.join(sorted(ProjectVersionState.ALL))}",
         )
 
-    updates_dict = payload.model_dump(exclude_unset=True, exclude={"change_reason", "state"})
+    updates_dict = payload.model_dump(
+        exclude_unset=True, exclude={"change_reason", "state"}
+    )
     updates = ProjectParameters(**updates_dict)
 
     version = project_versions.derive_next_version(
         db,
         project,
         updates,
-        user=user,
-        change_reason=payload.change_reason,
-        state=payload.state,
+        config=VersionConfig(
+            user=user,
+            change_reason=payload.change_reason,
+            state=payload.state,
+        ),
     )
 
     db.refresh(project)
