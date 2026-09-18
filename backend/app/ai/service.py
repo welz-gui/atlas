@@ -714,22 +714,30 @@ def _draft_to_rule(
     )
 
 
+
+@dataclass
+class ExtractionContext:
+    db: Session
+    user: User
+    jurisdiction: str
+    legal_text: str
+    request_hash: str
+    document: Optional[RegulatoryDocument] = None
+
+
 def _process_draft_batch(
-    db: Session,
+    ctx: ExtractionContext,
     batch: RuleDraftBatch,
-    jurisdiction: str,
-    user: User,
     result: AIResult,
-    document: Optional[RegulatoryDocument],
 ) -> List[str]:
     """Processa o lote de rascunhos retornando os IDs das regras criadas."""
     criadas: List[str] = []
 
     draft_keys = [draft.rule_key for draft in batch.drafts]
     existentes = (
-        db.query(RegulatoryRule.rule_key)
+        ctx.db.query(RegulatoryRule.rule_key)
         .filter(
-            RegulatoryRule.jurisdiction == jurisdiction,
+            RegulatoryRule.jurisdiction == ctx.jurisdiction,
             RegulatoryRule.rule_key.in_(draft_keys),
         )
         .all()
@@ -743,12 +751,12 @@ def _process_draft_batch(
 
         chaves_existentes.add(draft.rule_key)
 
-        rule = _draft_to_rule(draft, jurisdiction, document)
+        rule = _draft_to_rule(draft, ctx.jurisdiction, ctx.document)
         novas_regras.append(rule)
 
     if novas_regras:
-        db.add_all(novas_regras)
-        db.flush()
+        ctx.db.add_all(novas_regras)
+        ctx.db.flush()
 
         eventos = []
         for rule in novas_regras:
@@ -760,22 +768,22 @@ def _process_draft_batch(
                     action="extraida_por_ia",
                     notes=(
                         f"Extraída por {result.provider}/{result.model} a partir de texto "
-                        f"legal enviado por {user.name}. Aguarda conferência humana."
+                        f"legal enviado por {ctx.user.name}. Aguarda conferência humana."
                     ),
-                    actor_id=user.id,
-                    actor_name=user.name,
+                    actor_id=ctx.user.id,
+                    actor_name=ctx.user.name,
                 )
             )
             criadas.append(rule.id)
 
-        db.add_all(eventos)
+        ctx.db.add_all(eventos)
 
-    db.commit()
+    ctx.db.commit()
     return criadas
 
 
 def _handle_unavailable_provider(
-    db: Session, user: User, engine: AIProvider, legal_text: str, request_hash: str
+    ctx: ExtractionContext, engine: AIProvider
 ) -> DraftResult:
     return DraftResult(
         error=(
@@ -783,13 +791,13 @@ def _handle_unavailable_provider(
             "AI_PROVIDER configurado; o cadastro manual continua disponível."
         ),
         interaction_id=_record(
-            db,
-            organization_id=user.organization_id,
-            user=user,
+            ctx.db,
+            organization_id=ctx.user.organization_id,
+            user=ctx.user,
             project=None,
             purpose="extracao_de_regra",
-            prompt=legal_text[:4000],
-            request_hash=request_hash,
+            prompt=ctx.legal_text[:4000],
+            request_hash=ctx.request_hash,
             retrieved_keys=[],
             provider_name=engine.name,
         ).id,
@@ -797,18 +805,18 @@ def _handle_unavailable_provider(
 
 
 def _handle_failed_extraction(
-    db: Session, user: User, result: AIResult, legal_text: str, request_hash: str
+    ctx: ExtractionContext, result: AIResult
 ) -> DraftResult:
     return DraftResult(
         error=result.error or "O modelo não produziu rascunhos.",
         interaction_id=_record(
-            db,
-            organization_id=user.organization_id,
-            user=user,
+            ctx.db,
+            organization_id=ctx.user.organization_id,
+            user=ctx.user,
             project=None,
             purpose="extracao_de_regra",
-            prompt=legal_text[:4000],
-            request_hash=request_hash,
+            prompt=ctx.legal_text[:4000],
+            request_hash=ctx.request_hash,
             retrieved_keys=[],
             result=result,
         ).id,
@@ -816,25 +824,20 @@ def _handle_failed_extraction(
 
 
 def _handle_successful_extraction(
-    db: Session,
-    user: User,
+    ctx: ExtractionContext,
     result: AIResult,
     batch: RuleDraftBatch,
-    jurisdiction: str,
-    legal_text: str,
-    request_hash: str,
-    document: Optional[RegulatoryDocument] = None,
 ) -> DraftResult:
-    criadas = _process_draft_batch(db, batch, jurisdiction, user, result, document)
+    criadas = _process_draft_batch(ctx, batch, result)
 
     interaction = _record(
-        db,
-        organization_id=user.organization_id,
-        user=user,
+        ctx.db,
+        organization_id=ctx.user.organization_id,
+        user=ctx.user,
         project=None,
         purpose="extracao_de_regra",
-        prompt=legal_text[:4000],
-        request_hash=request_hash,
+        prompt=ctx.legal_text[:4000],
+        request_hash=ctx.request_hash,
         retrieved_keys=[],
         cited_keys=[d.rule_key for d in batch.drafts],
         result=result,
@@ -866,9 +869,10 @@ def extract_rule_drafts(
     """
     engine = provider or get_provider()
     request_hash = _request_hash(legal_text, [jurisdiction], getattr(engine, "model", None))
+    ctx = ExtractionContext(db, user, jurisdiction, legal_text, request_hash, document)
 
     if not engine.available:
-        return _handle_unavailable_provider(db, user, engine, legal_text, request_hash)
+        return _handle_unavailable_provider(ctx, engine)
 
     result = engine.complete(
         system=f"Extração de regras urbanísticas para a jurisdição {jurisdiction}.",
@@ -879,9 +883,7 @@ def extract_rule_drafts(
     )
 
     if not result.ok:
-        return _handle_failed_extraction(db, user, result, legal_text, request_hash)
+        return _handle_failed_extraction(ctx, result)
 
     batch: RuleDraftBatch = result.parsed  # type: ignore[assignment]
-    return _handle_successful_extraction(
-        db, user, result, batch, jurisdiction, legal_text, request_hash, document
-    )
+    return _handle_successful_extraction(ctx, result, batch)
