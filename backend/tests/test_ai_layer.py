@@ -16,7 +16,7 @@ import pytest
 from app.ai.provider import AIProvider, AIResult, NullProvider
 from app.ai.retrieval import retrieve, tokenize
 from app.ai.schemas import AssistantAnswer, RuleDraft, RuleDraftBatch, RuleDraftCheck
-from app.ai.service import ask, extract_rule_drafts
+from app.ai.service import ask, extract_rule_drafts, ExtractionContext
 from app.core.config import settings
 from app.models.domain import AIInteraction, RegulatoryRule
 from app.regulatory.catalog import RegulatoryCatalog, RuleState
@@ -371,7 +371,13 @@ def test_rascunho_nasce_como_rascunho_e_fora_do_motor(
 ):
     provider = FakeProvider(parsed=_batch())
     resultado = extract_rule_drafts(
-        db_session, "texto legal qualquer", "BR-RS-4311403", validator, provider=provider
+        "texto legal qualquer",
+        ExtractionContext(
+            db=db_session,
+            user=validator,
+            jurisdiction="BR-RS-4311403",
+            provider=provider
+        )
     )
 
     assert len(resultado.created_rule_ids) == 1
@@ -394,7 +400,13 @@ def test_rascunho_nasce_como_rascunho_e_fora_do_motor(
 def test_rascunho_registra_o_trecho_de_origem(db_session, validator, seeded_catalog):
     """O validador confere sem reabrir a lei."""
     resultado = extract_rule_drafts(
-        db_session, "texto", "BR-RS-4311403", validator, provider=FakeProvider(parsed=_batch())
+        "texto",
+        ExtractionContext(
+            db=db_session,
+            user=validator,
+            jurisdiction="BR-RS-4311403",
+            provider=FakeProvider(parsed=_batch())
+        )
     )
     regra = (
         db_session.query(RegulatoryRule)
@@ -425,7 +437,13 @@ def test_rascunho_nao_sobrescreve_regra_existente(
         ]
     )
     resultado = extract_rule_drafts(
-        db_session, "texto", "BR-RS-4311403", validator, provider=FakeProvider(parsed=batch)
+        "texto",
+        ExtractionContext(
+            db=db_session,
+            user=validator,
+            jurisdiction="BR-RS-4311403",
+            provider=FakeProvider(parsed=batch)
+        )
     )
 
     assert resultado.created_rule_ids == []
@@ -452,7 +470,13 @@ def test_exigencia_sem_numero_vira_analise_manual(db_session, validator, seeded_
         ]
     )
     resultado = extract_rule_drafts(
-        db_session, "texto", "BR-RS-4311403", validator, provider=FakeProvider(parsed=batch)
+        "texto",
+        ExtractionContext(
+            db=db_session,
+            user=validator,
+            jurisdiction="BR-RS-4311403",
+            provider=FakeProvider(parsed=batch)
+        )
     )
     regra = (
         db_session.query(RegulatoryRule)
@@ -466,7 +490,13 @@ def test_exigencia_sem_numero_vira_analise_manual(db_session, validator, seeded_
 
 def test_extracao_sem_provedor_recusa_com_motivo(db_session, validator, seeded_catalog):
     resultado = extract_rule_drafts(
-        db_session, "texto legal", "BR-RS-4311403", validator, provider=NullProvider()
+        "texto legal",
+        ExtractionContext(
+            db=db_session,
+            user=validator,
+            jurisdiction="BR-RS-4311403",
+            provider=NullProvider()
+        )
     )
 
     assert resultado.created_rule_ids == []

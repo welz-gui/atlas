@@ -666,6 +666,14 @@ class DraftResult:
     error: Optional[str] = None
 
 
+@dataclass
+class ExtractionContext:
+    db: Session
+    user: User
+    jurisdiction: str
+    document: Optional[RegulatoryDocument] = None
+    provider: Optional[AIProvider] = None
+
 def _draft_to_rule(
     draft: RuleDraft, jurisdiction: str, document: Optional[RegulatoryDocument]
 ) -> RegulatoryRule:
@@ -850,12 +858,8 @@ def _handle_successful_extraction(
 
 
 def extract_rule_drafts(
-    db: Session,
     legal_text: str,
-    jurisdiction: str,
-    user: User,
-    document: Optional[RegulatoryDocument] = None,
-    provider: Optional[AIProvider] = None,
+    context: ExtractionContext,
 ) -> DraftResult:
     """Propõe regras a partir de texto legal — como rascunho, sempre.
 
@@ -864,14 +868,14 @@ def extract_rule_drafts(
     partir de saída de modelo seria alterar a base legal sem que ninguém
     tivesse conferido.
     """
-    engine = provider or get_provider()
-    request_hash = _request_hash(legal_text, [jurisdiction], getattr(engine, "model", None))
+    engine = context.provider or get_provider()
+    request_hash = _request_hash(legal_text, [context.jurisdiction], getattr(engine, "model", None))
 
     if not engine.available:
-        return _handle_unavailable_provider(db, user, engine, legal_text, request_hash)
+        return _handle_unavailable_provider(context.db, context.user, engine, legal_text, request_hash)
 
     result = engine.complete(
-        system=f"Extração de regras urbanísticas para a jurisdição {jurisdiction}.",
+        system=f"Extração de regras urbanísticas para a jurisdição {context.jurisdiction}.",
         prompt=f"TEXTO LEGAL:\n\n{legal_text}",
         output_model=RuleDraftBatch,
         max_tokens=8192,
@@ -879,9 +883,9 @@ def extract_rule_drafts(
     )
 
     if not result.ok:
-        return _handle_failed_extraction(db, user, result, legal_text, request_hash)
+        return _handle_failed_extraction(context.db, context.user, result, legal_text, request_hash)
 
     batch: RuleDraftBatch = result.parsed  # type: ignore[assignment]
     return _handle_successful_extraction(
-        db, user, result, batch, jurisdiction, legal_text, request_hash, document
+        context.db, context.user, result, batch, context.jurisdiction, legal_text, request_hash, context.document
     )

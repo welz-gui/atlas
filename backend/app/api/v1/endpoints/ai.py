@@ -148,11 +148,13 @@ def extract_rule_drafts(
             )
 
     resultado = ai_service.extract_rule_drafts(
-        db,
         legal_text=req.legal_text,
-        jurisdiction=req.jurisdiction,
-        user=user,
-        document=document,
+        context=ai_service.ExtractionContext(
+            db=db,
+            user=user,
+            jurisdiction=req.jurisdiction,
+            document=document,
+        )
     )
     return RuleDraftResponse(
         created_rule_ids=resultado.created_rule_ids,
