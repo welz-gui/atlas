@@ -115,7 +115,7 @@ def atlas_ai_chat(
         if run:
             statuses = {v.rule_id: v.status for v in run.validations}
 
-    resposta = ai_service.ask(db, req.prompt, user, project=project, statuses=statuses)
+    resposta = ai_service.ask(ai_service.AskContext(db=db, query=req.prompt, user=user, project=project, statuses=statuses))
     return AIChatResponse(**resposta.__dict__)
 
 

@@ -103,6 +103,16 @@ antes de ser conferida e publicada por uma pessoa.\
 """
 
 
+
+@dataclass
+class AskContext:
+    db: Session
+    query: str
+    user: User
+    project: Optional[Project] = None
+    statuses: Optional[Dict[str, str]] = None
+    provider: Optional[AIProvider] = None
+
 # =============================================================================
 # Resultado do assistente
 # =============================================================================
@@ -365,10 +375,7 @@ def deterministic_answer(
 
 
 def _return_baseline(
-    db: Session,
-    user: User,
-    project: Optional[Project],
-    query: str,
+    context: AskContext,
     baseline: AssistantResponse,
     request_hash: str,
     retrieved_keys: Sequence[str],
@@ -391,12 +398,12 @@ def _return_baseline(
         baseline.warnings.append(warning)
 
     baseline.interaction_id = _record(
-        db,
-        organization_id=user.organization_id,
-        user=user,
-        project=project,
+        context.db,
+        organization_id=context.user.organization_id,
+        user=context.user,
+        project=context.project,
         purpose="consulta_normativa",
-        prompt=query,
+        prompt=context.query,
         request_hash=request_hash,
         retrieved_keys=retrieved_keys,
         cited_keys=cited_keys,
@@ -409,10 +416,7 @@ def _return_baseline(
 
 
 def _process_model_response(
-    db: Session,
-    user: User,
-    project: Optional[Project],
-    query: str,
+    context: AskContext,
     baseline: AssistantResponse,
     request_hash: str,
     retrieved: Sequence[RetrievedRule],
@@ -430,10 +434,7 @@ def _process_model_response(
 
     if inventadas:
         return _return_baseline(
-            db=db,
-            user=user,
-            project=project,
-            query=query,
+            context=context,
             baseline=baseline,
             request_hash=request_hash,
             retrieved_keys=retrieved_keys,
@@ -452,10 +453,7 @@ def _process_model_response(
         # O próprio modelo disse que o contexto não bastava. Melhor entregar o
         # que o catálogo tem do que uma resposta que ele mesmo não sustenta.
         return _return_baseline(
-            db=db,
-            user=user,
-            project=project,
-            query=query,
+            context=context,
             baseline=baseline,
             request_hash=request_hash,
             retrieved_keys=retrieved_keys,
@@ -493,12 +491,12 @@ def _process_model_response(
     )
 
     interaction = _record(
-        db,
-        organization_id=user.organization_id,
-        user=user,
-        project=project,
+        context.db,
+        organization_id=context.user.organization_id,
+        user=context.user,
+        project=context.project,
         purpose="consulta_normativa",
-        prompt=query,
+        prompt=context.query,
         request_hash=request_hash,
         retrieved_keys=retrieved_keys,
         cited_keys=citadas,
@@ -515,10 +513,7 @@ def _process_model_response(
 
 
 def _ask_model(
-    db: Session,
-    query: str,
-    user: User,
-    project: Optional[Project],
+    context: AskContext,
     baseline: AssistantResponse,
     retrieved: Sequence[RetrievedRule],
     retrieved_keys: Sequence[str],
@@ -532,10 +527,7 @@ def _ask_model(
         # a lacuna com conhecimento próprio, que é exatamente o que a política
         # proíbe. A resposta determinística já diz que o catálogo não cobre.
         return _return_baseline(
-            db=db,
-            user=user,
-            project=project,
-            query=query,
+            context=context,
             baseline=baseline,
             request_hash=request_hash,
             retrieved_keys=[],
@@ -551,7 +543,7 @@ def _ask_model(
     prompt = (
         f"Município: {municipality} (jurisdição {jurisdiction}).\n\n"
         f"REGRAS DO CATÁLOGO DISPONÍVEIS:\n\n{contexto}\n\n"
-        f"PERGUNTA DO USUÁRIO:\n{query}"
+        f"PERGUNTA DO USUÁRIO:\n{context.query}"
     )
 
     result = engine.complete(
@@ -565,10 +557,7 @@ def _ask_model(
         # Falha ou recusa do modelo devolve a resposta determinística — com o
         # motivo à vista, nunca disfarçada de resposta de IA.
         return _return_baseline(
-            db=db,
-            user=user,
-            project=project,
-            query=query,
+            context=context,
             baseline=baseline,
             request_hash=request_hash,
             retrieved_keys=retrieved_keys,
@@ -579,10 +568,7 @@ def _ask_model(
         )
 
     return _process_model_response(
-        db=db,
-        user=user,
-        project=project,
-        query=query,
+        context=context,
         baseline=baseline,
         request_hash=request_hash,
         retrieved=retrieved,
@@ -592,46 +578,36 @@ def _ask_model(
     )
 
 
-def ask(
-    db: Session,
-    query: str,
-    user: User,
-    project: Optional[Project] = None,
-    statuses: Optional[Dict[str, str]] = None,
-    provider: Optional[AIProvider] = None,
-) -> AssistantResponse:
+def ask(context: AskContext) -> AssistantResponse:
     """Responde a uma consulta normativa, com proveniência registrada."""
-    jurisdiction = project.city_ibge if project else "BR-RS-4311403"
-    municipality = project.city_name if project else "Lajeado"
+    jurisdiction = context.project.city_ibge if context.project else "BR-RS-4311403"
+    municipality = context.project.city_name if context.project else "Lajeado"
 
-    catalog = RegulatoryCatalog.from_db(db, jurisdiction)
+    catalog = RegulatoryCatalog.from_db(context.db, jurisdiction)
     candidatas = catalog.for_jurisdiction(jurisdiction)
-    retrieved = retrieve(query, candidatas)
+    retrieved = retrieve(context.query, candidatas)
     retrieved_keys = [item.rule.rule_id for item in retrieved]
 
-    engine = provider or get_provider()
+    engine = context.provider or get_provider()
     baseline = deterministic_answer(
-        query, retrieved, catalog, jurisdiction, municipality, statuses, project
+        context.query, retrieved, catalog, jurisdiction, municipality, context.statuses, context.project
     )
 
     if not engine.available:
         return _return_baseline(
-            db=db,
-            user=user,
-            project=project,
-            query=query,
+            context=context,
             baseline=baseline,
-            request_hash=_request_hash(query, _context_signature(retrieved), None),
+            request_hash=_request_hash(context.query, _context_signature(retrieved), None),
             retrieved_keys=retrieved_keys,
             cited_keys=retrieved_keys,
             provider_name=engine.name,
         )
 
     request_hash = _request_hash(
-        query, _context_signature(retrieved), getattr(engine, "model", None)
+        context.query, _context_signature(retrieved), getattr(engine, "model", None)
     )
 
-    cached = _lookup_cache(db, user.organization_id, request_hash)
+    cached = _lookup_cache(context.db, context.user.organization_id, request_hash)
     if cached and cached.response_json:
         resposta = AssistantResponse(**cached.response_json)
         resposta.interaction_id = cached.id
@@ -639,10 +615,7 @@ def ask(
         return resposta
 
     return _ask_model(
-        db=db,
-        query=query,
-        user=user,
-        project=project,
+        context=context,
         baseline=baseline,
         retrieved=retrieved,
         retrieved_keys=retrieved_keys,
