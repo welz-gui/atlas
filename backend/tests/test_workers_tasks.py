@@ -110,4 +110,4 @@ def test_run_analysis_invalid_version(db_session, project):
     )
 
     with pytest.raises(LookupError, match="Versão 'invalid_id' não pertence a este projeto."):
-        result = run_analysis(db_session, record)
+        run_analysis(db_session, record)
