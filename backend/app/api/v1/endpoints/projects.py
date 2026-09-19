@@ -23,7 +23,7 @@ from app.schemas.domain import (
     VersionStateChange,
 )
 from app.services import project_versions
-from app.services.regulatory_engine import RegulatoryEngine
+from app.services.regulatory_engine import RegulatoryEngine, EvaluationConfig
 
 router = APIRouter()
 
@@ -68,7 +68,7 @@ def create_project(
     db.commit()
     db.refresh(project)
 
-    RegulatoryEngine.evaluate_project(db, project, trigger="project_created", user=user)
+    RegulatoryEngine.evaluate_project(db, project, config=EvaluationConfig(trigger="project_created", user=user))
     db.refresh(project)
     return project
 
@@ -152,7 +152,7 @@ def create_version(
 
     db.refresh(project)
     RegulatoryEngine.evaluate_project(
-        db, project, trigger="version_created", user=user, version=version
+        db, project, config=EvaluationConfig(trigger="version_created", user=user, version=version)
     )
     db.refresh(version)
     return version

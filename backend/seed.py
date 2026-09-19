@@ -32,7 +32,7 @@ from app.models.domain import (
 )
 from app.regulatory.importer import import_seed_catalog
 from app.services import project_versions
-from app.services.regulatory_engine import RegulatoryEngine
+from app.services.regulatory_engine import RegulatoryEngine, EvaluationConfig
 
 DEMO_PASSWORD = os.getenv("DEMO_PASSWORD", secrets.token_urlsafe(16))
 
@@ -197,7 +197,7 @@ def _seed_projects(db, org, engineer):
 
     for project in (project1, project2, project3):
         db.refresh(project)
-        RegulatoryEngine.evaluate_project(db, project, trigger="seed", user=engineer)
+        RegulatoryEngine.evaluate_project(db, project, config=EvaluationConfig(trigger="seed", user=engineer))
 
     return project1, project2, project3
 
