@@ -92,6 +92,19 @@ function newId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+// Garante `createdAt` estritamente crescente. `id` é aleatório (UUID), então
+// `getAll()` do IndexedDB devolve os itens em ordem de chave, não de
+// inserção — dois registros no mesmo milissegundo (comum em preenchimento
+// rápido de campo) empatariam em `listOutbox()` e sairiam em ordem
+// arbitrária. Sem isso, "o que foi escrito primeiro" deixaria de ser verdade.
+let lastOutboxTimestamp = 0;
+
+function nextTimestamp(): string {
+  const now = Date.now();
+  lastOutboxTimestamp = now > lastOutboxTimestamp ? now : lastOutboxTimestamp + 1;
+  return new Date(lastOutboxTimestamp).toISOString();
+}
+
 // --- Fila --------------------------------------------------------------------
 
 const listeners = new Set<() => void>();
@@ -131,7 +144,7 @@ export async function enqueue(
     // O token de idempotência acompanha o item: reenviar depois de uma
     // resposta perdida não pode criar dois diários.
     payload: { ...payload, client_token: newId() },
-    createdAt: new Date().toISOString(),
+    createdAt: nextTimestamp(),
     status: "pendente",
     attempts: 0,
   };
