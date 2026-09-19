@@ -77,6 +77,15 @@ FIELD_LABELS = {
     "floors": "Nº de Pavimentos",
 }
 
+#: Compilados uma vez — os dois conjuntos são fixos e reutilizados a cada
+#: documento extraído.
+_COMPILED_FLOAT_PATTERNS = [
+    (name, re.compile(pattern, re.IGNORECASE), unit) for name, pattern, unit in FLOAT_PATTERNS
+]
+_COMPILED_INT_PATTERNS = [
+    (name, re.compile(pattern, re.IGNORECASE), unit) for name, pattern, unit in INT_PATTERNS
+]
+
 
 def fold_accents(text: str) -> str:
     """Remove diacríticos preservando o comprimento do texto.
@@ -139,8 +148,8 @@ class PDFPlanParser:
         evidence: List[str] = []
         warnings: List[str] = []
 
-        for name, pattern, unit in FLOAT_PATTERNS:
-            match = re.search(pattern, haystack, re.IGNORECASE)
+        for name, pattern, unit in _COMPILED_FLOAT_PATTERNS:
+            match = pattern.search(haystack)
             if not match:
                 continue
             value = parse_number(match.group(1))
@@ -164,8 +173,8 @@ class PDFPlanParser:
         evidence: List[str] = []
         warnings: List[str] = []
 
-        for name, pattern, unit in INT_PATTERNS:
-            match = re.search(pattern, haystack, re.IGNORECASE)
+        for name, pattern, unit in _COMPILED_INT_PATTERNS:
+            match = pattern.search(haystack)
             if not match:
                 continue
             try:
