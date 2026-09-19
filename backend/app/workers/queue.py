@@ -29,6 +29,7 @@ import os
 import socket
 import traceback
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from datetime import datetime
 from functools import lru_cache
 from typing import Any, Dict, Optional
@@ -164,18 +165,25 @@ def reset_queue_cache() -> None:
 
 
 # =============================================================================
+
+@dataclass
+class JobConfig:
+    payload: Optional[Dict[str, Any]] = field(default_factory=dict)
+    user: Optional[User] = None
+    organization_id: Optional[str] = None
+    project_id: Optional[str] = None
+    queue: str = "default"
+    backend: Optional[QueueBackend] = None
+
+
+# =============================================================================
 # Enfileirar e executar
 # =============================================================================
 
 def enqueue(
     db: Session,
     job_type: str,
-    payload: Optional[Dict[str, Any]] = None,
-    user: Optional[User] = None,
-    organization_id: Optional[str] = None,
-    project_id: Optional[str] = None,
-    queue: str = "default",
-    backend: Optional[QueueBackend] = None,
+    config: Optional[JobConfig] = None,
 ) -> JobRecord:
     """Cria o registro do trabalho e o entrega — ao broker ou a si mesmo.
 
@@ -188,26 +196,27 @@ def enqueue(
             f"Conhecidos: {', '.join(sorted(HANDLERS)) or 'nenhum'}."
         )
 
-    org_id = organization_id or (user.organization_id if user else None)
+    config = config or JobConfig()
+    org_id = config.organization_id or (config.user.organization_id if config.user else None)
     if not org_id:
         raise ValueError("Todo trabalho pertence a uma organização (§3.1).")
 
     record = JobRecord(
         organization_id=org_id,
-        project_id=project_id,
+        project_id=config.project_id,
         job_type=job_type,
-        payload=payload or {},
+        payload=config.payload or {},
         status=JobStatus.ENFILEIRADO,
-        queue=queue,
-        requested_by_id=user.id if user else None,
+        queue=config.queue,
+        requested_by_id=config.user.id if config.user else None,
     )
     db.add(record)
     db.commit()
     db.refresh(record)
 
-    broker = backend or get_queue()
+    broker = config.backend or get_queue()
     if broker.is_async:
-        broker.publish(record.id, queue)
+        broker.publish(record.id, config.queue)
     else:
         # Sem broker, quem pede executa. O registro guarda essa circunstância.
         record.executed_inline = True

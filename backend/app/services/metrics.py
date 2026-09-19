@@ -166,11 +166,11 @@ def _precision_metrics(
     cada projeto que chegou a protocolar.
     """
     protocolled_project_ids = {p.project_id for p in processes}
+    process_project_map = {p.id: p.project_id for p in processes}
     required_pairs = {
-        (process.project_id, r.linked_rule_key)
-        for process in processes
+        (process_project_map[r.process_id], r.linked_rule_key)
         for r in requirements
-        if r.process_id == process.id and r.linked_rule_key
+        if r.process_id in process_project_map and r.linked_rule_key
     }
 
     flagged_pairs: set[tuple[str, str]] = set()

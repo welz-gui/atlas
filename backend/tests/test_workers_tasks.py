@@ -85,7 +85,7 @@ def test_run_analysis_with_version_and_user(db_session, monkeypatch, project, en
         requested_by_id=engineer.id
     )
 
-    result = run_analysis(db_session, record)
+    run_analysis(db_session, record)
 
     mock_eval.assert_called_once_with(
         db_session,

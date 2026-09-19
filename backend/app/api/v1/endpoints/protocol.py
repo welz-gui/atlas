@@ -5,6 +5,7 @@ pode ser vinculada à regra do catálogo que deveria tê-la antecipado, o que
 permite medir o recall de bloqueios (§11) em vez de supô-lo.
 """
 
+from dataclasses import dataclass
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -39,30 +40,37 @@ from app.services.regulatory_engine import RegulatoryEngine
 router = APIRouter()
 
 
+@dataclass
+class EventPayload:
+    event_type: str
+    description: Optional[str] = None
+    from_status: Optional[str] = None
+    to_status: Optional[str] = None
+
+
 def _record_event(
     db: Session,
     process: ProtocolProcess,
-    event_type: str,
     user: User,
-    description: Optional[str] = None,
-    from_status: Optional[str] = None,
-    to_status: Optional[str] = None,
+    payload: EventPayload,
 ) -> None:
     db.add(
         ProtocolEvent(
             organization_id=process.organization_id,
             process_id=process.id,
-            event_type=event_type,
-            from_status=from_status,
-            to_status=to_status,
-            description=description,
+            event_type=payload.event_type,
+            from_status=payload.from_status,
+            to_status=payload.to_status,
+            description=payload.description,
             actor_id=user.id,
             actor_name=user.name,
         )
     )
 
 
-@router.get("/projects/{project_id}/protocols", response_model=List[ProtocolProcessResponse])
+@router.get(
+    "/projects/{project_id}/protocols", response_model=List[ProtocolProcessResponse]
+)
 def list_protocols(
     project_id: str,
     user: User = Depends(require_permission("protocol:read")),
@@ -93,7 +101,8 @@ def create_protocol(
     version_id = payload.project_version_id
     if version_id and not any(v.id == version_id for v in project.versions):
         raise HTTPException(
-            status_code=422, detail="A versão informada não pertence a este empreendimento."
+            status_code=422,
+            detail="A versão informada não pertence a este empreendimento.",
         )
     if not version_id and project.current_version:
         version_id = project.current_version.id
@@ -115,10 +124,12 @@ def create_protocol(
     _record_event(
         db,
         process,
-        "protocolo_registrado",
         user,
-        description=f"Protocolo {payload.protocol_number} registrado em {payload.agency}.",
-        to_status=ProtocolStatus.PROTOCOLADO,
+        EventPayload(
+            event_type="protocolo_registrado",
+            description=f"Protocolo {payload.protocol_number} registrado em {payload.agency}.",
+            to_status=ProtocolStatus.PROTOCOLADO,
+        ),
     )
     project.licensing_status = ProtocolStatus.PROTOCOLADO
     db.commit()
@@ -166,11 +177,13 @@ def change_protocol_status(
     _record_event(
         db,
         process,
-        "mudanca_situacao",
         user,
-        description=payload.description,
-        from_status=previous,
-        to_status=payload.status,
+        EventPayload(
+            event_type="mudanca_situacao",
+            description=payload.description,
+            from_status=previous,
+            to_status=payload.status,
+        ),
     )
 
     project = get_project_or_404(db, process.project_id, user)
@@ -182,6 +195,7 @@ def change_protocol_status(
 
 
 # --- Exigências e notificações ----------------------------------------------
+
 
 @router.post(
     "/protocols/{process_id}/requirements",
@@ -207,7 +221,8 @@ def create_requirement(
         run = RegulatoryEngine.latest_run(db, process.project_id)
         if run:
             match = next(
-                (v for v in run.validations if v.rule_id == payload.linked_rule_key), None
+                (v for v in run.validations if v.rule_id == payload.linked_rule_key),
+                None,
             )
             if match is not None:
                 was_predicted = match.status in ("nao_conforme", "atencao")
@@ -229,9 +244,11 @@ def create_requirement(
     _record_event(
         db,
         process,
-        "exigencia_registrada",
         user,
-        description=f"Exigência {next_sequence}: {payload.description[:120]}",
+        EventPayload(
+            event_type="exigencia_registrada",
+            description=f"Exigência {next_sequence}: {payload.description[:120]}",
+        ),
     )
 
     # Uma exigência aberta muda a situação do processo — a menos que já esteja
@@ -286,7 +303,10 @@ def update_requirement(
 
 # --- Métrica de acerto -------------------------------------------------------
 
-@router.get("/projects/{project_id}/prediction-accuracy", response_model=PredictionAccuracy)
+
+@router.get(
+    "/projects/{project_id}/prediction-accuracy", response_model=PredictionAccuracy
+)
 def prediction_accuracy(
     project_id: str,
     user: User = Depends(require_permission("protocol:read")),

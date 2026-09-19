@@ -269,9 +269,7 @@ def purge_expired_job_records(
     if organization_id:
         query = query.filter(JobRecord.organization_id == organization_id)
 
-    records = (
-        query.with_entities(JobRecord.id).order_by(JobRecord.queued_at).all()
-    )
+    records = query.with_entities(JobRecord.id).order_by(JobRecord.queued_at).all()
     if not records:
         return report
 

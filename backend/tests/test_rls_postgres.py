@@ -48,25 +48,24 @@ def restricted_url():
     """Cria um papel **sem** BYPASSRLS e devolve a URL para conectar com ele."""
     admin = create_engine(DATABASE_URL, isolation_level="AUTOCOMMIT")
     with admin.connect() as conn:
-        conn.execute(text(f"DROP OWNED BY {APP_ROLE} CASCADE") if False else text("SELECT 1"))
-        conn.execute(
-            text(
-                f"""
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{APP_ROLE}') THEN
-                        CREATE ROLE {APP_ROLE} LOGIN PASSWORD '{APP_PASSWORD}';
-                    END IF;
-                END
-                $$
-                """
+        conn.execute(text(f'DROP OWNED BY "{APP_ROLE}" CASCADE') if False else text("SELECT 1"))
+
+        has_role = conn.execute(
+            text("SELECT 1 FROM pg_roles WHERE rolname = :role"),
+            {"role": APP_ROLE}
+        ).scalar()
+
+        if not has_role:
+            conn.execute(
+                text(f'CREATE ROLE "{APP_ROLE}" LOGIN PASSWORD :password'),
+                {"password": APP_PASSWORD}
             )
-        )
-        conn.execute(text(f"GRANT USAGE ON SCHEMA public TO {APP_ROLE}"))
+
+        conn.execute(text(f'GRANT USAGE ON SCHEMA public TO "{APP_ROLE}"'))
         conn.execute(
             text(
                 "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES "
-                f"IN SCHEMA public TO {APP_ROLE}"
+                f'IN SCHEMA public TO "{APP_ROLE}"'
             )
         )
     admin.dispose()
