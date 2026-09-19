@@ -213,7 +213,9 @@ jobs:
     # O MinIO sobe por `docker run` num passo, e não como serviço, porque
     # exige `command` (`server /data`) — e serviços do Actions não permitem
     # sobrescrevê-lo. A primeira tentativa usou uma imagem de terceiro que já
-    # trazia o comando embutido, e ela deixou de ser publicada.
+    # trazia o comando embutido, e ela deixou de ser publicada. A segunda,
+    # `minio/minio` no Docker Hub, também saiu do ar (2026-09): o repositório
+    # deixou de existir ali. A imagem oficial segue publicada em `quay.io`.
     services:
       clamav:
         image: clamav/clamav:latest
@@ -251,7 +253,7 @@ jobs:
       - name: Subir o MinIO e criar o bucket
         shell: bash
         run: |
-          docker run -d --name minio             -p 9000:9000             -e MINIO_ROOT_USER=atlas_minio             -e MINIO_ROOT_PASSWORD=atlas_minio_secret             minio/minio:latest server /data
+          docker run -d --name minio             -p 9000:9000             -e MINIO_ROOT_USER=atlas_minio             -e MINIO_ROOT_PASSWORD=atlas_minio_secret             quay.io/minio/minio:latest server /data
 
           # Espera o servidor responder antes de seguir. Sem isto, o primeiro
           # teste falharia por conexão recusada e pareceria defeito do código.
