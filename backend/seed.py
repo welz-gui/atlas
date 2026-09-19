@@ -32,6 +32,7 @@ from app.models.domain import (
 )
 from app.regulatory.importer import import_seed_catalog
 from app.services import project_versions
+from app.services.project_versions import VersionConfig
 from app.services.regulatory_engine import RegulatoryEngine, EvaluationConfig
 
 DEMO_PASSWORD = os.getenv("DEMO_PASSWORD", secrets.token_urlsafe(16))
@@ -162,9 +163,11 @@ def _seed_projects(db, org, engineer):
             permeability_rate=22.5,
             parking_spaces=2,
         ),
-        user=engineer,
-        change_reason="Cadastro inicial.",
-        commit=False,
+        config=VersionConfig(
+            user=engineer,
+            change_reason="Cadastro inicial.",
+            commit=False,
+        ),
     )
     project_versions.create_version(
         db,
@@ -181,17 +184,21 @@ def _seed_projects(db, org, engineer):
             permeability_rate=12.0,
             parking_spaces=1,
         ),
-        user=engineer,
-        change_reason="Cadastro inicial.",
-        commit=False,
+        config=VersionConfig(
+            user=engineer,
+            change_reason="Cadastro inicial.",
+            commit=False,
+        ),
     )
     project_versions.create_version(
         db,
         project3,
         ProjectParameters(zone="Z2", building_type="residencial_unifamiliar"),
-        user=engineer,
-        change_reason="Cadastro inicial, sem medidas.",
-        commit=False,
+        config=VersionConfig(
+            user=engineer,
+            change_reason="Cadastro inicial, sem medidas.",
+            commit=False,
+        ),
     )
     db.commit()
 

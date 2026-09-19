@@ -23,6 +23,7 @@ from app.schemas.domain import (
     VersionStateChange,
 )
 from app.services import project_versions
+from app.services.project_versions import VersionConfig
 from app.services.regulatory_engine import RegulatoryEngine, EvaluationConfig
 
 router = APIRouter()
@@ -61,9 +62,11 @@ def create_project(
         db,
         project,
         ProjectParameters.model_validate(payload.model_dump()),
-        user=user,
-        change_reason="Cadastro inicial do empreendimento.",
-        commit=False,
+        config=VersionConfig(
+            user=user,
+            change_reason="Cadastro inicial do empreendimento.",
+            commit=False,
+        ),
     )
     db.commit()
     db.refresh(project)
@@ -145,9 +148,11 @@ def create_version(
         db,
         project,
         updates,
-        user=user,
-        change_reason=payload.change_reason,
-        state=payload.state,
+        config=VersionConfig(
+            user=user,
+            change_reason=payload.change_reason,
+            state=payload.state,
+        ),
     )
 
     db.refresh(project)
