@@ -52,6 +52,7 @@ from app.models.domain import (
 from app.regulatory.catalog import CheckOutcome, RuleState
 from app.regulatory.importer import import_seed_catalog
 from app.services import project_versions
+from app.services.project_versions import VersionConfig
 from app.services.regulatory_engine import RegulatoryEngine, EvaluationConfig
 
 DEMO_PASSWORD = os.getenv("DEMO_PASSWORD", secrets.token_urlsafe(16))
@@ -277,9 +278,11 @@ def run_stage0_seed():
                     db,
                     proj,
                     ProjectParameters(**sc["params"]),
-                    user=analista,
-                    change_reason=f"Cadastro de Pré-análise Concierge #{index}",
-                    commit=False,
+                    config=VersionConfig(
+                        user=analista,
+                        change_reason=f"Cadastro de Pré-análise Concierge #{index}",
+                        commit=False,
+                    ),
                 )
                 db.flush()
 

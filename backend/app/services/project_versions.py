@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -44,17 +45,23 @@ def version_content_hash(parameters: ProjectParameters) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+@dataclass
+class VersionConfig:
+    user: Optional[User] = None
+    state: Optional[str] = None
+    change_reason: Optional[str] = None
+    change_origin: str = "cadastro_manual"
+    commit: bool = True
+
+
 def create_version(
     db: Session,
     project: Project,
     parameters: ProjectParameters,
-    user: Optional[User] = None,
-    state: str = ProjectVersionState.ESTUDO_PRELIMINAR,
-    change_reason: Optional[str] = None,
-    change_origin: str = "cadastro_manual",
-    commit: bool = True,
+    config: Optional[VersionConfig] = None,
 ) -> ProjectVersion:
     """Cria a próxima versão do projeto a partir de `parameters`."""
+    config = config or VersionConfig()
     previous = project.current_version
     next_number = (previous.version_number + 1) if previous else 1
 
@@ -65,11 +72,11 @@ def create_version(
         organization_id=project.organization_id,
         project_id=project.id,
         version_number=next_number,
-        state=state,
-        change_reason=change_reason,
-        change_origin=change_origin,
+        state=config.state or ProjectVersionState.ESTUDO_PRELIMINAR,
+        change_reason=config.change_reason,
+        change_origin=config.change_origin,
         content_hash=version_content_hash(parameters),
-        created_by_id=user.id if user else None,
+        created_by_id=config.user.id if config.user else None,
         # Numéricos: None é significativo (não informado) e vai como está.
         lot_area=payload["lot_area"],
         built_area=payload["built_area"],
@@ -87,7 +94,7 @@ def create_version(
         version.building_type = payload["building_type"]
 
     db.add(version)
-    if commit:
+    if config.commit:
         db.commit()
         db.refresh(version)
     else:
@@ -99,15 +106,13 @@ def derive_next_version(
     db: Session,
     project: Project,
     updates: ProjectParameters,
-    user: Optional[User] = None,
-    change_reason: Optional[str] = None,
-    change_origin: str = "cadastro_manual",
-    state: Optional[str] = None,
+    config: Optional[VersionConfig] = None,
 ) -> ProjectVersion:
     """Cria uma versão nova copiando a atual e aplicando `updates`.
 
     `updates` só precisa conter o que mudou; o restante é herdado.
     """
+    config = config or VersionConfig()
     current = project.current_version
     base: Dict[str, Any] = (
         {field: getattr(current, field) for field in VERSION_FIELDS} if current else {}
@@ -115,14 +120,21 @@ def derive_next_version(
     base.update({k: v for k, v in updates.model_dump(exclude_unset=True).items() if k in VERSION_FIELDS})
     new_params = ProjectParameters.model_validate(base)
 
+    resolved_state = config.state or (
+        current.state if current else ProjectVersionState.ESTUDO_PRELIMINAR
+    )
+
     return create_version(
         db,
         project,
         new_params,
-        user=user,
-        state=state or (current.state if current else ProjectVersionState.ESTUDO_PRELIMINAR),
-        change_reason=change_reason,
-        change_origin=change_origin,
+        config=VersionConfig(
+            user=config.user,
+            state=resolved_state,
+            change_reason=config.change_reason,
+            change_origin=config.change_origin,
+            commit=config.commit,
+        ),
     )
 
 
