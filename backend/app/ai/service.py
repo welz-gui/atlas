@@ -34,7 +34,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy.orm import Session
 
-from app.ai.provider import AIProvider, AIResult, get_provider
+from app.ai.provider import AIProvider, AIRequest, AIResult, get_provider
 from app.ai.retrieval import RetrievedRule, format_context, retrieve
 from app.ai.schemas import AssistantAnswer, RuleDraft, RuleDraftBatch
 from app.core.config import settings
@@ -171,44 +171,45 @@ def _lookup_cache(
     )
 
 
-def _record(
-    db: Session,
-    *,
-    organization_id: str,
-    user: Optional[User],
-    project: Optional[Project],
-    purpose: str,
-    prompt: str,
-    request_hash: str,
-    retrieved_keys: Sequence[str],
-    cited_keys: Sequence[str] = (),
-    result: Optional[AIResult] = None,
-    response_json: Optional[dict] = None,
-    grounded: bool = True,
-    served_from_cache: bool = False,
-    provider_name: str = "none",
-) -> AIInteraction:
+@dataclass
+class RecordParams:
+    organization_id: str
+    purpose: str
+    prompt: str
+    request_hash: str
+    retrieved_keys: Sequence[str]
+    user: Optional[User] = None
+    project: Optional[Project] = None
+    cited_keys: Sequence[str] = ()
+    result: Optional[AIResult] = None
+    response_json: Optional[dict] = None
+    grounded: bool = True
+    served_from_cache: bool = False
+    provider_name: str = "none"
+
+
+def _record(db: Session, params: RecordParams) -> AIInteraction:
     """Grava a proveniência. Chamado em todos os caminhos, inclusive nas falhas."""
     interaction = AIInteraction(
-        organization_id=organization_id,
-        project_id=project.id if project else None,
-        purpose=purpose,
-        provider=result.provider if result else provider_name,
-        model=result.model if result else None,
-        prompt=prompt,
-        request_hash=request_hash,
-        retrieved_rule_keys=list(retrieved_keys),
-        cited_rule_keys=list(cited_keys),
-        response_text=result.text if result else None,
-        response_json=response_json,
-        stop_reason=result.stop_reason if result else None,
-        input_tokens=result.input_tokens if result else None,
-        output_tokens=result.output_tokens if result else None,
-        latency_ms=result.latency_ms if result else None,
-        grounded=grounded,
-        served_from_cache=served_from_cache,
-        error=result.error if result else None,
-        created_by_id=user.id if user else None,
+        organization_id=params.organization_id,
+        project_id=params.project.id if params.project else None,
+        purpose=params.purpose,
+        provider=params.result.provider if params.result else params.provider_name,
+        model=params.result.model if params.result else None,
+        prompt=params.prompt,
+        request_hash=params.request_hash,
+        retrieved_rule_keys=list(params.retrieved_keys),
+        cited_rule_keys=list(params.cited_keys),
+        response_text=params.result.text if params.result else None,
+        response_json=params.response_json,
+        stop_reason=params.result.stop_reason if params.result else None,
+        input_tokens=params.result.input_tokens if params.result else None,
+        output_tokens=params.result.output_tokens if params.result else None,
+        latency_ms=params.result.latency_ms if params.result else None,
+        grounded=params.grounded,
+        served_from_cache=params.served_from_cache,
+        error=params.result.error if params.result else None,
+        created_by_id=params.user.id if params.user else None,
     )
     db.add(interaction)
     db.commit()
@@ -302,15 +303,18 @@ def _format_missing_rules(
     return lines, citations, actions
 
 
-def deterministic_answer(
-    query: str,
-    retrieved: Sequence[RetrievedRule],
-    catalog: RegulatoryCatalog,
-    jurisdiction: str,
-    municipality: str,
-    statuses: Optional[Dict[str, str]] = None,
-    project: Optional[Project] = None,
-) -> AssistantResponse:
+@dataclass
+class QueryContext:
+    query: str
+    retrieved: Sequence[RetrievedRule]
+    catalog: RegulatoryCatalog
+    jurisdiction: str
+    municipality: str
+    statuses: Optional[Dict[str, str]] = None
+    project: Optional[Project] = None
+
+
+def deterministic_answer(context: QueryContext) -> AssistantResponse:
     """Resposta montada a partir do catálogo, sem modelo de linguagem.
 
     É o que responde quando não há provedor configurado, quando o provedor
@@ -318,15 +322,16 @@ def deterministic_answer(
     consolo: é a garantia de que o sistema continua dizendo apenas o que está
     cadastrado.
     """
-    statuses = statuses or {}
+    statuses = context.statuses or {}
+    retrieved = context.retrieved
 
     if retrieved:
         lines, citations, actions = _format_retrieved_rules(
-            retrieved, municipality, statuses
+            retrieved, context.municipality, statuses
         )
     else:
         lines, citations, actions = _format_missing_rules(
-            query, catalog, jurisdiction, municipality
+            context.query, context.catalog, context.jurisdiction, context.municipality
         )
 
     # O aviso de regra não validada faz parte da resposta, não de um rodapé
@@ -338,11 +343,11 @@ def deterministic_answer(
         lines.append("")
         lines.append(f"Atenção: {aviso}")
 
-    if project:
-        version = project.current_version
+    if context.project:
+        version = context.project.current_version
         lines.append("")
         lines.append(
-            f"Empreendimento em contexto: '{project.name}' — {municipality}, "
+            f"Empreendimento em contexto: '{context.project.name}' — {context.municipality}, "
             f"zona {version.zone if version else '—'}, "
             f"lote {(version.lot_area if version else None) or 'não informado'} m², "
             f"área construída {(version.built_area if version else None) or 'não informado'} m²."
@@ -364,11 +369,18 @@ def deterministic_answer(
 # =============================================================================
 
 
+@dataclass
+class AskContext:
+    db: Session
+    query: str
+    user: User
+    project: Optional[Project] = None
+    statuses: Optional[Dict[str, str]] = None
+    provider: Optional[AIProvider] = None
+
+
 def _return_baseline(
-    db: Session,
-    user: User,
-    project: Optional[Project],
-    query: str,
+    context: AskContext,
     baseline: AssistantResponse,
     request_hash: str,
     retrieved_keys: Sequence[str],
@@ -391,28 +403,27 @@ def _return_baseline(
         baseline.warnings.append(warning)
 
     baseline.interaction_id = _record(
-        db,
-        organization_id=user.organization_id,
-        user=user,
-        project=project,
-        purpose="consulta_normativa",
-        prompt=query,
-        request_hash=request_hash,
-        retrieved_keys=retrieved_keys,
-        cited_keys=cited_keys,
-        provider_name=provider_name,
-        result=result,
-        response_json=response_json,
-        grounded=grounded,
+        context.db,
+        RecordParams(
+            organization_id=context.user.organization_id,
+            user=context.user,
+            project=context.project,
+            purpose="consulta_normativa",
+            prompt=context.query,
+            request_hash=request_hash,
+            retrieved_keys=retrieved_keys,
+            cited_keys=cited_keys,
+            provider_name=provider_name,
+            result=result,
+            response_json=response_json,
+            grounded=grounded,
+        ),
     ).id
     return baseline
 
 
 def _process_model_response(
-    db: Session,
-    user: User,
-    project: Optional[Project],
-    query: str,
+    context: AskContext,
     baseline: AssistantResponse,
     request_hash: str,
     retrieved: Sequence[RetrievedRule],
@@ -430,10 +441,7 @@ def _process_model_response(
 
     if inventadas:
         return _return_baseline(
-            db=db,
-            user=user,
-            project=project,
-            query=query,
+            context,
             baseline=baseline,
             request_hash=request_hash,
             retrieved_keys=retrieved_keys,
@@ -452,10 +460,7 @@ def _process_model_response(
         # O próprio modelo disse que o contexto não bastava. Melhor entregar o
         # que o catálogo tem do que uma resposta que ele mesmo não sustenta.
         return _return_baseline(
-            db=db,
-            user=user,
-            project=project,
-            query=query,
+            context,
             baseline=baseline,
             request_hash=request_hash,
             retrieved_keys=retrieved_keys,
@@ -493,32 +498,31 @@ def _process_model_response(
     )
 
     interaction = _record(
-        db,
-        organization_id=user.organization_id,
-        user=user,
-        project=project,
-        purpose="consulta_normativa",
-        prompt=query,
-        request_hash=request_hash,
-        retrieved_keys=retrieved_keys,
-        cited_keys=citadas,
-        result=result,
-        response_json={
-            k: v
-            for k, v in resposta.__dict__.items()
-            if k not in {"interaction_id", "served_from_cache"}
-        },
-        grounded=True,
+        context.db,
+        RecordParams(
+            organization_id=context.user.organization_id,
+            user=context.user,
+            project=context.project,
+            purpose="consulta_normativa",
+            prompt=context.query,
+            request_hash=request_hash,
+            retrieved_keys=retrieved_keys,
+            cited_keys=citadas,
+            result=result,
+            response_json={
+                k: v
+                for k, v in resposta.__dict__.items()
+                if k not in {"interaction_id", "served_from_cache"}
+            },
+            grounded=True,
+        ),
     )
     resposta.interaction_id = interaction.id
     return resposta
 
 
 def _ask_model(
-    db: Session,
-    query: str,
-    user: User,
-    project: Optional[Project],
+    context: AskContext,
     baseline: AssistantResponse,
     retrieved: Sequence[RetrievedRule],
     retrieved_keys: Sequence[str],
@@ -532,10 +536,7 @@ def _ask_model(
         # a lacuna com conhecimento próprio, que é exatamente o que a política
         # proíbe. A resposta determinística já diz que o catálogo não cobre.
         return _return_baseline(
-            db=db,
-            user=user,
-            project=project,
-            query=query,
+            context,
             baseline=baseline,
             request_hash=request_hash,
             retrieved_keys=[],
@@ -551,24 +552,23 @@ def _ask_model(
     prompt = (
         f"Município: {municipality} (jurisdição {jurisdiction}).\n\n"
         f"REGRAS DO CATÁLOGO DISPONÍVEIS:\n\n{contexto}\n\n"
-        f"PERGUNTA DO USUÁRIO:\n{query}"
+        f"PERGUNTA DO USUÁRIO:\n{context.query}"
     )
 
     result = engine.complete(
-        system=f"Consulta normativa para {municipality}.",
-        prompt=prompt,
-        output_model=AssistantAnswer,
-        cacheable_prefix=ASSISTANT_POLICY,
+        AIRequest(
+            system=f"Consulta normativa para {municipality}.",
+            prompt=prompt,
+            output_model=AssistantAnswer,
+            cacheable_prefix=ASSISTANT_POLICY,
+        )
     )
 
     if not result.ok:
         # Falha ou recusa do modelo devolve a resposta determinística — com o
         # motivo à vista, nunca disfarçada de resposta de IA.
         return _return_baseline(
-            db=db,
-            user=user,
-            project=project,
-            query=query,
+            context,
             baseline=baseline,
             request_hash=request_hash,
             retrieved_keys=retrieved_keys,
@@ -579,10 +579,7 @@ def _ask_model(
         )
 
     return _process_model_response(
-        db=db,
-        user=user,
-        project=project,
-        query=query,
+        context,
         baseline=baseline,
         request_hash=request_hash,
         retrieved=retrieved,
@@ -592,15 +589,11 @@ def _ask_model(
     )
 
 
-def ask(
-    db: Session,
-    query: str,
-    user: User,
-    project: Optional[Project] = None,
-    statuses: Optional[Dict[str, str]] = None,
-    provider: Optional[AIProvider] = None,
-) -> AssistantResponse:
+def ask(context: AskContext) -> AssistantResponse:
     """Responde a uma consulta normativa, com proveniência registrada."""
+    project = context.project
+    query = context.query
+    db = context.db
     jurisdiction = project.city_ibge if project else "BR-RS-4311403"
     municipality = project.city_name if project else "Lajeado"
 
@@ -609,17 +602,22 @@ def ask(
     retrieved = retrieve(query, candidatas)
     retrieved_keys = [item.rule.rule_id for item in retrieved]
 
-    engine = provider or get_provider()
+    engine = context.provider or get_provider()
     baseline = deterministic_answer(
-        query, retrieved, catalog, jurisdiction, municipality, statuses, project
+        QueryContext(
+            query=query,
+            retrieved=retrieved,
+            catalog=catalog,
+            jurisdiction=jurisdiction,
+            municipality=municipality,
+            statuses=context.statuses,
+            project=project,
+        )
     )
 
     if not engine.available:
         return _return_baseline(
-            db=db,
-            user=user,
-            project=project,
-            query=query,
+            context,
             baseline=baseline,
             request_hash=_request_hash(query, _context_signature(retrieved), None),
             retrieved_keys=retrieved_keys,
@@ -631,7 +629,7 @@ def ask(
         query, _context_signature(retrieved), getattr(engine, "model", None)
     )
 
-    cached = _lookup_cache(db, user.organization_id, request_hash)
+    cached = _lookup_cache(db, context.user.organization_id, request_hash)
     if cached and cached.response_json:
         resposta = AssistantResponse(**cached.response_json)
         resposta.interaction_id = cached.id
@@ -639,10 +637,7 @@ def ask(
         return resposta
 
     return _ask_model(
-        db=db,
-        query=query,
-        user=user,
-        project=project,
+        context,
         baseline=baseline,
         retrieved=retrieved,
         retrieved_keys=retrieved_keys,
@@ -784,14 +779,16 @@ def _handle_unavailable_provider(
         ),
         interaction_id=_record(
             db,
-            organization_id=user.organization_id,
-            user=user,
-            project=None,
-            purpose="extracao_de_regra",
-            prompt=legal_text[:4000],
-            request_hash=request_hash,
-            retrieved_keys=[],
-            provider_name=engine.name,
+            RecordParams(
+                organization_id=user.organization_id,
+                user=user,
+                project=None,
+                purpose="extracao_de_regra",
+                prompt=legal_text[:4000],
+                request_hash=request_hash,
+                retrieved_keys=[],
+                provider_name=engine.name,
+            ),
         ).id,
     )
 
@@ -803,14 +800,16 @@ def _handle_failed_extraction(
         error=result.error or "O modelo não produziu rascunhos.",
         interaction_id=_record(
             db,
-            organization_id=user.organization_id,
-            user=user,
-            project=None,
-            purpose="extracao_de_regra",
-            prompt=legal_text[:4000],
-            request_hash=request_hash,
-            retrieved_keys=[],
-            result=result,
+            RecordParams(
+                organization_id=user.organization_id,
+                user=user,
+                project=None,
+                purpose="extracao_de_regra",
+                prompt=legal_text[:4000],
+                request_hash=request_hash,
+                retrieved_keys=[],
+                result=result,
+            ),
         ).id,
     )
 
@@ -829,16 +828,18 @@ def _handle_successful_extraction(
 
     interaction = _record(
         db,
-        organization_id=user.organization_id,
-        user=user,
-        project=None,
-        purpose="extracao_de_regra",
-        prompt=legal_text[:4000],
-        request_hash=request_hash,
-        retrieved_keys=[],
-        cited_keys=[d.rule_key for d in batch.drafts],
-        result=result,
-        response_json=batch.model_dump(),
+        RecordParams(
+            organization_id=user.organization_id,
+            user=user,
+            project=None,
+            purpose="extracao_de_regra",
+            prompt=legal_text[:4000],
+            request_hash=request_hash,
+            retrieved_keys=[],
+            cited_keys=[d.rule_key for d in batch.drafts],
+            result=result,
+            response_json=batch.model_dump(),
+        ),
     )
 
     return DraftResult(
@@ -849,14 +850,16 @@ def _handle_successful_extraction(
     )
 
 
-def extract_rule_drafts(
-    db: Session,
-    legal_text: str,
-    jurisdiction: str,
-    user: User,
-    document: Optional[RegulatoryDocument] = None,
-    provider: Optional[AIProvider] = None,
-) -> DraftResult:
+@dataclass
+class ExtractionContext:
+    db: Session
+    user: User
+    jurisdiction: str
+    document: Optional[RegulatoryDocument] = None
+    provider: Optional[AIProvider] = None
+
+
+def extract_rule_drafts(legal_text: str, context: ExtractionContext) -> DraftResult:
     """Propõe regras a partir de texto legal — como rascunho, sempre.
 
     O resultado entra na fila de validação humana (§7.5). Regra com `rule_key`
@@ -864,18 +867,23 @@ def extract_rule_drafts(
     partir de saída de modelo seria alterar a base legal sem que ninguém
     tivesse conferido.
     """
-    engine = provider or get_provider()
+    db = context.db
+    user = context.user
+    jurisdiction = context.jurisdiction
+    engine = context.provider or get_provider()
     request_hash = _request_hash(legal_text, [jurisdiction], getattr(engine, "model", None))
 
     if not engine.available:
         return _handle_unavailable_provider(db, user, engine, legal_text, request_hash)
 
     result = engine.complete(
-        system=f"Extração de regras urbanísticas para a jurisdição {jurisdiction}.",
-        prompt=f"TEXTO LEGAL:\n\n{legal_text}",
-        output_model=RuleDraftBatch,
-        max_tokens=8192,
-        cacheable_prefix=EXTRACTION_POLICY,
+        AIRequest(
+            system=f"Extração de regras urbanísticas para a jurisdição {jurisdiction}.",
+            prompt=f"TEXTO LEGAL:\n\n{legal_text}",
+            output_model=RuleDraftBatch,
+            max_tokens=8192,
+            cacheable_prefix=EXTRACTION_POLICY,
+        )
     )
 
     if not result.ok:
@@ -883,5 +891,5 @@ def extract_rule_drafts(
 
     batch: RuleDraftBatch = result.parsed  # type: ignore[assignment]
     return _handle_successful_extraction(
-        db, user, result, batch, jurisdiction, legal_text, request_hash, document
+        db, user, result, batch, jurisdiction, legal_text, request_hash, context.document
     )

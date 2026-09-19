@@ -115,7 +115,11 @@ def atlas_ai_chat(
         if run:
             statuses = {v.rule_id: v.status for v in run.validations}
 
-    resposta = ai_service.ask(db, req.prompt, user, project=project, statuses=statuses)
+    resposta = ai_service.ask(
+        ai_service.AskContext(
+            db=db, query=req.prompt, user=user, project=project, statuses=statuses
+        )
+    )
     return AIChatResponse(**resposta.__dict__)
 
 
@@ -148,11 +152,13 @@ def extract_rule_drafts(
             )
 
     resultado = ai_service.extract_rule_drafts(
-        db,
         legal_text=req.legal_text,
-        jurisdiction=req.jurisdiction,
-        user=user,
-        document=document,
+        context=ai_service.ExtractionContext(
+            db=db,
+            user=user,
+            jurisdiction=req.jurisdiction,
+            document=document,
+        ),
     )
     return RuleDraftResponse(
         created_rule_ids=resultado.created_rule_ids,

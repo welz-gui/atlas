@@ -13,10 +13,10 @@ from datetime import datetime
 
 import pytest
 
-from app.ai.provider import AIProvider, AIResult, NullProvider
+from app.ai.provider import AIProvider, AIRequest, AIResult, NullProvider
 from app.ai.retrieval import retrieve, tokenize
 from app.ai.schemas import AssistantAnswer, RuleDraft, RuleDraftBatch, RuleDraftCheck
-from app.ai.service import ask, extract_rule_drafts
+from app.ai.service import AskContext, ExtractionContext, ask, extract_rule_drafts
 from app.core.config import settings
 from app.models.domain import AIInteraction, RegulatoryRule
 from app.regulatory.catalog import RegulatoryCatalog, RuleState
@@ -35,9 +35,9 @@ class FakeProvider(AIProvider):
         self.refused = refused
         self.calls = []
 
-    def complete(self, system, prompt, output_model, max_tokens=2048, cacheable_prefix=None):
+    def complete(self, request: AIRequest) -> AIResult:
         self.calls.append(
-            {"system": system, "prompt": prompt, "prefix": cacheable_prefix}
+            {"system": request.system, "prompt": request.prompt, "prefix": request.cacheable_prefix}
         )
         return AIResult(
             parsed=self.parsed,
@@ -139,7 +139,7 @@ def test_resposta_do_modelo_e_usada_quando_se_sustenta(
         )
     )
 
-    resposta = ask(db_session, "qual o recuo frontal", engineer, provider=provider)
+    resposta = ask(AskContext(db=db_session, query="qual o recuo frontal", user=engineer, provider=provider))
 
     assert resposta.is_ai_generated is True
     assert resposta.method == "modelo_de_linguagem_sobre_catalogo"
@@ -155,7 +155,7 @@ def test_a_politica_vai_no_prefixo_cacheavel(db_session, engineer, seeded_catalo
             answer="ok", cited_rule_keys=[], answered_from_context=True
         )
     )
-    ask(db_session, "recuo frontal", engineer, provider=provider)
+    ask(AskContext(db=db_session, query="recuo frontal", user=engineer, provider=provider))
 
     prefixo = provider.calls[0]["prefix"]
     assert "NUNCA cite artigo" in prefixo
@@ -174,7 +174,7 @@ def test_citacao_inventada_e_descartada(db_session, engineer, seeded_catalog):
         )
     )
 
-    resposta = ask(db_session, "qual o recuo frontal", engineer, provider=provider)
+    resposta = ask(AskContext(db=db_session, query="qual o recuo frontal", user=engineer, provider=provider))
 
     assert resposta.is_ai_generated is False
     assert "10 m" not in resposta.answer
@@ -198,7 +198,7 @@ def test_modelo_sem_base_no_contexto_cai_para_o_deterministico(
         )
     )
 
-    resposta = ask(db_session, "recuo frontal", engineer, provider=provider)
+    resposta = ask(AskContext(db=db_session, query="recuo frontal", user=engineer, provider=provider))
 
     assert resposta.is_ai_generated is False
     assert "3 metros" not in resposta.answer
@@ -207,7 +207,7 @@ def test_modelo_sem_base_no_contexto_cai_para_o_deterministico(
 
 def test_falha_do_provedor_nao_derruba_a_consulta(db_session, engineer, seeded_catalog):
     provider = FakeProvider(error="Limite de requisições do provedor atingido.")
-    resposta = ask(db_session, "recuo frontal", engineer, provider=provider)
+    resposta = ask(AskContext(db=db_session, query="recuo frontal", user=engineer, provider=provider))
 
     assert resposta.is_ai_generated is False
     assert "Recuo Frontal" in resposta.answer  # o catálogo respondeu
@@ -221,7 +221,7 @@ def test_falha_do_provedor_nao_derruba_a_consulta(db_session, engineer, seeded_c
 
 def test_recusa_do_modelo_e_registrada_como_recusa(db_session, engineer, seeded_catalog):
     provider = FakeProvider(refused=True, error="O modelo recusou-se a responder.")
-    resposta = ask(db_session, "recuo frontal", engineer, provider=provider)
+    resposta = ask(AskContext(db=db_session, query="recuo frontal", user=engineer, provider=provider))
 
     assert resposta.is_ai_generated is False
     registro = db_session.query(AIInteraction).order_by(
@@ -236,9 +236,7 @@ def test_sem_contexto_o_modelo_nem_e_consultado(db_session, engineer, seeded_cat
         parsed=AssistantAnswer(answer="qualquer", cited_rule_keys=[], answered_from_context=True)
     )
 
-    resposta = ask(
-        db_session, "custo do metro quadrado de alvenaria", engineer, provider=provider
-    )
+    resposta = ask(AskContext(db=db_session, query="custo do metro quadrado de alvenaria", user=engineer, provider=provider))
 
     assert provider.calls == []
     assert resposta.is_ai_generated is False
@@ -248,7 +246,7 @@ def test_sem_contexto_o_modelo_nem_e_consultado(db_session, engineer, seeded_cat
 def test_sem_provedor_a_resposta_e_deterministica_e_registrada(
     db_session, engineer, seeded_catalog
 ):
-    resposta = ask(db_session, "recuo frontal", engineer, provider=NullProvider())
+    resposta = ask(AskContext(db=db_session, query="recuo frontal", user=engineer, provider=NullProvider()))
 
     assert resposta.is_ai_generated is False
     assert resposta.method == "busca_por_palavra_chave_no_catalogo"
@@ -272,8 +270,8 @@ def test_resposta_identica_vem_do_cache(db_session, engineer, seeded_catalog):
         )
     )
 
-    primeira = ask(db_session, "qual o recuo frontal", engineer, provider=provider)
-    segunda = ask(db_session, "qual o recuo frontal", engineer, provider=provider)
+    primeira = ask(AskContext(db=db_session, query="qual o recuo frontal", user=engineer, provider=provider))
+    segunda = ask(AskContext(db=db_session, query="qual o recuo frontal", user=engineer, provider=provider))
 
     assert len(provider.calls) == 1
     assert segunda.served_from_cache is True
@@ -291,7 +289,7 @@ def test_regra_alterada_invalida_o_cache(
             answered_from_context=True,
         )
     )
-    ask(db_session, "qual o recuo frontal", engineer, provider=provider)
+    ask(AskContext(db=db_session, query="qual o recuo frontal", user=engineer, provider=provider))
 
     regra = (
         db_session.query(RegulatoryRule)
@@ -303,7 +301,7 @@ def test_regra_alterada_invalida_o_cache(
     regra.validated_at = datetime.utcnow()
     db_session.commit()
 
-    ask(db_session, "qual o recuo frontal", engineer, provider=provider)
+    ask(AskContext(db=db_session, query="qual o recuo frontal", user=engineer, provider=provider))
     assert len(provider.calls) == 2
 
 
@@ -317,8 +315,8 @@ def test_cache_desligado_sempre_consulta(
         )
     )
 
-    ask(db_session, "recuo frontal", engineer, provider=provider)
-    ask(db_session, "recuo frontal", engineer, provider=provider)
+    ask(AskContext(db=db_session, query="recuo frontal", user=engineer, provider=provider))
+    ask(AskContext(db=db_session, query="recuo frontal", user=engineer, provider=provider))
     assert len(provider.calls) == 2
 
 
@@ -331,11 +329,11 @@ def test_cache_nao_atravessa_organizacoes(db_session, engineer, seeded_catalog):
             answer="ok", cited_rule_keys=["lajeado_recuo_frontal_z2"], answered_from_context=True
         )
     )
-    ask(db_session, "recuo frontal", engineer, provider=provider)
+    ask(AskContext(db=db_session, query="recuo frontal", user=engineer, provider=provider))
 
     outra = make_org(db_session, "Concorrente S.A.")
     intruso = make_user(db_session, outra, UserRole.OWNER, "intruso-cache@atlas-qa.com")
-    ask(db_session, "recuo frontal", intruso, provider=provider)
+    ask(AskContext(db=db_session, query="recuo frontal", user=intruso, provider=provider))
 
     assert len(provider.calls) == 2
 
@@ -371,7 +369,8 @@ def test_rascunho_nasce_como_rascunho_e_fora_do_motor(
 ):
     provider = FakeProvider(parsed=_batch())
     resultado = extract_rule_drafts(
-        db_session, "texto legal qualquer", "BR-RS-4311403", validator, provider=provider
+        "texto legal qualquer",
+        ExtractionContext(db=db_session, user=validator, jurisdiction="BR-RS-4311403", provider=provider),
     )
 
     assert len(resultado.created_rule_ids) == 1
@@ -394,7 +393,8 @@ def test_rascunho_nasce_como_rascunho_e_fora_do_motor(
 def test_rascunho_registra_o_trecho_de_origem(db_session, validator, seeded_catalog):
     """O validador confere sem reabrir a lei."""
     resultado = extract_rule_drafts(
-        db_session, "texto", "BR-RS-4311403", validator, provider=FakeProvider(parsed=_batch())
+        "texto",
+        ExtractionContext(db=db_session, user=validator, jurisdiction="BR-RS-4311403", provider=FakeProvider(parsed=_batch())),
     )
     regra = (
         db_session.query(RegulatoryRule)
@@ -425,7 +425,8 @@ def test_rascunho_nao_sobrescreve_regra_existente(
         ]
     )
     resultado = extract_rule_drafts(
-        db_session, "texto", "BR-RS-4311403", validator, provider=FakeProvider(parsed=batch)
+        "texto",
+        ExtractionContext(db=db_session, user=validator, jurisdiction="BR-RS-4311403", provider=FakeProvider(parsed=batch)),
     )
 
     assert resultado.created_rule_ids == []
@@ -452,7 +453,8 @@ def test_exigencia_sem_numero_vira_analise_manual(db_session, validator, seeded_
         ]
     )
     resultado = extract_rule_drafts(
-        db_session, "texto", "BR-RS-4311403", validator, provider=FakeProvider(parsed=batch)
+        "texto",
+        ExtractionContext(db=db_session, user=validator, jurisdiction="BR-RS-4311403", provider=FakeProvider(parsed=batch)),
     )
     regra = (
         db_session.query(RegulatoryRule)
@@ -466,7 +468,8 @@ def test_exigencia_sem_numero_vira_analise_manual(db_session, validator, seeded_
 
 def test_extracao_sem_provedor_recusa_com_motivo(db_session, validator, seeded_catalog):
     resultado = extract_rule_drafts(
-        db_session, "texto legal", "BR-RS-4311403", validator, provider=NullProvider()
+        "texto legal",
+        ExtractionContext(db=db_session, user=validator, jurisdiction="BR-RS-4311403", provider=NullProvider()),
     )
 
     assert resultado.created_rule_ids == []
