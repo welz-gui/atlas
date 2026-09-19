@@ -702,3 +702,22 @@ def test_run_job_sem_executor_registrado_vira_falha(db_session, org):
     assert resultado.status == JobStatus.FALHOU
     assert resultado.error == f"Nenhum executor registrado para '{job_type}'."
     assert resultado.finished_at is not None
+
+
+def test_reset_queue_cache(monkeypatch):
+    from app.workers.queue import get_queue, reset_queue_cache
+
+    monkeypatch.setenv("QUEUE_BACKEND", "inline")
+    reset_queue_cache()
+
+    try:
+        queue_instance_1 = get_queue()
+        queue_instance_2 = get_queue()
+        assert queue_instance_1 is queue_instance_2, "get_queue() não devolveu a instância em cache"
+
+        reset_queue_cache()
+
+        queue_instance_3 = get_queue()
+        assert queue_instance_1 is not queue_instance_3, "get_queue() devolveu a instância antiga após o reset"
+    finally:
+        reset_queue_cache()
