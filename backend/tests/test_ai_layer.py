@@ -527,3 +527,15 @@ def test_proveniencia_nao_vaza_entre_organizacoes(
         "/api/v1/ai/interactions", headers=auth_headers(client, intruso.email)
     ).json()
     assert registros == []
+
+def test_reset_provider_cache():
+    from app.ai.provider import get_provider, reset_provider_cache
+
+    provider1 = get_provider()
+    provider2 = get_provider()
+    assert provider1 is provider2, "get_provider() should return a cached instance"
+
+    reset_provider_cache()
+
+    provider3 = get_provider()
+    assert provider1 is not provider3, "reset_provider_cache() should clear the cache so a new instance is returned"
