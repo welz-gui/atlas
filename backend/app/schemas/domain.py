@@ -1,3 +1,4 @@
+from fastapi import Form
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from typing import Any, Dict, List, Optional
 from datetime import datetime
@@ -456,6 +457,29 @@ class PredictionAccuracy(BaseModel):
 # =============================================================================
 # Documentos (§8.3)
 # =============================================================================
+
+
+class DocumentUpload(BaseModel):
+    title: str
+    category: str = "projeto_arquitetonico"
+    version: str = "v1.0"
+    supersedes_id: Optional[str] = None
+
+    @classmethod
+    def as_form(
+        cls,
+        title: str = Form(...),
+        category: str = Form("projeto_arquitetonico"),
+        version: str = Form("v1.0"),
+        supersedes_id: Optional[str] = Form(None),
+    ):
+        return cls(
+            title=title,
+            category=category,
+            version=version,
+            supersedes_id=supersedes_id,
+        )
+
 
 class DocumentResponse(BaseModel):
     id: str

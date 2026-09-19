@@ -7,13 +7,14 @@ dependendo da conferência de um validador técnico.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import inspect
+import re
+import ssl
+import unicodedata
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from html.parser import HTMLParser
-import re
-import unicodedata
-from typing import Callable
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
 
@@ -295,7 +296,8 @@ def fetch_source(
             "Cookie": "media=2",
         },
     )
-    with urlopen(request, timeout=timeout) as response:  # noqa: S310 - URL vem do registro fixo
+    context = ssl.create_default_context()
+    with urlopen(request, timeout=timeout, context=context) as response:  # noqa: S310 - URL vem do registro fixo
         final_host = urlparse(response.geturl()).hostname
         configured_source = next(
             (

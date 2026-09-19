@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.models.domain import Document, DocumentState, JobRecord, JobType, Project, User
 from app.services.pdf_parser import PDFPlanParser
-from app.services.regulatory_engine import RegulatoryEngine
+from app.services.regulatory_engine import RegulatoryEngine, EvaluationConfig
 from app.services.retention import purge_expired_documents
 from app.services.storage import ObjectNotFound, get_storage
 from app.workers.registry import register
@@ -119,9 +119,11 @@ def run_analysis(db: Session, record: JobRecord) -> Dict[str, Any]:
     run = RegulatoryEngine.evaluate_project(
         db,
         project,
-        trigger=record.payload.get("trigger", "assincrono"),
-        user=requester,
-        version=version,
+        config=EvaluationConfig(
+            trigger=record.payload.get("trigger", "assincrono"),
+            user=requester,
+            version=version,
+        )
     )
     return {
         "analysis_run_id": run.id,
