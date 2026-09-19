@@ -1,5 +1,5 @@
-import pytest
-from app.services.antivirus import get_scanner, reset_scanner_cache, _SCANNERS
+from app.services.antivirus import get_scanner, reset_scanner_cache
+
 
 def test_reset_scanner_cache():
     # Popula o cache
