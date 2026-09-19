@@ -19,6 +19,7 @@ from app.workers.registry import register
 from app.workers.registry import HANDLERS
 from app.workers.queue import (
     InlineQueue,
+    JobConfig,
     QueueBackend,
     enqueue,
     get_queue,
@@ -69,7 +70,7 @@ def test_sem_broker_o_trabalho_roda_no_request_e_diz_isso(db_session, org, engin
         return {"eco": record.payload.get("valor")}
 
     trabalho = enqueue(
-        db_session, "teste_ok", {"valor": 42}, user=engineer, backend=InlineQueue()
+        db_session, "teste_ok", config=JobConfig(payload={"valor": 42}, user=engineer, backend=InlineQueue())
     )
 
     assert trabalho.status == JobStatus.CONCLUIDO
@@ -83,7 +84,7 @@ def test_com_broker_o_trabalho_fica_enfileirado(db_session, org, engineer, broke
     def _handler(db, record):
         return {"ok": True}
 
-    trabalho = enqueue(db_session, "teste_ok", user=engineer, backend=broker)
+    trabalho = enqueue(db_session, "teste_ok", config=JobConfig(user=engineer, backend=broker))
 
     assert trabalho.status == JobStatus.ENFILEIRADO
     assert trabalho.executed_inline is False
@@ -107,13 +108,13 @@ def test_registro_existe_antes_da_publicacao(db_session, org, engineer, broker):
     def _handler(db, record):
         return {}
 
-    enqueue(db_session, "teste_ok", user=engineer, backend=Espiao())
+    enqueue(db_session, "teste_ok", config=JobConfig(user=engineer, backend=Espiao()))
     assert visto["existe"] is True
 
 
 def test_tipo_sem_executor_e_recusado_no_enfileiramento(db_session, engineer):
     with pytest.raises(ValueError, match="não tem executor"):
-        enqueue(db_session, "tipo_inexistente", user=engineer)
+        enqueue(db_session, "tipo_inexistente", config=JobConfig(user=engineer))
 
 
 def test_trabalho_sem_organizacao_e_recusado(db_session):
@@ -130,7 +131,7 @@ def test_falha_vira_registro_e_volta_para_a_fila(db_session, org, engineer, brok
     def _handler(db, record):
         raise RuntimeError("o PDF está corrompido")
 
-    trabalho = enqueue(db_session, "teste_falha", user=engineer, backend=broker)
+    trabalho = enqueue(db_session, "teste_falha", config=JobConfig(user=engineer, backend=broker))
     resultado = run_job(db_session, trabalho.id)
 
     # Primeira tentativa de três: volta para a fila, com o erro registrado.
@@ -145,7 +146,7 @@ def test_tentativas_esgotadas_encerram_em_falha(db_session, org, engineer, broke
     def _handler(db, record):
         raise RuntimeError("falha permanente")
 
-    trabalho = enqueue(db_session, "teste_falha", user=engineer, backend=broker)
+    trabalho = enqueue(db_session, "teste_falha", config=JobConfig(user=engineer, backend=broker))
     for _ in range(3):
         run_job(db_session, trabalho.id)
 
@@ -163,7 +164,7 @@ def test_trabalho_concluido_nao_executa_de_novo(db_session, org, engineer, broke
         execucoes.append(1)
         return {"n": len(execucoes)}
 
-    trabalho = enqueue(db_session, "teste_contagem", user=engineer, backend=broker)
+    trabalho = enqueue(db_session, "teste_contagem", config=JobConfig(user=engineer, backend=broker))
     run_job(db_session, trabalho.id)
     run_job(db_session, trabalho.id)
 
@@ -192,7 +193,7 @@ def test_worker_republica_trabalho_parado_na_fila(
     def _handler(db, record):
         return {}
 
-    trabalho = enqueue(db_session, "teste_ok", user=engineer, backend=broker)
+    trabalho = enqueue(db_session, "teste_ok", config=JobConfig(user=engineer, backend=broker))
     broker.published.clear()  # o broker "perdeu" a mensagem
 
     trabalho.queued_at = datetime.utcnow() - timedelta(minutes=30)
@@ -214,7 +215,7 @@ def test_trabalho_recem_publicado_nao_e_republicado(
     def _handler(db, record):
         return {}
 
-    enqueue(db_session, "teste_ok", user=engineer, backend=broker)
+    enqueue(db_session, "teste_ok", config=JobConfig(user=engineer, backend=broker))
     broker.published.clear()
 
     monkeypatch.setattr(worker_module, "get_queue", lambda: broker)
@@ -346,9 +347,11 @@ def test_worker_nao_alcanca_projeto_de_outra_organizacao(db_session, org, projec
     trabalho = enqueue(
         db_session,
         JobType.ANALISE_REGULATORIA,
-        payload={"project_id": project["id"]},
-        user=intruso,
-        backend=FakeBroker(),
+        config=JobConfig(
+            payload={"project_id": project["id"]},
+            user=intruso,
+            backend=FakeBroker(),
+        ),
     )
     resultado = run_job(db_session, trabalho.id)
 

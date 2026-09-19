@@ -1,6 +1,6 @@
 import pytest
 from app.workers.tasks import run_analysis
-from app.models.domain import JobRecord, JobType, Project, ProjectVersion, User
+from app.models.domain import JobRecord, JobType, Project, ProjectVersion
 from app.services.regulatory_engine import RegulatoryEngine
 from unittest.mock import MagicMock
 
@@ -83,7 +83,7 @@ def test_run_analysis_with_version_and_user(db_session, monkeypatch, project, en
         requested_by_id=engineer.id
     )
 
-    result = run_analysis(db_session, record)
+    run_analysis(db_session, record)
 
     mock_eval.assert_called_once_with(
         db_session,
