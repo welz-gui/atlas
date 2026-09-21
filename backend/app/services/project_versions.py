@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -117,7 +117,13 @@ def derive_next_version(
     base: Dict[str, Any] = (
         {field: getattr(current, field) for field in VERSION_FIELDS} if current else {}
     )
-    base.update({k: v for k, v in updates.model_dump(exclude_unset=True).items() if k in VERSION_FIELDS})
+    base.update(
+        {
+            k: v
+            for k, v in updates.model_dump(exclude_unset=True).items()
+            if k in VERSION_FIELDS
+        }
+    )
     new_params = ProjectParameters.model_validate(base)
 
     resolved_state = config.state or (
@@ -128,13 +134,7 @@ def derive_next_version(
         db,
         project,
         new_params,
-        config=VersionConfig(
-            user=config.user,
-            state=resolved_state,
-            change_reason=config.change_reason,
-            change_origin=config.change_origin,
-            commit=config.commit,
-        ),
+        config=replace(config, state=resolved_state)
     )
 
 

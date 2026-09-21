@@ -1,6 +1,8 @@
 """Versionamento de projeto e linha de base oficial (§3.2, §14.15)."""
 
-from app.models.domain import ProjectVersion, ProjectVersionState
+from app.models.domain import Project, ProjectVersion, ProjectVersionState
+from app.services.project_versions import derive_next_version, VersionConfig
+from app.schemas.domain import ProjectParameters
 
 
 def _versions(client, headers, project_id):
@@ -199,3 +201,16 @@ def test_mark_official_baseline_value_error(client, engineer_headers, project, m
     )
     assert response.status_code == 409
     assert response.json()["detail"] == "Simulated error"
+
+
+def test_derive_next_version_with_config(db_session, project, engineer):
+    project_orm = db_session.get(Project, project["id"])
+    updates = ProjectParameters(front_setback=1.5)
+    config = VersionConfig(user=engineer, change_reason="Test reason", state=ProjectVersionState.REVISAO_INTERNA)
+
+    new_version = derive_next_version(db_session, project_orm, updates, config=config)
+
+    assert new_version.version_number == 2
+    assert new_version.front_setback == 1.5
+    assert new_version.change_reason == "Test reason"
+    assert new_version.state == ProjectVersionState.REVISAO_INTERNA

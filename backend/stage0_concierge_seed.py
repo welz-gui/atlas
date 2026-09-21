@@ -289,7 +289,9 @@ def run_stage0_seed():
             # Executa a pré-análise pelo motor regulatório
             db.refresh(proj)
             run = RegulatoryEngine.evaluate_project(
-                db, proj, config=EvaluationConfig(trigger=f"concierge_v{index}", user=analista)
+                db,
+                proj,
+                config=EvaluationConfig(trigger=f"concierge_v{index}", user=analista),
             )
 
             # Regras que o motor de fato apontou nesta análise. É daqui que sai

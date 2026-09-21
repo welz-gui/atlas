@@ -204,7 +204,9 @@ def _seed_projects(db, org, engineer):
 
     for project in (project1, project2, project3):
         db.refresh(project)
-        RegulatoryEngine.evaluate_project(db, project, config=EvaluationConfig(trigger="seed", user=engineer))
+        RegulatoryEngine.evaluate_project(
+            db, project, config=EvaluationConfig(trigger="seed", user=engineer)
+        )
 
     return project1, project2, project3
 
