@@ -46,7 +46,7 @@ class OrganizationBase(BaseModel):
 
 
 class OrganizationCreate(OrganizationBase):
-    pass
+    """Esquema para criação de organização."""
 
 
 class OrganizationResponse(OrganizationBase):
@@ -585,7 +585,7 @@ class EAPItemBase(BaseModel):
 
 
 class EAPItemCreate(EAPItemBase):
-    pass
+    """Esquema para criação de item da EAP."""
 
 
 class EAPItemResponse(EAPItemBase):
