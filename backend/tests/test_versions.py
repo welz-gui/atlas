@@ -214,3 +214,25 @@ def test_derive_next_version_with_config(db_session, project, engineer):
     assert new_version.front_setback == 1.5
     assert new_version.change_reason == "Test reason"
     assert new_version.state == ProjectVersionState.REVISAO_INTERNA
+
+def test_version_content_hash_deterministic():
+    from app.services.project_versions import version_content_hash
+
+    params = ProjectParameters(front_setback=4.5, floors=2, lot_area=450.0)
+    hash1 = version_content_hash(params)
+    hash2 = version_content_hash(params)
+
+    assert hash1 == hash2
+    assert len(hash1) == 64
+    assert isinstance(hash1, str)
+
+def test_version_content_hash_changes_with_parameters():
+    from app.services.project_versions import version_content_hash
+
+    params1 = ProjectParameters(front_setback=4.5, floors=2, lot_area=450.0)
+    params2 = ProjectParameters(front_setback=5.0, floors=2, lot_area=450.0)
+
+    hash1 = version_content_hash(params1)
+    hash2 = version_content_hash(params2)
+
+    assert hash1 != hash2
