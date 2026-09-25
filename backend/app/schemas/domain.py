@@ -7,6 +7,7 @@ from datetime import datetime
 # Autenticação e organização
 # =============================================================================
 
+
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -46,7 +47,7 @@ class OrganizationBase(BaseModel):
 
 
 class OrganizationCreate(OrganizationBase):
-    pass
+    """Dados para criação de organização."""
 
 
 class OrganizationResponse(OrganizationBase):
@@ -69,6 +70,7 @@ class SignupRequest(BaseModel):
 # =============================================================================
 # Versões de projeto
 # =============================================================================
+
 
 class ProjectParameters(BaseModel):
     """Parâmetros urbanísticos.
@@ -128,6 +130,7 @@ class VersionStateChange(BaseModel):
 # =============================================================================
 # Empreendimento
 # =============================================================================
+
 
 class ProjectIdentity(BaseModel):
     """Campos de identidade e localização do empreendimento (§8.2)."""
@@ -231,6 +234,7 @@ class ProjectResponse(ProjectIdentity):
 # Análises
 # =============================================================================
 
+
 class AnalysisRunResponse(BaseModel):
     id: str
     project_id: str
@@ -274,6 +278,7 @@ class RegulatoryAnalysisReport(BaseModel):
 # =============================================================================
 # Catálogo regulatório (§7)
 # =============================================================================
+
 
 class RegulatoryDocumentBase(BaseModel):
     jurisdiction: str
@@ -332,7 +337,9 @@ class RegulatoryRuleResponse(BaseModel):
 class RuleValidationRequest(BaseModel):
     """Ato de validação técnica de uma regra (§7.5, §15.12)."""
 
-    action: str = Field(description="publicar | rejeitar | suspender | revogar | reabrir")
+    action: str = Field(
+        description="publicar | rejeitar | suspender | revogar | reabrir"
+    )
     notes: Optional[str] = None
     #: Obrigatórios ao publicar: sem fonte conferida a regra não pode ser vigente.
     source_document_id: Optional[str] = None
@@ -362,6 +369,7 @@ class CatalogImportResponse(BaseModel):
 # =============================================================================
 # Tramitação (§8.5)
 # =============================================================================
+
 
 class ProtocolProcessCreate(BaseModel):
     protocol_number: str
@@ -576,6 +584,7 @@ class ExtractionResponse(BaseModel):
 # EAP, tarefas e diário
 # =============================================================================
 
+
 class EAPItemBase(BaseModel):
     code: str
     name: str
@@ -585,7 +594,7 @@ class EAPItemBase(BaseModel):
 
 
 class EAPItemCreate(EAPItemBase):
-    pass
+    """Dados para criação de item da EAP."""
 
 
 class EAPItemResponse(EAPItemBase):
