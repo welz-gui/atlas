@@ -1,8 +1,9 @@
 """Extração assistida — o extrator não pode inventar medida alguma."""
 
 import pytest
+from unittest.mock import patch
 
-from app.services.pdf_parser import EXPECTED_FIELDS, PDFPlanParser, parse_number
+from app.services.pdf_parser import EXPECTED_FIELDS, PDFPlanParser, fold_accents, parse_number
 
 QUADRO_COMPLETO = """
 MEMORIAL DESCRITIVO E QUADRO DE ÁREAS
@@ -124,3 +125,92 @@ def test_extrai_de_pdf_real_com_camada_de_texto():
 )
 def test_normalizacao_de_numeros(raw, expected):
     assert parse_number(raw) == expected
+
+def test_extract_float_patterns_unparseable():
+    text = "Área do Lote: 123,456.78.9 m²"
+    haystack = "area do lote: 123,456.78.9 m2"
+    extracted, evidence, warnings = PDFPlanParser._extract_float_patterns(text, haystack)
+    assert not extracted
+    assert any("não pôde ser interpretado" in w for w in warnings)
+
+def test_extract_int_patterns_unparseable():
+    # The regex requires digits (\d+), but we want to simulate int() failing for coverage of the except block.
+    text = "Nº de Pavimentos: 5"
+    haystack = "pavimentos: 5"
+
+    # We patch the compiled regex to return a mock match object that returns a non-digit string
+    # which will force int("mocked_non_int") to raise a ValueError.
+    class MockMatch:
+        def group(self, idx):
+            return "not_an_int"
+        def start(self): return 0
+        def end(self): return len(text)
+
+    class MockPattern:
+        def search(self, text):
+            return MockMatch()
+
+    with patch('app.services.pdf_parser._COMPILED_INT_PATTERNS', [('floors', MockPattern(), 'pavimentos')]):
+        extracted, evidence, warnings = PDFPlanParser._extract_int_patterns(text, haystack)
+
+    assert not extracted
+    assert any("não pôde ser interpretado" in w for w in warnings)
+
+def test_status_nao_verificavel():
+    extracted = {}
+    evidence = []
+    warnings = []
+    res = PDFPlanParser._finalize_extraction(extracted, evidence, warnings)
+    assert res["status"] == "nao_verificavel"
+    assert res["fields_found"] == 0
+
+def test_extract_text_empty():
+    text, warnings = PDFPlanParser.extract_text(b"")
+    assert text == ""
+    assert "Arquivo vazio." in warnings
+
+def test_extract_text_pypdf_missing():
+    with patch.dict('sys.modules', {'pypdf': None}):
+        text, warnings = PDFPlanParser.extract_text(b"%PDF-1.4...")
+        assert text == ""
+        assert any("Biblioteca de leitura de PDF indisponível" in w for w in warnings)
+
+def test_extract_text_pypdf_exception():
+    with patch('pypdf.PdfReader', side_effect=Exception("mocked error")):
+        text, warnings = PDFPlanParser.extract_text(b"%PDF-1.4...")
+        assert text == ""
+        assert any("Falha ao ler o PDF: mocked error" in w for w in warnings)
+
+def test_extract_text_utf8_decode_error():
+    text, warnings = PDFPlanParser.extract_text(b"\xff\xfe", "test.txt")
+    assert text == ""
+    assert any("Formato de 'test.txt' não suportado" in w for w in warnings)
+
+def test_extract_text_pdf_no_text():
+    class MockPage:
+        def extract_text(self):
+            return "   "
+    class MockPdfReader:
+        def __init__(self, stream):
+            self.pages = [MockPage()]
+    with patch('pypdf.PdfReader', MockPdfReader):
+        text, warnings = PDFPlanParser.extract_text(b"%PDF-1.4...")
+        assert text == "   "
+        assert any("provavelmente digitalizado" in w for w in warnings)
+
+def test_extract_text_keyboard_interrupt():
+    # Force the pypdf import to fail with a KeyboardInterrupt inside extract_text
+    # which is caught and explicitly re-raised by `except (KeyboardInterrupt, SystemExit): raise`
+    import builtins
+    real_import = builtins.__import__
+    def mock_import(name, *args, **kwargs):
+        if name == 'pypdf':
+            raise KeyboardInterrupt()
+        return real_import(name, *args, **kwargs)
+
+    with patch('builtins.__import__', side_effect=mock_import):
+        with pytest.raises(KeyboardInterrupt):
+            PDFPlanParser.extract_text(b"%PDF-1.4...")
+
+def test_fold_accents():
+    assert fold_accents("Áéîõüç") == "Aeiouc"
