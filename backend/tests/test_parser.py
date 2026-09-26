@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.services.pdf_parser import EXPECTED_FIELDS, PDFPlanParser, parse_number
+from app.services.pdf_parser import EXPECTED_FIELDS, PDFPlanParser, fold_accents, parse_number
 
 QUADRO_COMPLETO = """
 MEMORIAL DESCRITIVO E QUADRO DE ÁREAS
@@ -81,13 +81,15 @@ def _pdf_com_texto(linhas):
 
 
 def test_extrai_de_pdf_real_com_camada_de_texto():
-    pdf_bytes = _pdf_com_texto([
-        "QUADRO DE AREAS",
-        "Area do Terreno: 512,40 m²",
-        "Area Construida: 268,15 m²",
-        "Recuo Frontal: 5,10 m",
-        "N de Pavimentos: 3",
-    ])
+    pdf_bytes = _pdf_com_texto(
+        [
+            "QUADRO DE AREAS",
+            "Area do Terreno: 512,40 m²",
+            "Area Construida: 268,15 m²",
+            "Recuo Frontal: 5,10 m",
+            "N de Pavimentos: 3",
+        ]
+    )
 
     res = PDFPlanParser.parse_file(pdf_bytes, "prancha.pdf")
 
@@ -104,23 +106,45 @@ def test_extrai_de_pdf_real_com_camada_de_texto():
 @pytest.mark.parametrize(
     "raw, expected",
     [
-        ("450,00", 450.0),      # decimal brasileiro
-        ("450.00", 450.0),      # decimal inglês
+        ("450,00", 450.0),  # decimal brasileiro
+        ("450.00", 450.0),  # decimal inglês
         ("1.234,56", 1234.56),  # milhar brasileiro
         ("1,234.56", 1234.56),  # milhar inglês
-        ("1.234", 1234.0),      # ponto como separador de milhar
+        ("1.234", 1234.0),  # ponto como separador de milhar
         ("2", 2.0),
         ("", None),
         ("abc", None),
         ("1.234.567", 1234567.0),  # múltiplos pontos (milhar sem decimal)
         ("1,234,567", 1234567.0),  # múltiplas vírgulas (milhar sem decimal)
-        ("1.234.567,89", 1234567.89), # múltiplos pontos (milhar com decimal brasileiro)
-        ("1,234,567.89", 1234567.89), # múltiplas vírgulas (milhar com decimal inglês)
-        ("1a", None),              # string com letras junto aos dígitos falha no float
-        ("123 abc", None),         # string com espaços e letras falha no float
-        ("1-2-3", None),           # string com hifens falha no float
-        ("123,456.78.9", None),    # excesso de pontos e vírgulas combinados
+        (
+            "1.234.567,89",
+            1234567.89,
+        ),  # múltiplos pontos (milhar com decimal brasileiro)
+        ("1,234,567.89", 1234567.89),  # múltiplas vírgulas (milhar com decimal inglês)
+        ("1a", None),  # string com letras junto aos dígitos falha no float
+        ("123 abc", None),  # string com espaços e letras falha no float
+        ("1-2-3", None),  # string com hifens falha no float
+        ("123,456.78.9", None),  # excesso de pontos e vírgulas combinados
     ],
 )
 def test_normalizacao_de_numeros(raw, expected):
     assert parse_number(raw) == expected
+
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("Área construída", "Area construida"),
+        ("çãõñüÇÃÕÑÜ", "caonuCAONU"),
+        ("áéíóúÁÉÍÓÚ", "aeiouAEIOU"),
+        ("abc 123", "abc 123"),
+        ("", ""),
+        ("vovó, avô, maçã", "vovo, avo, maca"),
+        ("123 m²", "123 m²"),
+    ],
+)
+def test_fold_accents(raw, expected):
+    result = fold_accents(raw)
+    assert result == expected
+    assert len(result) == len(raw)
