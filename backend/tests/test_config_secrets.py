@@ -80,3 +80,11 @@ def test_desenvolvimento_gera_chave_efemera(monkeypatch):
     assert configuracao.SECRET_KEY
     # Efêmera: dois processos não compartilham chave, e nenhuma está versionada.
     assert configuracao.SECRET_KEY != Settings(_env_file=None).SECRET_KEY
+
+def test_repr_redige_anthropic_api_key(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-12345")
+    from app.core.config import Settings
+    configuracao = Settings(_env_file=None)
+    texto = repr(configuracao)
+    assert "sk-ant-12345" not in texto
+    assert "ANTHROPIC_API_KEY='***'" in texto
