@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 import os
 import socket
+import time
 import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -226,7 +227,7 @@ def enqueue(
         # chamador um trabalho que ninguém retomaria seria mentir sobre o
         # estado dele. Execução inline termina sempre em estado terminal.
         while not run_job(db, record.id).is_terminal:
-            pass
+            time.sleep(0.5)
         db.refresh(record)
 
     return record
