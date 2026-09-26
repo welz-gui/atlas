@@ -210,12 +210,17 @@ jobs:
     # Job separado de propósito: o clamd carrega assinaturas na partida e leva
     # minutos: prendê-lo à suíte principal tornaria lenta a resposta que mais
     # se espera.
-    # O MinIO sobe por `docker run` num passo, e não como serviço, porque
-    # exige `command` (`server /data`) — e serviços do Actions não permitem
-    # sobrescrevê-lo. A primeira tentativa usou uma imagem de terceiro que já
-    # trazia o comando embutido, e ela deixou de ser publicada. A segunda,
-    # `minio/minio` no Docker Hub, também saiu do ar (2026-09): o repositório
-    # deixou de existir ali. A imagem oficial segue publicada em `quay.io`.
+    # O MinIO sobe por `docker run` num passo, e não como serviço, para que o
+    # comando e as variáveis de ambiente fiquem visíveis aqui.
+    #
+    # A imagem já foi retirada duas vezes, em três canais: a de terceiro
+    # original, `minio/minio` no Docker Hub (404) e `quay.io/minio/minio`
+    # (401), e o binário em `dl.min.io` responde 410. O projeto encerrou a
+    # distribuição comunitária. Usamos o arquivo congelado da Bitnami, fixado
+    # numa tag exata: não recebe atualização nem correção de segurança, o que
+    # é aceitável para um servidor descartável de teste — e é dívida assumida.
+    # Quando a Bitnami retirar também esta, o caminho é um servidor S3
+    # mantido, não outro espelho do MinIO.
     services:
       clamav:
         image: clamav/clamav:latest
@@ -253,7 +258,7 @@ jobs:
       - name: Subir o MinIO e criar o bucket
         shell: bash
         run: |
-          docker run -d --name minio             -p 9000:9000             -e MINIO_ROOT_USER=atlas_minio             -e MINIO_ROOT_PASSWORD=atlas_minio_secret             quay.io/minio/minio:latest server /data
+          docker run -d --name minio             -p 9000:9000             -e MINIO_ROOT_USER=atlas_minio             -e MINIO_ROOT_PASSWORD=atlas_minio_secret             bitnamilegacy/minio:2025.7.23-debian-12-r5
 
           # Espera o servidor responder antes de seguir. Sem isto, o primeiro
           # teste falharia por conexão recusada e pareceria defeito do código.
