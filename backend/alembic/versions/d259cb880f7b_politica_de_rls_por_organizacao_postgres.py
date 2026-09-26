@@ -55,11 +55,15 @@ def upgrade() -> None:
         return
 
     for table in TENANT_TABLES:
-        op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
-        op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
+        quoted_table = op.get_bind().dialect.identifier_preparer.quote(table)
+        quoted_policy = op.get_bind().dialect.identifier_preparer.quote(
+            f"{table}_tenant_isolation"
+        )
+        op.execute(f"ALTER TABLE {quoted_table} ENABLE ROW LEVEL SECURITY")
+        op.execute(f"ALTER TABLE {quoted_table} FORCE ROW LEVEL SECURITY")
         op.execute(
             f"""
-            CREATE POLICY {table}_tenant_isolation ON {table}
+            CREATE POLICY {quoted_policy} ON {quoted_table}
             USING (organization_id = current_setting('atlas.organization_id', true))
             WITH CHECK (organization_id = current_setting('atlas.organization_id', true))
             """
@@ -71,5 +75,9 @@ def downgrade() -> None:
         return
 
     for table in TENANT_TABLES:
-        op.execute(f"DROP POLICY IF EXISTS {table}_tenant_isolation ON {table}")
-        op.execute(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")
+        quoted_table = op.get_bind().dialect.identifier_preparer.quote(table)
+        quoted_policy = op.get_bind().dialect.identifier_preparer.quote(
+            f"{table}_tenant_isolation"
+        )
+        op.execute(f"DROP POLICY IF EXISTS {quoted_policy} ON {quoted_table}")
+        op.execute(f"ALTER TABLE {quoted_table} DISABLE ROW LEVEL SECURITY")
