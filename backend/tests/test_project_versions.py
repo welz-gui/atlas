@@ -1,8 +1,7 @@
-from datetime import datetime
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models.domain import Project, ProjectVersion, ProjectVersionState, User
+from app.models.domain import Project, ProjectVersionState, User
 from app.schemas.domain import ProjectParameters
 from app.services.project_versions import (
     VersionConfig,
@@ -54,7 +53,7 @@ def test_create_version_without_config(db_session: Session, project_orm: Project
 def test_derive_next_version_inherits_fields(db_session: Session, project_orm: Project, engineer: User):
     params = ProjectParameters(front_setback=3.0, built_area=100.0, floors=2)
     config = VersionConfig(user=engineer)
-    v1 = create_version(db_session, project_orm, params, config)
+    create_version(db_session, project_orm, params, config)
 
     updates = ProjectParameters(built_area=150.0) # only update built_area
     v2 = derive_next_version(db_session, project_orm, updates, config)
