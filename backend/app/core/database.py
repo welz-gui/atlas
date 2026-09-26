@@ -5,7 +5,9 @@ from app.core.config import settings
 from app.core.tenant import current_organization_id
 
 # Check if SQLite to adjust connect_args
-connect_args = {"check_same_thread": False} if settings.DATABASE_URL.startswith("sqlite") else {}
+connect_args = (
+    {"check_same_thread": False} if settings.DATABASE_URL.startswith("sqlite") else {}
+)
 
 engine = create_engine(settings.DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -61,7 +63,7 @@ register_tenant_listener(SessionLocal)
 
 
 class Base(DeclarativeBase):
-    pass
+    """Base class for all SQLAlchemy declarative models."""
 
 
 def get_db():
