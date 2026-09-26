@@ -33,3 +33,8 @@ Thumbs.db
 *.log
 .vscode/
 .idea/
+
+# Coverage
+.coverage
+coverage.xml
+htmlcov/
