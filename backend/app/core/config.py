@@ -143,6 +143,7 @@ class Settings(BaseSettings):
         "DATABASE_URL",
         "S3_ACCESS_KEY",
         "S3_SECRET_KEY",
+        "ANTHROPIC_API_KEY",
     )
 
     #: Campos que o backend `file` sabe carregar. Não é toda a configuração —
