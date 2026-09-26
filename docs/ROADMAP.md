@@ -4,14 +4,14 @@ Documento vivo. Consolida o **roadmap estratégico** do plano (§9 e §10 de
 [`PLANO_DE_IMPLEMENTACAO_v2.md`](PLANO_DE_IMPLEMENTACAO_v2.md)) com o **estado
 real do código** e o **caminho de execução** de cada estágio.
 
-- Última atualização: **2026-09-19**
-- Base avaliada: `master` em `ffa1925`, espelhada em
+- Última atualização: **2026-09-26**
+- Base avaliada: `master` em `e07dc41`, espelhada em
   [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
   estágios foi levantado em `7dc50d2` e continua valendo, com uma exceção
   registrada abaixo: o **Estágio 6 deixou de ser "nada construído"**.
 - **A Fase D está encerrada, exceto pelo D3** — que nunca foi de engenharia.
   Ver o registro adiante.
-- Suíte: **469 casos de backend** (eram 199 em `7dc50d2`) e **65 de
+- Suíte: **534 casos de backend** (eram 199 em `7dc50d2`) e **65 de
   frontend** (8 arquivos, incluindo componentes — `ErrorBanner`, `StatusChip`,
   `EmptyState`, `OfflineBar`, `AppShell`, `Navbar` — e a fila offline).
   Mais 13 de integração e 6 de RLS, que só rodam na CI porque exigem
@@ -223,7 +223,7 @@ delas falhar, pare e conserte antes de continuar a construir.
 
 | Worktree | Branch | PR | Situação |
 |---|---|---|---|
-| `worktrees/roadmap-update-5` | `docs/atualiza-roadmap-quinta-leva` | — | 🟨 A frente que trouxe esta atualização. |
+| `worktrees/roadmap-update-6` | `docs/atualiza-roadmap-sexta-leva` | — | 🟨 A frente que trouxe esta atualização. |
 
 Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
@@ -241,7 +241,7 @@ Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
 ## Estado atual em uma página
 
-**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 469 testes; RLS ativa, MFA
+**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 534 testes; RLS ativa, MFA
 por TOTP, log em JSON com correlação e sondas de vida e prontidão):
 
 ```
@@ -1346,10 +1346,10 @@ um sem escolher nenhum. Suíte: 353 → 367.
 si. Depende de decisão e de conta, não de código — e, como o D3, não é
 engenharia que o trava.
 
-### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-09-19)
+### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-09-26)
 
-Um agente externo (Jules, do Google) abriu cinco levas de PRs contra o
-repositório — 30, 42, 24, 7 e 38 — do tipo "code health": remoção de import morto,
+Um agente externo (Jules, do Google) abriu seis levas de PRs contra o
+repositório — 30, 42, 24, 7, 38 e 23 — do tipo "code health": remoção de import morto,
 refator de função complexa, teste de caminho de erro, correção de N+1, e
 algumas de segurança. Nenhuma foi mesclada às cegas por CI verde; cada uma foi
 lida contra o código real antes de decidir. O que isso revelou vale mais do
@@ -1414,6 +1414,24 @@ que qualquer regra individual corrigida:
   garante `createdAt` estritamente crescente mesmo dentro do mesmo
   milissegundo — confirmado rodando o teste cinco vezes seguidas antes de
   aceitar.
+
+- **a correção da CI foi retirada em menos de uma semana.** A imagem do MinIO já tinha
+  sido trocada por `quay.io/minio/minio` (#224); na sexta leva as 23 PRs
+  chegaram de novo com o job `Integração` vermelho, e o Quay agora respondia
+  **401**. O binário oficial em `dl.min.io` responde **410 Gone** e
+  `minio/minio` no Docker Hub segue 404: a distribuição comunitária do MinIO
+  acabou nos três canais, então trocar de espelho não resolve — só adia. O job
+  passou a usar o arquivo congelado da Bitnami (`bitnamilegacy/minio`, tag
+  exata, #257). **É dívida assumida**: a imagem não recebe atualização nem
+  correção de segurança (aceitável para um servidor descartável de teste), e
+  o caminho quando ela também sumir é um servidor S3 mantido. Registrada em
+  *Dívidas técnicas*;
+- **mais um segredo em `repr(settings)`.** A `ANTHROPIC_API_KEY` não estava na
+  lista de campos sensíveis e saía em claro em `repr` e `str` — reproduzido
+  em `master` antes de aceitar a correção (#248). É o mesmo defeito que a Fase
+  D já tinha encontrado com a chave de assinatura: a lista de campos
+  sensíveis é uma lista manual, e todo segredo novo precisa entrar nela.
+  Aceita porque foi *demonstrada*, não porque a PR dizia "vazamento";
 
 **Padrões que se repetiram e mudaram como a revisão foi feita:**
 
@@ -1480,6 +1498,45 @@ que qualquer regra individual corrigida:
   alvo (a versão mais cirúrgica de cada sub-cacho, sem reformatação Black
   não relacionada) numa única PR.
 
+- **alegação de segurança ou de desempenho sem entrada de usuário nem laço
+  de espera.** Uma PR "corrigia injeção de SQL" numa migração cujas tabelas são
+  uma tupla constante — e reescrevia uma migração **já aplicada**, o que o
+  histórico do Alembic não admite. Outra "consertava CPU a 100%" num laço
+  `while not run_job(...).is_terminal: pass` que não espera nada: cada volta
+  executa uma tentativa do job e o laço termina em no máximo 3; o `sleep`
+  só acrescentaria até ~1 s de latência dentro do request. Rejeitadas com a
+  explicação de por que o diagnóstico está errado;
+- **um "conserto" de lint que era regressão.** Uma PR removia a supressão de
+  `exhaustive-deps` de um efeito trocando a dependência do **id** da versão
+  pelo objeto `currentVersion`. O efeito zera o rascunho de parâmetros que a
+  pessoa está editando; o objeto muda de identidade a cada refetch (foco da
+  janela, reconexão) — a edição em andamento seria apagada ao voltar para a
+  aba. A supressão era deliberada; agora o código diz por quê (#260), porque
+  esta tarefa volta;
+- **cinco PRs, dois arquivos novos.** Três PRs apendavam no mesmo ponto de
+  `test_parser.py` e duas criavam o mesmo `test_pdf_report_generator.py`.
+  Consolidadas em duas (#258, #259). Nas duas, o que se descartou importa
+  tanto quanto o que ficou: um `patch` incondicional de `builtins.__import__`
+  (quebraria qualquer import durante o teste) e um teste de `generate_pdf`
+  que mockava o `SimpleDocTemplate` e só conferia que `build()` foi chamado —
+  passaria com o laudo errado. O substituto gera o PDF de verdade e lê o
+  texto de volta;
+- **teste bom se prova por mutação.** Os testes consolidados foram
+  verificados quebrando o código de propósito: inverter o banner "USO
+  INTERNO" derruba dois testes; tratar `0.0` como ausência em `_fmt` derruba
+  um; remover o `re-raise` de `KeyboardInterrupt`/`SystemExit` na importação
+  do `pypdf` derruba dois. Um teste que nunca falhou não provou nada;
+- **o Jules passou a reconhecer tarefa vencida.** Entre a quinta e a sexta
+  leva, uma PR chegou **sem diff**, dizendo que a tarefa já estava resolvida
+  em `master` (#231) — o comportamento certo, em vez de fabricar mudança —,
+  e outra reapresentou a mesma refatoração já mesclada com o mesmo teste
+  (#233, fechada como duplicata). Uma terceira trouxe um teste novo e
+  correto de `derive_next_version` (#232, mesclada). E uma branch órfã
+  reapareceu com conteúdo **revisado** segundo o motivo da rejeição
+  (`reset_queue_cache`, agora por identidade de objeto, sem tocar código de
+  produção — mesclada, #230), o que só se percebe abrindo o diff em vez de
+  apagar por reflexo;
+
 Resultado: **21 PRs mescladas na primeira leva**; na segunda, **21 mescladas**
 (16 diretas + 5 reescritas) e **25 fechadas**; na terceira, **12 mescladas
 diretamente**, mais **7 refeitas em 4 PRs novas** (mesmo padrão de cachos na
@@ -1495,14 +1552,20 @@ tinha 13 PRs — e as duas versões quebradas de `create_version` reescritas em
 pré-compilação de regex salva de uma PR com arquivo de benchmark solto).
 Mais duas PRs próprias fora da revisão de conteúdo: a imagem do MinIO
 (infraestrutura de CI, não Jules) e a ordenação da fila offline (bug real
-achado pela própria leva). Suíte: 367 → 441 → 452 → 453 → 469 (backend),
-15 → 21 → 39 → 40 → 65 (frontend, 4 arquivos até a quarta leva, 8 desde a
-quinta).
+achado pela própria leva); na sexta, **8 das 23 mescladas diretamente**
+(#234, #238, #239, #240, #243, #245, #247 — esta depois de tirar imports sem
+uso —, #248) e **15 fechadas**: 10 rejeitadas ou duplicadas com o motivo
+técnico em cada uma, e 5 absorvidas em duas consolidações próprias (#258,
+#259). Mais duas PRs próprias, a da CI (#257) e a do comentário que protege o
+efeito do `exhaustive-deps` (#260). Suíte: 367 → 441 → 452 → 453 → 469 → 534
+(backend), 15 → 21 → 39 → 40 → 65 (frontend, 4 arquivos até a quarta leva, 8
+desde a quinta; a sexta não acrescentou teste de frontend).
 
 **Pendência sem solução de código:** branches de PRs já mescladas ou fechadas
 continuam reaparecendo em `origin` depois de apagadas — inclusive branches de
-PRs tão antigas quanto #4–#26, e reapareceu de novo durante a própria quinta
-leva, com push novo em branches já fechadas nesta mesma revisão. O Jules
+PRs tão antigas quanto #4–#26, e reapareceu de novo durante a quinta e a
+sexta levas, com push novo em branches já fechadas na mesma revisão (uma
+branch antiga chegou a reaparecer com conteúdo diferente do rejeitado). O Jules
 aparenta manter acesso de push ao repositório para além da vida do PR que
 abriu. Não há correção do lado do código; a correção é revogar ou
 reconfigurar o acesso do Jules no GitHub.
@@ -1625,9 +1688,11 @@ vazia.
 
 | Dívida | Impacto | Onde |
 |---|---|---|
-| Frontend quase sem teste de componente | Quatro (`ErrorBanner`, `StatusChip`, `EmptyState`, `OfflineBar`), via Testing Library; o resto das telas segue sem cobertura | `frontend/` |
+| Frontend com pouco teste de tela | Seis componentes (`ErrorBanner`, `StatusChip`, `EmptyState`, `OfflineBar`, `AppShell`, `Navbar`), o cliente HTTP, a fila offline e o hook `useProjects`, via Testing Library; as telas em si seguem sem cobertura | `frontend/` |
 | Sem cofre de segredos | `repr` não vaza, backend `file` já é compatível com um cofre externo e a rotação de `SECRET_KEY` não derruba MFA; falta o cofre em si, com rotação automática e auditoria de acesso | acompanha a escolha do provedor |
 | Sem métricas, rastreamento nem alerta | O log estruturado existe e alimenta os três; falta para onde mandá-los | acompanha a escolha do provedor |
+| **Servidor S3 de teste sem manutenção** | A CI usa `bitnamilegacy/minio` numa tag congelada: o MinIO encerrou a distribuição comunitária (Docker Hub 404, Quay 401, `dl.min.io` 410) e a Bitnami não atualiza o arquivo. Sem correção de segurança, mas é servidor descartável de teste. Quando a imagem sumir, o caminho é um servidor S3 mantido — não outro espelho do MinIO | `.github/workflows/ci.yml` |
+| Falha intermitente em `Integração` | `test_conteudo_grande_atravessa_em_blocos` falhou **uma vez** em ~25 execuções (`ClientDisconnected` no primeiro `PutObject` de 5 MiB) e passou na repetição. Hipótese não comprovada: o passo de espera sonda `/minio/health/live` e não `/ready`. Amostra pequena demais para afirmar | `.github/workflows/ci.yml` |
 | **Sem provedor de hospedagem** | A imagem e a composição existem; o ambiente, não | `docker-compose.prod.yml` |
 | **Catálogo maior, validação parada** | O coletor aumenta a fila do D3 sem que ninguém a consuma | `regulatory/discovery.py` |
 | RLS não cobre `users` | Listagem de usuários tem só o filtro de aplicação; as tabelas com trabalho de cliente estão cobertas | `alembic/.../a4d7e91c5b20` |
