@@ -28,6 +28,7 @@ Três decisões que valem explicação:
 from __future__ import annotations
 
 import hashlib
+from contextlib import suppress
 import os
 import shutil
 import tempfile
@@ -70,6 +71,7 @@ def build_key(extension: str = "") -> str:
 # =============================================================================
 # Escrita
 # =============================================================================
+
 
 class StorageWriter:
     """Gravação em duas fases, com hash e tamanho apurados no caminho.
@@ -154,10 +156,8 @@ class StorageWriter:
         if self._closed:
             return
         self._closed = True
-        try:
+        with suppress(FileNotFoundError):
             os.unlink(self._temp_path)
-        except FileNotFoundError:
-            pass
 
     def __enter__(self) -> "StorageWriter":
         return self
@@ -177,6 +177,7 @@ class StorageWriter:
 # Backends
 # =============================================================================
 
+
 class StorageBackend(ABC):
     name: str
 
@@ -192,8 +193,7 @@ class StorageBackend(ABC):
         """Abre o objeto para leitura. Levanta `ObjectNotFound` se não existir."""
 
     @abstractmethod
-    def exists(self, key: str) -> bool:
-        ...
+    def exists(self, key: str) -> bool: ...
 
     @abstractmethod
     def delete(self, key: str) -> bool:
@@ -285,9 +285,7 @@ class S3Storage(StorageBackend):
     ):
         self.bucket = bucket or settings.S3_BUCKET
         if not self.bucket:
-            raise StorageError(
-                "STORAGE_BACKEND=s3 exige S3_BUCKET configurado."
-            )
+            raise StorageError("STORAGE_BACKEND=s3 exige S3_BUCKET configurado.")
         self.prefix = (prefix if prefix is not None else settings.S3_PREFIX) or ""
         self._client = client
 
@@ -313,10 +311,8 @@ class S3Storage(StorageBackend):
 
     def _persist(self, key: str, source_path: str) -> None:
         self.client.upload_file(source_path, self.bucket, self._object_key(key))
-        try:
+        with suppress(FileNotFoundError):
             os.unlink(source_path)
-        except FileNotFoundError:
-            pass
 
     def open(self, key: str) -> BinaryIO:
         try:
@@ -343,23 +339,23 @@ class S3Storage(StorageBackend):
     def delete_bulk(self, keys: list[str]) -> dict[str, str]:
         results = {}
         for i in range(0, len(keys), 1000):
-            batch = keys[i:i+1000]
+            batch = keys[i : i + 1000]
             # Map object keys back to original keys safely
             key_map = {self._object_key(k): k for k in batch}
             try:
                 response = self.client.delete_objects(
                     Bucket=self.bucket,
                     Delete={
-                        'Objects': [{'Key': k} for k in key_map.keys()],
-                        'Quiet': False
-                    }
+                        "Objects": [{"Key": k} for k in key_map.keys()],
+                        "Quiet": False,
+                    },
                 )
-                for deleted in response.get('Deleted', []):
-                    obj_key = deleted.get('Key', '')
+                for deleted in response.get("Deleted", []):
+                    obj_key = deleted.get("Key", "")
                     if obj_key in key_map:
                         results[key_map[obj_key]] = "deleted"
-                for error in response.get('Errors', []):
-                    obj_key = error.get('Key', '')
+                for error in response.get("Errors", []):
+                    obj_key = error.get("Key", "")
                     if obj_key in key_map:
                         results[key_map[obj_key]] = "error"
             except Exception:
