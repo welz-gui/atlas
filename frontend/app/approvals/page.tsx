@@ -113,7 +113,7 @@ export default function ApprovalsPage() {
     );
     setChangeReason("");
     setReportError(null);
-  }, [currentVersion?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentVersion]);
 
   const dirtyKeys = useMemo(() => {
     if (!currentVersion) return [];
