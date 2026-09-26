@@ -1,8 +1,18 @@
 """Extração assistida — o extrator não pode inventar medida alguma."""
 
+import builtins
+import re
+import sys
+
 import pytest
 
-from app.services.pdf_parser import EXPECTED_FIELDS, PDFPlanParser, parse_number
+from app.services import pdf_parser
+from app.services.pdf_parser import (
+    EXPECTED_FIELDS,
+    PDFPlanParser,
+    fold_accents,
+    parse_number,
+)
 
 QUADRO_COMPLETO = """
 MEMORIAL DESCRITIVO E QUADRO DE ÁREAS
@@ -124,3 +134,130 @@ def test_extrai_de_pdf_real_com_camada_de_texto():
 )
 def test_normalizacao_de_numeros(raw, expected):
     assert parse_number(raw) == expected
+
+
+# =============================================================================
+# Caminhos de falha — o extrator diz "não extraí", nunca inventa
+# =============================================================================
+
+
+def test_numero_ilegivel_vira_aviso_e_nao_valor():
+    res = PDFPlanParser.parse_text_content("Área do Terreno: 1,234.56.7 m²")
+
+    assert res["lot_area"] is None
+    assert any(
+        "valor '1,234.56.7' não pôde ser interpretado" in w for w in res["warnings"]
+    )
+
+
+def test_inteiro_ilegivel_vira_aviso_e_nao_valor(monkeypatch):
+    # O padrão real só casa dígitos, então o ramo de erro só é alcançável
+    # forçando um padrão que case texto.
+    monkeypatch.setattr(
+        pdf_parser,
+        "_COMPILED_INT_PATTERNS",
+        [("floors", re.compile(r"Pavimentos: (.*)"), "pavimentos")],
+    )
+
+    res = PDFPlanParser.parse_text_content("Pavimentos: abc")
+
+    assert res["floors"] is None
+    assert any(
+        "Nº de Pavimentos: valor 'abc' não pôde ser interpretado" in w
+        for w in res["warnings"]
+    )
+
+
+def test_nada_encontrado_e_nao_verificavel():
+    res = PDFPlanParser._finalize_extraction({}, [], [])
+
+    assert res["status"] == "nao_verificavel"
+    assert res["fields_found"] == 0
+
+
+def test_extrair_texto_de_arquivo_vazio():
+    texto, avisos = PDFPlanParser.extract_text(b"\xff\xfe\x00\x00", "memorial.rtf")
+
+    assert texto == ""
+    assert any("Formato de 'memorial.rtf' não suportado" in a for a in avisos)
+
+
+def test_pypdf_indisponivel_nao_derruba_a_extracao(monkeypatch):
+    monkeypatch.setitem(sys.modules, "pypdf", None)
+
+    texto, avisos = PDFPlanParser.extract_text(b"%PDF-1.4 x", "prancha.pdf")
+
+    assert texto == ""
+    assert any("Biblioteca de leitura de PDF indisponível" in a for a in avisos)
+
+
+def test_pdf_corrompido_vira_aviso(monkeypatch):
+    import pypdf
+
+    def _falha(*_args, **_kwargs):
+        raise Exception("PDF corrompido")
+
+    monkeypatch.setattr(pypdf, "PdfReader", _falha)
+
+    texto, avisos = PDFPlanParser.extract_text(b"%PDF-1.4 x", "prancha.pdf")
+
+    assert texto == ""
+    assert any("Falha ao ler o PDF: PDF corrompido" in a for a in avisos)
+
+
+@pytest.mark.parametrize("conteudo_da_pagina", [None, "   "])
+def test_pdf_sem_camada_de_texto_avisa_que_precisa_de_ocr(
+    monkeypatch, conteudo_da_pagina
+):
+    import pypdf
+
+    class _Pagina:
+        def extract_text(self):
+            return conteudo_da_pagina
+
+    class _Leitor:
+        def __init__(self, _stream):
+            self.pages = [_Pagina()]
+
+    monkeypatch.setattr(pypdf, "PdfReader", _Leitor)
+
+    texto, avisos = PDFPlanParser.extract_text(b"%PDF-1.4 x", "prancha.pdf")
+
+    assert not texto.strip()
+    assert any("não contém camada de texto" in a for a in avisos)
+
+
+@pytest.mark.parametrize("interrupcao", [KeyboardInterrupt, SystemExit])
+def test_interrupcao_do_operador_nao_e_engolida(monkeypatch, interrupcao):
+    """O `except` amplo da importação não pode capturar Ctrl+C nem `sys.exit`."""
+    importar_de_verdade = builtins.__import__
+
+    def _importar(nome, *args, **kwargs):
+        if nome == "pypdf":
+            raise interrupcao()
+        return importar_de_verdade(nome, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _importar)
+
+    with pytest.raises(interrupcao):
+        PDFPlanParser.extract_text(b"%PDF-1.4 x", "prancha.pdf")
+
+
+@pytest.mark.parametrize(
+    "bruto, esperado",
+    [
+        ("Área construída", "Area construida"),
+        ("çãõñüÇÃÕÑÜ", "caonuCAONU"),
+        ("áéíóúÁÉÍÓÚ", "aeiouAEIOU"),
+        ("vovó, avô, maçã", "vovo, avo, maca"),
+        ("abc 123", "abc 123"),
+        ("123 m²", "123 m²"),
+        ("", ""),
+    ],
+)
+def test_fold_accents_remove_diacriticos_e_preserva_o_comprimento(bruto, esperado):
+    """O comprimento importa: é o que permite recortar a evidência do original."""
+    resultado = fold_accents(bruto)
+
+    assert resultado == esperado
+    assert len(resultado) == len(bruto)
