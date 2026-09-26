@@ -30,12 +30,15 @@ trinta municípios é a diferença entre coletar e ser bloqueado.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
+
+logger = logging.getLogger(__name__)
 
 #: Como o coletor se identifica. O mesmo token é usado para casar os grupos
 #: `User-agent` do arquivo.
@@ -116,7 +119,9 @@ def parse_robots(texto: str, user_agent: str = USER_AGENT) -> dict:
                 atuais = []
                 agente_esperando = True
             atuais.append(valor.lower())
-            grupos.setdefault(valor.lower(), {"allow": [], "disallow": [], "delay": None})
+            grupos.setdefault(
+                valor.lower(), {"allow": [], "disallow": [], "delay": None}
+            )
             continue
 
         agente_esperando = False
@@ -137,7 +142,7 @@ def parse_robots(texto: str, user_agent: str = USER_AGENT) -> dict:
                 try:
                     grupo["delay"] = float(valor.replace(",", "."))
                 except ValueError:
-                    pass
+                    logger.warning("Falha ao ler crawl-delay: %r", valor)
 
     agente = user_agent.lower()
     escolhido = None
