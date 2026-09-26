@@ -231,7 +231,7 @@ def test_report_filename_empty_string():
     assert filename == "Pre_Analise_empreendimento.pdf"
 
 
-@patch("app.services.report_builder.RegulatoryReportGenerator")
+@patch("app.services.report_builder.pdf_report_generator")
 def test_build_report(mock_generator):
     mock_generator.generate_pdf.return_value = b"fake-pdf-content"
 
