@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   FileCheck,
@@ -103,9 +103,14 @@ export default function ApprovalsPage() {
     loadVersions();
   }, [loadVersions]);
 
+  const initializedVersionId = useRef<string | null>(null);
+
   // O rascunho parte sempre da versão vigente.
   useEffect(() => {
     if (!currentVersion) return;
+    if (initializedVersionId.current === currentVersion.id) return;
+    initializedVersionId.current = currentVersion.id;
+
     setDraft(
       Object.fromEntries(
         PARAMETERS.map(({ key }) => [key, currentVersion[key]])
@@ -113,7 +118,7 @@ export default function ApprovalsPage() {
     );
     setChangeReason("");
     setReportError(null);
-  }, [currentVersion?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentVersion]);
 
   const dirtyKeys = useMemo(() => {
     if (!currentVersion) return [];
