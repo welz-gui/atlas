@@ -1,6 +1,8 @@
 """Extração assistida — o extrator não pode inventar medida alguma."""
 
 import pytest
+import re
+from unittest.mock import patch
 
 from app.services.pdf_parser import EXPECTED_FIELDS, PDFPlanParser, parse_number
 
@@ -124,3 +126,82 @@ def test_extrai_de_pdf_real_com_camada_de_texto():
 )
 def test_normalizacao_de_numeros(raw, expected):
     assert parse_number(raw) == expected
+
+def test_extract_float_patterns_invalid_number_format():
+    """Test that a float pattern matched but with an invalid number value produces a warning."""
+    # "Area do Terreno: " matches lot_area pattern
+    # We provide a value that parse_number will return None for, e.g., "1,234.56.7"
+    text = "Área do Terreno: 1,234.56.7 m²"
+    res = PDFPlanParser.parse_text_content(text)
+
+    assert res["lot_area"] is None
+    assert any("valor '1,234.56.7' não pôde ser interpretado." in w for w in res["warnings"])
+
+def test_extract_int_patterns_invalid_number_format():
+    """Test that an int pattern matched but with an invalid number value produces a warning."""
+    mock_patterns = [("floors", re.compile(r"Pavimentos: (.*)"), "pavimentos")]
+    with patch("app.services.pdf_parser._COMPILED_INT_PATTERNS", mock_patterns):
+        res = PDFPlanParser.parse_text_content("Pavimentos: abc")
+        assert res["floors"] is None
+        assert any("Nº de Pavimentos: valor 'abc' não pôde ser interpretado." in w for w in res["warnings"])
+
+
+def test_extract_text_empty_file():
+    text, warnings = PDFPlanParser.extract_text(b"")
+    assert text == ""
+    assert warnings == ["Arquivo vazio."]
+
+def test_extract_text_pypdf_import_error():
+    from unittest.mock import patch
+    with patch.dict("sys.modules", {"pypdf": None}):
+        text, warnings = PDFPlanParser.extract_text(b"%PDF-1.4 dummy", "prancha.pdf")
+        assert text == ""
+        assert any("Biblioteca de leitura de PDF indisponível no servidor" in w for w in warnings)
+
+def test_extract_text_pypdf_read_error():
+    from unittest.mock import patch
+    with patch("pypdf.PdfReader", side_effect=Exception("Corrupted PDF")):
+        text, warnings = PDFPlanParser.extract_text(b"%PDF-1.4 dummy", "prancha.pdf")
+        assert text == ""
+        assert any("Falha ao ler o PDF: Corrupted PDF" in w for w in warnings)
+
+def test_extract_text_unicode_decode_error():
+    # Pass arbitrary bytes that can't be decoded as utf-8 and don't start with %PDF-
+    invalid_bytes = b"\xff\xfe\x00\x00"
+    text, warnings = PDFPlanParser.extract_text(invalid_bytes, "document.rtf")
+    assert text == ""
+    assert any("Formato de 'document.rtf' não suportado pela extração" in w for w in warnings)
+
+def test_extract_text_pdf_no_text_layer():
+    from unittest.mock import patch
+
+    class MockPage:
+        def extract_text(self):
+            return None
+
+    class MockReader:
+        pages = [MockPage()]
+
+    with patch("pypdf.PdfReader", return_value=MockReader()):
+        text, warnings = PDFPlanParser.extract_text(b"%PDF-1.4 dummy", "prancha.pdf")
+        assert text == ""
+        assert any("O PDF não contém camada de texto" in w for w in warnings)
+
+def test_extract_text_pypdf_system_exit():
+    from unittest.mock import patch
+    import pytest
+
+    # Check that KeyboardInterrupt or SystemExit are re-raised and not swallowed
+    with patch("builtins.__import__", side_effect=SystemExit):
+        with pytest.raises(SystemExit):
+            PDFPlanParser.extract_text(b"%PDF-1.4 dummy")
+
+def test_parse_number_regional_logic():
+    # Additional test cases to strengthen coverage for parse_number
+    # although it was covered by parameterization, we want to ensure
+    # we explicitly test the required logic.
+    assert parse_number("1.000,50") == 1000.50
+    assert parse_number("1,000.50") == 1000.50
+    assert parse_number("450,00") == 450.0
+    assert parse_number("450.00") == 450.0
+    assert parse_number("1.234") == 1234.0
