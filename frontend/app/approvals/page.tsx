@@ -104,6 +104,11 @@ export default function ApprovalsPage() {
   }, [loadVersions]);
 
   // O rascunho parte sempre da versão vigente.
+  //
+  // A dependência é o **id** da versão, de propósito: `currentVersion` muda de
+  // identidade a cada refetch de `projects` (foco da janela, reconexão), e
+  // depender do objeto zeraria o que a pessoa está editando. Por isso o
+  // `eslint-disable` abaixo não é dívida — tentar "corrigi-lo" é uma regressão.
   useEffect(() => {
     if (!currentVersion) return;
     setDraft(
