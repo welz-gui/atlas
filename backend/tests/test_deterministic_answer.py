@@ -1,4 +1,3 @@
-import pytest
 from app.ai.service import deterministic_answer, QueryContext
 from app.ai.retrieval import RetrievedRule
 from app.regulatory.catalog import RegulatoryCatalog, Rule, RuleSource, RuleState
