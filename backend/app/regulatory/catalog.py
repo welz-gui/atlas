@@ -17,6 +17,11 @@ from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 import yaml
+
+try:
+    from yaml import CSafeLoader as SafeLoader
+except ImportError:
+    from yaml import SafeLoader
 from sqlalchemy.orm import Session
 
 from app.regulatory.jurisdiction import jurisdiction_chain
@@ -346,7 +351,7 @@ class RegulatoryCatalog:
             with open(
                 os.path.join(data_dir, filename), "r", encoding="utf-8"
             ) as handle:
-                payload = yaml.safe_load(handle) or {}
+                payload = yaml.load(handle, Loader=SafeLoader) or {}
 
             jurisdiction = (payload.get("jurisdiction") or {}).get("code")
             if not jurisdiction:
