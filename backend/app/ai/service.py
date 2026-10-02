@@ -221,6 +221,12 @@ def _record(db: Session, params: RecordParams) -> AIInteraction:
 # Resposta determinística — o piso, não o improviso
 # =============================================================================
 
+def _citation(rule: Rule) -> str:
+    """Fonte como o usuário a vê. O artigo só aparece se a regra foi validada
+    por pessoa: é a promessa que `_unvalidated_warning` faz na mesma resposta."""
+    return f"{rule.title} — {rule.source.citation(include_article=rule.is_publishable)}"
+
+
 def _unvalidated_warning(rules: Sequence[Rule]) -> Optional[str]:
     pendentes = [r for r in rules if not r.is_publishable]
     if not pendentes:
@@ -260,7 +266,7 @@ def _format_retrieved_rules(
                 f"'{statuses[rule.rule_id]}'."
             )
         lines.append(linha)
-        citations.append(f"{rule.title} — {rule.source.citation()}")
+        citations.append(_citation(rule))
         if rule.check:
             actions.append(
                 f"Conferir '{rule.check['field']}' no projeto contra o limite "
@@ -478,7 +484,7 @@ def _process_model_response(
     # A citação legal é resolvida pelo Atlas, a partir do catálogo — nunca pelo
     # texto que o modelo escreveu.
     regras_citadas = [item.rule for item in retrieved if item.rule.rule_id in citadas]
-    citacoes = [f"{r.title} — {r.source.citation()}" for r in regras_citadas]
+    citacoes = [_citation(r) for r in regras_citadas]
 
     warnings: List[str] = []
     aviso = _unvalidated_warning(regras_citadas)
@@ -745,23 +751,24 @@ def _process_draft_batch(
         db.add_all(novas_regras)
         db.flush()
 
-        eventos = []
-        for rule in novas_regras:
-            eventos.append(
-                RuleValidationEvent(
-                    rule_id=rule.id,
-                    from_state=None,
-                    to_state=RuleState.RASCUNHO_EXTRAIDO_POR_IA,
-                    action="extraida_por_ia",
-                    notes=(
-                        f"Extraída por {result.provider}/{result.model} a partir de texto "
-                        f"legal enviado por {user.name}. Aguarda conferência humana."
-                    ),
-                    actor_id=user.id,
-                    actor_name=user.name,
-                )
+        notes_template = (
+            f"Extraída por {result.provider}/{result.model} a partir de texto "
+            f"legal enviado por {user.name}. Aguarda conferência humana."
+        )
+
+        eventos = [
+            RuleValidationEvent(
+                rule_id=rule.id,
+                from_state=None,
+                to_state=RuleState.RASCUNHO_EXTRAIDO_POR_IA,
+                action="extraida_por_ia",
+                notes=notes_template,
+                actor_id=user.id,
+                actor_name=user.name,
             )
-            criadas.append(rule.id)
+            for rule in novas_regras
+        ]
+        criadas.extend(rule.id for rule in novas_regras)
 
         db.add_all(eventos)
 
