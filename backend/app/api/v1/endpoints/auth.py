@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_permission, tenant_query
@@ -209,10 +209,16 @@ def consume_second_factor(db: Session, user: User, code: str) -> bool:
             db.commit()
         return True
 
-    for recovery in user.recovery_codes:
-        if recovery.used_at is None and mfa.verify_recovery_code(
-            code, recovery.code_hash
-        ):
+    recovery_codes = db.scalars(
+        select(MFARecoveryCode)
+        .where(
+            MFARecoveryCode.user_id == user.id,
+            MFARecoveryCode.used_at.is_(None)
+        )
+    ).all()
+
+    for recovery in recovery_codes:
+        if mfa.verify_recovery_code(code, recovery.code_hash):
             recovery.used_at = datetime.utcnow()
             db.commit()
             return True
