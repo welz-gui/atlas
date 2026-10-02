@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import {
   Calendar,
   FolderKanban,
@@ -93,6 +93,18 @@ export default function PlanPage() {
     }
   };
 
+  const tasksByStatus = useMemo(() => {
+    const grouped: Record<string, TaskItem[]> = {};
+    for (let i = 0; i < tasks.length; i++) {
+      const task = tasks[i];
+      if (!grouped[task.status]) {
+        grouped[task.status] = [];
+      }
+      grouped[task.status].push(task);
+    }
+    return grouped;
+  }, [tasks]);
+
   return (
     <div className="space-y-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
@@ -174,7 +186,7 @@ export default function PlanPage() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                 {COLUMNS.map((column) => {
-                  const columnTasks = tasks.filter((t) => t.status === column.key);
+                  const columnTasks = tasksByStatus[column.key] || [];
                   return (
                     <div
                       key={column.key}
