@@ -745,23 +745,24 @@ def _process_draft_batch(
         db.add_all(novas_regras)
         db.flush()
 
-        eventos = []
-        for rule in novas_regras:
-            eventos.append(
-                RuleValidationEvent(
-                    rule_id=rule.id,
-                    from_state=None,
-                    to_state=RuleState.RASCUNHO_EXTRAIDO_POR_IA,
-                    action="extraida_por_ia",
-                    notes=(
-                        f"Extraída por {result.provider}/{result.model} a partir de texto "
-                        f"legal enviado por {user.name}. Aguarda conferência humana."
-                    ),
-                    actor_id=user.id,
-                    actor_name=user.name,
-                )
+        notes_template = (
+            f"Extraída por {result.provider}/{result.model} a partir de texto "
+            f"legal enviado por {user.name}. Aguarda conferência humana."
+        )
+
+        eventos = [
+            RuleValidationEvent(
+                rule_id=rule.id,
+                from_state=None,
+                to_state=RuleState.RASCUNHO_EXTRAIDO_POR_IA,
+                action="extraida_por_ia",
+                notes=notes_template,
+                actor_id=user.id,
+                actor_name=user.name,
             )
-            criadas.append(rule.id)
+            for rule in novas_regras
+        ]
+        criadas.extend(rule.id for rule in novas_regras)
 
         db.add_all(eventos)
 
