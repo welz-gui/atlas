@@ -68,9 +68,8 @@ def requeue_orphans(queue_name: str, older_than_minutes: int = 5) -> int:
             )
             .all()
         )
-        for job in orphans:
-            broker.publish(job.id, queue_name)
         if orphans:
+            broker.publish_bulk([job.id for job in orphans], queue_name)
             logger.info("%d trabalho(s) órfão(s) republicado(s).", len(orphans))
         return len(orphans)
     finally:

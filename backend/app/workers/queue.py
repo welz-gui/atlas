@@ -59,6 +59,11 @@ class QueueBackend(ABC):
     def publish(self, job_id: str, queue: str = "default") -> None:
         """Avisa que há trabalho a fazer."""
 
+    def publish_bulk(self, job_ids: list[str], queue: str = "default") -> None:
+        """Publica vários trabalhos de uma vez."""
+        for job_id in job_ids:
+            self.publish(job_id, queue)
+
     @abstractmethod
     def consume(self, queue: str = "default", timeout: int = 5) -> Optional[str]:
         """Bloqueia até haver trabalho, ou devolve None ao esgotar o tempo."""
@@ -82,6 +87,9 @@ class InlineQueue(QueueBackend):
     name = "inline"
 
     def publish(self, job_id: str, queue: str = "default") -> None:
+        return None
+
+    def publish_bulk(self, job_ids: list[str], queue: str = "default") -> None:
         return None
 
     def consume(self, queue: str = "default", timeout: int = 5) -> Optional[str]:
@@ -132,6 +140,10 @@ class RedisQueue(QueueBackend):
 
     def publish(self, job_id: str, queue: str = "default") -> None:
         self.client.lpush(self._key(queue), job_id)
+
+    def publish_bulk(self, job_ids: list[str], queue: str = "default") -> None:
+        if job_ids:
+            self.client.lpush(self._key(queue), *job_ids)
 
     def consume(self, queue: str = "default", timeout: int = 5) -> Optional[str]:
         return self.client.blmove(
