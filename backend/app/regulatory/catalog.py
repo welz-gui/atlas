@@ -105,10 +105,12 @@ class RuleSource:
         """Uma fonte só é verificada quando aponta para um artigo concreto."""
         return bool(self.document and self.article)
 
-    def citation(self) -> str:
+    def citation(self, include_article: bool = True) -> str:
+        """Texto da fonte. `include_article=False` deixa o artigo de fora —
+        é o que se usa para regra que ninguém conferiu (§7.5)."""
         if not self.document:
             return "Fonte não informada"
-        if self.article:
+        if self.article and include_article:
             return f"{self.document}, {self.article}"
         return f"{self.document} (artigo não verificado)"
 
