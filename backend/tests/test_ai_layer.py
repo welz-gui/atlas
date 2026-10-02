@@ -364,6 +364,16 @@ def _batch():
     )
 
 
+def test_extracao_sucesso_happy_path(db_session, validator, seeded_catalog):
+    provider = FakeProvider(parsed=_batch())
+    resultado = extract_rule_drafts(
+        "texto legal",
+        ExtractionContext(db=db_session, user=validator, jurisdiction="BR-RS-4311403", provider=provider),
+    )
+    assert len(resultado.created_rule_ids) == 1
+    assert not resultado.error
+
+
 def test_rascunho_nasce_como_rascunho_e_fora_do_motor(
     db_session, validator, seeded_catalog
 ):
@@ -474,6 +484,17 @@ def test_extracao_sem_provedor_recusa_com_motivo(db_session, validator, seeded_c
 
     assert resultado.created_rule_ids == []
     assert "Nenhum provedor de modelo configurado" in resultado.error
+    assert resultado.interaction_id is not None
+
+
+def test_extracao_com_falha(db_session, validator, seeded_catalog):
+    provider = FakeProvider(error="Internal model error")
+    resultado = extract_rule_drafts(
+        "texto legal",
+        ExtractionContext(db=db_session, user=validator, jurisdiction="BR-RS-4311403", provider=provider),
+    )
+
+    assert resultado.created_rule_ids == []
     assert resultado.interaction_id is not None
 
 
