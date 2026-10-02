@@ -107,6 +107,7 @@ antes de ser conferida e publicada por uma pessoa.\
 # Resultado do assistente
 # =============================================================================
 
+
 @dataclass
 class AssistantResponse:
     answer: str
@@ -221,6 +222,7 @@ def _record(db: Session, params: RecordParams) -> AIInteraction:
 # Resposta determinística — o piso, não o improviso
 # =============================================================================
 
+
 def _unvalidated_warning(rules: Sequence[Rule]) -> Optional[str]:
     pendentes = [r for r in rules if not r.is_publishable]
     if not pendentes:
@@ -252,7 +254,9 @@ def _format_retrieved_rules(
             if rule.check
             else "verificação documental (não derivável de parâmetros numéricos)"
         )
-        pendente = "" if rule.is_publishable else " — regra ainda não validada tecnicamente"
+        pendente = (
+            "" if rule.is_publishable else " — regra ainda não validada tecnicamente"
+        )
         linha = f"• {rule.title}: {limite}{pendente}."
         if rule.rule_id in statuses:
             linha += (
@@ -422,62 +426,66 @@ def _return_baseline(
     return baseline
 
 
-def _process_model_response(
-    context: AskContext,
-    baseline: AssistantResponse,
-    request_hash: str,
-    retrieved: Sequence[RetrievedRule],
-    retrieved_keys: Sequence[str],
-    engine: AIProvider,
-    result: AIResult,
+@dataclass
+class ModelResponseContext:
+    context: AskContext
+    baseline: AssistantResponse
+    request_hash: str
+    retrieved: Sequence[RetrievedRule]
+    retrieved_keys: Sequence[str]
+    engine: AIProvider
+    result: AIResult
+
+
+def _handle_invented_rules(
+    ctx: ModelResponseContext, parsed: AssistantAnswer, citadas: List[str]
 ) -> AssistantResponse:
-    parsed: AssistantAnswer = result.parsed  # type: ignore[assignment]
+    return _return_baseline(
+        ctx.context,
+        baseline=ctx.baseline,
+        request_hash=ctx.request_hash,
+        retrieved_keys=ctx.retrieved_keys,
+        cited_keys=citadas,
+        provider_name=ctx.engine.name,
+        warning=(
+            "A resposta do modelo referenciou regra fora do catálogo consultado e foi "
+            "substituída pela consulta determinística."
+        ),
+        result=ctx.result,
+        response_json=parsed.model_dump(),
+        grounded=False,
+    )
 
-    # Conferência: chave citada que não estava no contexto é descartada.
-    permitidas = set(retrieved_keys)
-    citadas = [key for key in parsed.cited_rule_keys if key in permitidas]
-    inventadas = [key for key in parsed.cited_rule_keys if key not in permitidas]
-    grounded = not inventadas and parsed.answered_from_context
 
-    if inventadas:
-        return _return_baseline(
-            context,
-            baseline=baseline,
-            request_hash=request_hash,
-            retrieved_keys=retrieved_keys,
-            cited_keys=citadas,
-            provider_name=engine.name,
-            warning=(
-                "A resposta do modelo referenciou regra fora do catálogo consultado e foi "
-                "substituída pela consulta determinística."
-            ),
-            result=result,
-            response_json=parsed.model_dump(),
-            grounded=False,
-        )
+def _handle_insufficient_context(
+    ctx: ModelResponseContext, parsed: AssistantAnswer, citadas: List[str]
+) -> AssistantResponse:
+    return _return_baseline(
+        ctx.context,
+        baseline=ctx.baseline,
+        request_hash=ctx.request_hash,
+        retrieved_keys=ctx.retrieved_keys,
+        cited_keys=citadas,
+        provider_name=ctx.engine.name,
+        warning=(
+            "O modelo indicou que o catálogo não sustenta uma resposta completa para "
+            "esta consulta."
+        ),
+        result=ctx.result,
+        response_json=parsed.model_dump(),
+        grounded=True,
+    )
 
-    if not parsed.answered_from_context:
-        # O próprio modelo disse que o contexto não bastava. Melhor entregar o
-        # que o catálogo tem do que uma resposta que ele mesmo não sustenta.
-        return _return_baseline(
-            context,
-            baseline=baseline,
-            request_hash=request_hash,
-            retrieved_keys=retrieved_keys,
-            cited_keys=citadas,
-            provider_name=engine.name,
-            warning=(
-                "O modelo indicou que o catálogo não sustenta uma resposta completa para "
-                "esta consulta."
-            ),
-            result=result,
-            response_json=parsed.model_dump(),
-            grounded=True,
-        )
 
-    # A citação legal é resolvida pelo Atlas, a partir do catálogo — nunca pelo
-    # texto que o modelo escreveu.
-    regras_citadas = [item.rule for item in retrieved if item.rule.rule_id in citadas]
+def _build_successful_response(
+    ctx: ModelResponseContext,
+    parsed: AssistantAnswer,
+    citadas: List[str],
+    grounded: bool,
+) -> AssistantResponse:
+    regras_citadas = [
+        item.rule for item in ctx.retrieved if item.rule.rule_id in citadas
+    ]
     citacoes = [f"{r.title} — {r.source.citation()}" for r in regras_citadas]
 
     warnings: List[str] = []
@@ -492,23 +500,23 @@ def _process_model_response(
         matched_rules=citadas,
         is_ai_generated=True,
         method="modelo_de_linguagem_sobre_catalogo",
-        model=result.model,
+        model=ctx.result.model,
         grounded=grounded,
         warnings=warnings,
     )
 
     interaction = _record(
-        context.db,
+        ctx.context.db,
         RecordParams(
-            organization_id=context.user.organization_id,
-            user=context.user,
-            project=context.project,
+            organization_id=ctx.context.user.organization_id,
+            user=ctx.context.user,
+            project=ctx.context.project,
             purpose="consulta_normativa",
-            prompt=context.query,
-            request_hash=request_hash,
-            retrieved_keys=retrieved_keys,
+            prompt=ctx.context.query,
+            request_hash=ctx.request_hash,
+            retrieved_keys=ctx.retrieved_keys,
             cited_keys=citadas,
-            result=result,
+            result=ctx.result,
             response_json={
                 k: v
                 for k, v in resposta.__dict__.items()
@@ -519,6 +527,23 @@ def _process_model_response(
     )
     resposta.interaction_id = interaction.id
     return resposta
+
+
+def _process_model_response(ctx: ModelResponseContext) -> AssistantResponse:
+    parsed: AssistantAnswer = ctx.result.parsed  # type: ignore[assignment]
+
+    permitidas = set(ctx.retrieved_keys)
+    citadas = [key for key in parsed.cited_rule_keys if key in permitidas]
+    inventadas = [key for key in parsed.cited_rule_keys if key not in permitidas]
+    grounded = not inventadas and parsed.answered_from_context
+
+    if inventadas:
+        return _handle_invented_rules(ctx, parsed, citadas)
+
+    if not parsed.answered_from_context:
+        return _handle_insufficient_context(ctx, parsed, citadas)
+
+    return _build_successful_response(ctx, parsed, citadas, grounded)
 
 
 def _ask_model(
@@ -579,13 +604,15 @@ def _ask_model(
         )
 
     return _process_model_response(
-        context,
-        baseline=baseline,
-        request_hash=request_hash,
-        retrieved=retrieved,
-        retrieved_keys=retrieved_keys,
-        engine=engine,
-        result=result,
+        ModelResponseContext(
+            context=context,
+            baseline=baseline,
+            request_hash=request_hash,
+            retrieved=retrieved,
+            retrieved_keys=retrieved_keys,
+            engine=engine,
+            result=result,
+        )
     )
 
 
@@ -652,6 +679,7 @@ def ask(context: AskContext) -> AssistantResponse:
 # Extração de rascunhos de regra
 # =============================================================================
 
+
 @dataclass
 class DraftResult:
     created_rule_ids: List[str] = field(default_factory=list)
@@ -690,7 +718,9 @@ def _draft_to_rule(
         jurisdiction=jurisdiction,
         title=draft.title,
         state=RuleState.RASCUNHO_EXTRAIDO_POR_IA,
-        severity=draft.severity if draft.severity in {"bloqueio", "alerta"} else "alerta",
+        severity=draft.severity
+        if draft.severity in {"bloqueio", "alerta"}
+        else "alerta",
         applies_to=applies_to,
         check=check,
         requires_manual_review=check is None,
@@ -871,7 +901,9 @@ def extract_rule_drafts(legal_text: str, context: ExtractionContext) -> DraftRes
     user = context.user
     jurisdiction = context.jurisdiction
     engine = context.provider or get_provider()
-    request_hash = _request_hash(legal_text, [jurisdiction], getattr(engine, "model", None))
+    request_hash = _request_hash(
+        legal_text, [jurisdiction], getattr(engine, "model", None)
+    )
 
     if not engine.available:
         return _handle_unavailable_provider(db, user, engine, legal_text, request_hash)
@@ -891,5 +923,12 @@ def extract_rule_drafts(legal_text: str, context: ExtractionContext) -> DraftRes
 
     batch: RuleDraftBatch = result.parsed  # type: ignore[assignment]
     return _handle_successful_extraction(
-        db, user, result, batch, jurisdiction, legal_text, request_hash, context.document
+        db,
+        user,
+        result,
+        batch,
+        jurisdiction,
+        legal_text,
+        request_hash,
+        context.document,
     )
