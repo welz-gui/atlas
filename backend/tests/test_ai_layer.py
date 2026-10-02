@@ -542,3 +542,79 @@ def test_reset_provider_cache():
 
     provider3 = get_provider()
     assert provider1 is not provider3, "reset_provider_cache() should clear the cache so a new instance is returned"
+
+
+# =============================================================================
+# Citação — artigo de regra não validada não aparece (§7.5)
+# =============================================================================
+
+
+def _regra_com_artigo(db_session, rule_key, artigo):
+    regra = (
+        db_session.query(RegulatoryRule)
+        .filter(RegulatoryRule.rule_key == rule_key)
+        .one()
+    )
+    regra.source_article = artigo
+    db_session.commit()
+    return regra
+
+
+def test_resposta_deterministica_nao_cita_artigo_de_regra_nao_validada(
+    db_session, engineer, seeded_catalog
+):
+    """O aviso da resposta diz que o artigo foi omitido — tem de ser verdade."""
+    regra = _regra_com_artigo(db_session, "lajeado_recuo_frontal_z2", "Art. 99-X")
+    assert regra.validated_by_name is None
+
+    resposta = ask(
+        AskContext(
+            db=db_session, query="recuo frontal", user=engineer, provider=NullProvider()
+        )
+    )
+
+    assert any("omitida" in w for w in resposta.warnings)
+    assert not any("Art. 99-X" in c for c in resposta.law_citations)
+    assert any("artigo não verificado" in c for c in resposta.law_citations)
+
+
+def test_resposta_do_modelo_tambem_nao_cita_artigo_de_regra_nao_validada(
+    db_session, engineer, seeded_catalog
+):
+    _regra_com_artigo(db_session, "lajeado_recuo_frontal_z2", "Art. 99-X")
+    provider = FakeProvider(
+        parsed=AssistantAnswer(
+            answer="Recuo frontal mínimo: 4,00 m.",
+            cited_rule_keys=["lajeado_recuo_frontal_z2"],
+            answered_from_context=True,
+        )
+    )
+
+    resposta = ask(
+        AskContext(
+            db=db_session, query="qual o recuo frontal", user=engineer, provider=provider
+        )
+    )
+
+    assert resposta.is_ai_generated is True
+    assert not any("Art. 99-X" in c for c in resposta.law_citations)
+
+
+def test_regra_validada_continua_citando_o_artigo(
+    db_session, engineer, validator, seeded_catalog
+):
+    """O outro lado: omitir tem de valer só para o que não foi conferido."""
+    regra = _regra_com_artigo(db_session, "lajeado_recuo_frontal_z2", "Art. 45")
+    regra.state = RuleState.VIGENTE
+    regra.validated_by_name = validator.name
+    regra.validated_at = datetime.utcnow()
+    db_session.commit()
+
+    resposta = ask(
+        AskContext(
+            db=db_session, query="recuo frontal", user=engineer, provider=NullProvider()
+        )
+    )
+
+    assert any("Art. 45" in c for c in resposta.law_citations)
+
