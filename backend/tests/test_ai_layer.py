@@ -123,6 +123,44 @@ def test_recuperacao_ordena_por_relevancia(catalog_rules):
     assert resultados[0].rule_key == "lajeado_taxa_permeabilidade_min_z2"
 
 
+@pytest.mark.parametrize("consulta", ["", "   ", "a o de os"])
+def test_consulta_vazia_ou_so_de_palavras_vazias_nao_recupera_nada(
+    catalog_rules, consulta
+):
+    assert retrieve(consulta, catalog_rules) == []
+
+
+def test_sem_regras_nao_ha_o_que_recuperar():
+    assert retrieve("taxa de permeabilidade", []) == []
+
+
+def test_recuperacao_ignora_caixa(catalog_rules):
+    minuscula = retrieve("taxa de permeabilidade", catalog_rules)
+    maiuscula = retrieve("TAXA DE PERMEABILIDADE", catalog_rules)
+
+    assert minuscula
+    assert [r.rule_key for r in minuscula] == [r.rule_key for r in maiuscula]
+
+
+def test_resultado_ordena_por_escore_e_desempata_pela_chave(catalog_rules):
+    """"taxa recuo" tem empate de escore: é ele que expõe o critério de desempate."""
+    resultados = retrieve("taxa recuo", catalog_rules)
+
+    assert len(resultados) >= 3
+    assert len({r.score for r in resultados}) < len(resultados), "precisa haver empate"
+    ordem = [(-r.score, r.rule_key) for r in resultados]
+    assert ordem == sorted(ordem)
+
+
+@pytest.mark.parametrize("limite", [1, 2, 3])
+def test_limite_devolve_o_inicio_da_lista_ordenada(catalog_rules, limite):
+    completo = retrieve("taxa recuo", catalog_rules)
+
+    limitado = retrieve("taxa recuo", catalog_rules, limit=limite)
+
+    assert [r.rule_key for r in limitado] == [r.rule_key for r in completo[:limite]]
+
+
 # =============================================================================
 # Assistente com modelo
 # =============================================================================
@@ -464,6 +502,33 @@ def test_exigencia_sem_numero_vira_analise_manual(db_session, validator, seeded_
 
     assert regra.check is None
     assert regra.requires_manual_review is True
+
+
+def test_falha_do_provedor_na_extracao_nao_cria_rascunho(
+    db_session, validator, seeded_catalog
+):
+    """Modelo que falha não pode deixar regra pela metade — e a falha fica registrada."""
+    antes = db_session.query(RegulatoryRule).count()
+
+    resultado = extract_rule_drafts(
+        "texto legal",
+        ExtractionContext(
+            db=db_session,
+            user=validator,
+            jurisdiction="BR-RS-4311403",
+            provider=FakeProvider(error="Limite de requisições do provedor atingido."),
+        ),
+    )
+
+    assert resultado.created_rule_ids == []
+    assert "Limite de requisições" in resultado.error
+    assert db_session.query(RegulatoryRule).count() == antes
+
+    registro = db_session.query(AIInteraction).order_by(
+        AIInteraction.created_at.desc()
+    ).first()
+    assert registro.id == resultado.interaction_id
+    assert "Limite de requisições" in registro.error
 
 
 def test_extracao_sem_provedor_recusa_com_motivo(db_session, validator, seeded_catalog):
