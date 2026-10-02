@@ -4,14 +4,14 @@ Documento vivo. Consolida o **roadmap estratégico** do plano (§9 e §10 de
 [`PLANO_DE_IMPLEMENTACAO_v2.md`](PLANO_DE_IMPLEMENTACAO_v2.md)) com o **estado
 real do código** e o **caminho de execução** de cada estágio.
 
-- Última atualização: **2026-09-26**
-- Base avaliada: `master` em `e07dc41`, espelhada em
+- Última atualização: **2026-10-02**
+- Base avaliada: `master` em `f24f4ba`, espelhada em
   [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
   estágios foi levantado em `7dc50d2` e continua valendo, com uma exceção
   registrada abaixo: o **Estágio 6 deixou de ser "nada construído"**.
 - **A Fase D está encerrada, exceto pelo D3** — que nunca foi de engenharia.
   Ver o registro adiante.
-- Suíte: **534 casos de backend** (eram 199 em `7dc50d2`) e **65 de
+- Suíte: **551 casos de backend** (eram 199 em `7dc50d2`) e **65 de
   frontend** (8 arquivos, incluindo componentes — `ErrorBanner`, `StatusChip`,
   `EmptyState`, `OfflineBar`, `AppShell`, `Navbar` — e a fila offline).
   Mais 13 de integração e 6 de RLS, que só rodam na CI porque exigem
@@ -223,7 +223,7 @@ delas falhar, pare e conserte antes de continuar a construir.
 
 | Worktree | Branch | PR | Situação |
 |---|---|---|---|
-| `worktrees/roadmap-update-6` | `docs/atualiza-roadmap-sexta-leva` | — | 🟨 A frente que trouxe esta atualização. |
+| `worktrees/roadmap-update-7` | `docs/atualiza-roadmap-setima-leva` | — | 🟨 A frente que trouxe esta atualização. |
 
 Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
@@ -241,7 +241,7 @@ Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
 ## Estado atual em uma página
 
-**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 534 testes; RLS ativa, MFA
+**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 551 testes; RLS ativa, MFA
 por TOTP, log em JSON com correlação e sondas de vida e prontidão):
 
 ```
@@ -1346,10 +1346,10 @@ um sem escolher nenhum. Suíte: 353 → 367.
 si. Depende de decisão e de conta, não de código — e, como o D3, não é
 engenharia que o trava.
 
-### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-09-26)
+### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-10-02)
 
-Um agente externo (Jules, do Google) abriu seis levas de PRs contra o
-repositório — 30, 42, 24, 7, 38 e 23 — do tipo "code health": remoção de import morto,
+Um agente externo (Jules, do Google) abriu sete levas de PRs contra o
+repositório — 30, 42, 24, 7, 38, 23 e 12 — do tipo "code health": remoção de import morto,
 refator de função complexa, teste de caminho de erro, correção de N+1, e
 algumas de segurança. Nenhuma foi mesclada às cegas por CI verde; cada uma foi
 lida contra o código real antes de decidir. O que isso revelou vale mais do
@@ -1432,6 +1432,25 @@ que qualquer regra individual corrigida:
   D já tinha encontrado com a chave de assinatura: a lista de campos
   sensíveis é uma lista manual, e todo segredo novo precisa entrar nela.
   Aceita porque foi *demonstrada*, não porque a PR dizia "vazamento";
+
+- **uma resposta que afirmava o que não fazia.** `_unvalidated_warning` diz,
+  na resposta do assistente, que as regras em validação "tiveram a referência
+  de artigo **omitida**" — mas o código citava `rule.source.citation()` sem
+  olhar `is_publishable`. Um `source_article` preenchido (rascunho extraído por
+  IA, ou cadastro ainda não conferido) saía em claro **na mesma resposta que
+  dizia tê-lo omitido**: a família "afirma sem apurar", agora em texto de ajuda
+  ao usuário. Achado ao revisar os testes de `deterministic_answer` (#264) e
+  **reproduzido pelo caminho real** (`ask()`, com `source_article = "Art.
+  99-X"` numa regra `em_validacao`) antes de corrigir. Corrigido em #274 com os
+  testes escritos antes — dois falham em `master`; o contra-teste (regra
+  *validada* continua citando o artigo) passa antes e depois, para a omissão
+  não virar apagão. A decisão por `is_publishable` e não por
+  `RuleSource.is_verified` importa: `is_verified` só quer dizer "tem documento
+  e artigo", e seria verdadeiro justamente para o rascunho que extraiu os
+  dois. O defeito reproduzido está no assistente; o motor e o laudo usam o
+  mesmo `citation()`, mas gravam `source_is_verified` e o laudo sai "USO
+  INTERNO" sem regra conferida — **não investiguei se isso basta**. Ficou em
+  *Dívidas técnicas*;
 
 **Padrões que se repetiram e mudaram como a revisão foi feita:**
 
@@ -1537,6 +1556,42 @@ que qualquer regra individual corrigida:
   produção — mesclada, #230), o que só se percebe abrindo o diff em vez de
   apagar por reflexo;
 
+- **"otimização" sem problema medido, desta vez refutada lendo o chamador.**
+  Uma PR "otimizava a republicação de órfãos da fila" com `publish_bulk` — mas
+  `requeue_orphans` roda **uma vez, na partida do worker, e só com a flag
+  `--recover`**, antes do laço;
+  outra "corrigia N+1" em `user.recovery_codes`, um relationship *lazy* que
+  traz a coleção inteira em **uma** consulta (o custo real é o argon2 por
+  código, que a mudança não toca); outra acrescentava um cache em memória para
+  uma consulta indexada, mas em acerto ainda fazia `db.get(...)` — voltava ao
+  banco, com estado global de brinde. Nenhuma exigiu benchmark: bastou abrir
+  quem chama e como o relationship carrega;
+- **o desenho recusado volta com outro nome.** Duas PRs reapresentaram, para
+  `_process_model_response`, o objeto-contexto que carrega o resultado de cada
+  etapa (`AskModelConfig`, `ModelResponseContext`) — o mesmo de #218/#221,
+  recusado semanas antes — e uma delas ainda **apagava os comentários que
+  documentam a invariante I9** ("a citação legal é resolvida pelo Atlas,
+  nunca pelo texto que o modelo escreveu"). Recusar uma vez não impede a
+  volta; o que permite recusar de novo em minutos é o motivo estar escrito na
+  PR fechada;
+- **um teste que sobrevive a mutação não é forte.** Ao consolidar os testes de
+  `retrieve()`, a primeira versão do teste de `limit` **sobreviveu** à
+  mutação que embaralhava a ordem: comparava o resultado limitado com o
+  início da *própria lista mutada* (autoconsistente) e, nas consultas óbvias,
+  a ordem verdadeira coincide com a alfabética invertida. Reescrito em torno
+  do contrato `(-escore, rule_key)` e de uma consulta com **empate** de
+  escore ("taxa recuo"), que é o que expõe o desempate; depois, o desempate
+  invertido derrubou 1 teste, o `limit` pela cauda derrubou 3, e a falha do
+  provedor seguindo adiante derrubou 1. A mutação só vale se o caso discrimina
+  — e eu só soube porque rodei;
+- **verde antigo não vale, e o agregado engana.** A #275 estava verde, mas
+  fora testada antes de #274 mexer no mesmo arquivo; foi atualizada sobre o
+  `master` real e a CI reexecutada antes do merge. E `gh pr view` mostrou
+  `CANCELLED` em todos os jobs da #264, quando na verdade havia **duas**
+  execuções no mesmo SHA — uma cancelada por duplicidade, a outra com
+  sucesso; quem lê só o agregado concluiria que quebrou. Conferido pela lista
+  de execuções;
+
 Resultado: **21 PRs mescladas na primeira leva**; na segunda, **21 mescladas**
 (16 diretas + 5 reescritas) e **25 fechadas**; na terceira, **12 mescladas
 diretamente**, mais **7 refeitas em 4 PRs novas** (mesmo padrão de cachos na
@@ -1557,9 +1612,13 @@ achado pela própria leva); na sexta, **8 das 23 mescladas diretamente**
 uso —, #248) e **15 fechadas**: 10 rejeitadas ou duplicadas com o motivo
 técnico em cada uma, e 5 absorvidas em duas consolidações próprias (#258,
 #259). Mais duas PRs próprias, a da CI (#257) e a do comentário que protege o
-efeito do `exhaustive-deps` (#260). Suíte: 367 → 441 → 452 → 453 → 469 → 534
-(backend), 15 → 21 → 39 → 40 → 65 (frontend, 4 arquivos até a quarta leva, 8
-desde a quinta; a sexta não acrescentou teste de frontend).
+efeito do `exhaustive-deps` (#260); na sétima, **2 das 12 mescladas
+diretamente** (#264, depois de tirar um import sem uso, e #268), **2
+absorvidas** numa consolidação própria (#275) e **8 fechadas** com o motivo
+técnico em cada uma. Mais uma PR própria de correção (#274). Suíte: 367 → 441
+→ 452 → 453 → 469 → 534 → 551 (backend), 15 → 21 → 39 → 40 → 65 (frontend, 4
+arquivos até a quarta leva, 8 desde a quinta; a sexta e a sétima não
+acrescentaram teste de frontend).
 
 **Pendência sem solução de código:** branches de PRs já mescladas ou fechadas
 continuam reaparecendo em `origin` depois de apagadas — inclusive branches de
@@ -1693,6 +1752,7 @@ vazia.
 | Sem métricas, rastreamento nem alerta | O log estruturado existe e alimenta os três; falta para onde mandá-los | acompanha a escolha do provedor |
 | **Servidor S3 de teste sem manutenção** | A CI usa `bitnamilegacy/minio` numa tag congelada: o MinIO encerrou a distribuição comunitária (Docker Hub 404, Quay 401, `dl.min.io` 410) e a Bitnami não atualiza o arquivo. Sem correção de segurança, mas é servidor descartável de teste. Quando a imagem sumir, o caminho é um servidor S3 mantido — não outro espelho do MinIO | `.github/workflows/ci.yml` |
 | Falha intermitente em `Integração` | `test_conteudo_grande_atravessa_em_blocos` falhou **uma vez** em ~25 execuções (`ClientDisconnected` no primeiro `PutObject` de 5 MiB) e passou na repetição. Hipótese não comprovada: o passo de espera sonda `/minio/health/live` e não `/ready`. Amostra pequena demais para afirmar | `.github/workflows/ci.yml` |
+| `RuleSource.is_verified` não quer dizer "conferido por pessoa" | Só significa "tem documento **e** artigo"; o critério real é `Rule.is_publishable` (estado + validador). O assistente já omite o artigo de regra não validada (#274), mas `ai/retrieval.py` ainda entrega ao modelo `fonte_conferida` calculado por `is_verified`, e o motor grava `source_is_verified` com o mesmo critério. Não revisado se isso basta no laudo | `regulatory/catalog.py`, `ai/retrieval.py`, `services/regulatory_engine.py` |
 | **Sem provedor de hospedagem** | A imagem e a composição existem; o ambiente, não | `docker-compose.prod.yml` |
 | **Catálogo maior, validação parada** | O coletor aumenta a fila do D3 sem que ninguém a consuma | `regulatory/discovery.py` |
 | RLS não cobre `users` | Listagem de usuários tem só o filtro de aplicação; as tabelas com trabalho de cliente estão cobertas | `alembic/.../a4d7e91c5b20` |
