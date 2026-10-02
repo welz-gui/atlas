@@ -238,16 +238,16 @@ function NewProjectModal({
     setIsSaving(true);
     setError(null);
     try {
-      const numeric = Object.fromEntries(
-        NUMERIC_FIELDS.map(({ key }) => {
-          const raw = values[key];
-          // String vazia vira null: o campo não foi informado.
-          return [key, raw === undefined || raw.trim() === "" ? null : Number(raw)];
-        })
-      );
-      const identity = Object.fromEntries(
-        IDENTITY_FIELDS.map(({ key }) => [key, values[key]?.trim() || undefined])
-      );
+      const numeric = NUMERIC_FIELDS.reduce((acc, { key }) => {
+        const raw = values[key];
+        // String vazia vira null: o campo não foi informado.
+        acc[key] = raw === undefined || raw.trim() === "" ? null : Number(raw);
+        return acc;
+      }, {} as Record<string, number | null>);
+      const identity = IDENTITY_FIELDS.reduce((acc, { key }) => {
+        acc[key] = values[key]?.trim() || undefined;
+        return acc;
+      }, {} as Record<string, string | undefined>);
       const municipality = MUNICIPALITIES.find((item) => item.city_ibge === municipalityCode)!;
       await createProject({ name, zone, ...municipality, ...identity, ...numeric });
       onCreated();
