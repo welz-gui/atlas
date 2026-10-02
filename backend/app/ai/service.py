@@ -37,6 +37,7 @@ from sqlalchemy.orm import Session
 from app.ai.provider import AIProvider, AIRequest, AIResult, get_provider
 from app.ai.retrieval import RetrievedRule, format_context, retrieve
 from app.ai.schemas import AssistantAnswer, RuleDraft, RuleDraftBatch
+from app.ai.cache import _memory_cache
 from app.core.config import settings
 from app.models.domain import (
     AIInteraction,
@@ -156,8 +157,24 @@ def _lookup_cache(
 ) -> Optional[AIInteraction]:
     if settings.AI_CACHE_HOURS <= 0:
         return None
+
     cutoff = datetime.utcnow() - timedelta(hours=settings.AI_CACHE_HOURS)
-    return (
+
+    mem_cached = _memory_cache.get(organization_id, request_hash)
+    if mem_cached:
+        # Only return if it's within the cutoff
+        # Use the actual created_at from the database record
+        if mem_cached.get('created_at') and mem_cached['created_at'] >= cutoff:
+            # Note: callers expect an attached ORM instance, so we do a quick
+            # primary key lookup which hits the session identity map (very fast)
+            # or db if evicted from session, but avoids complex query execution plan
+            interaction_id = mem_cached.get('id')
+            if interaction_id:
+                return db.get(AIInteraction, interaction_id)
+        # If we got here, it's either expired or doesn't have an ID
+        pass
+
+    result = (
         db.query(AIInteraction)
         .filter(
             AIInteraction.organization_id == organization_id,
@@ -169,6 +186,15 @@ def _lookup_cache(
         .order_by(AIInteraction.created_at.desc())
         .first()
     )
+
+    if result:
+        dict_result = {
+            'id': result.id,
+            'created_at': result.created_at
+        }
+        _memory_cache.set(organization_id, request_hash, dict_result)
+
+    return result
 
 
 @dataclass
@@ -214,6 +240,13 @@ def _record(db: Session, params: RecordParams) -> AIInteraction:
     db.add(interaction)
     db.commit()
     db.refresh(interaction)
+
+    if not interaction.error and interaction.grounded:
+        dict_interaction = {
+            'id': interaction.id,
+            'created_at': interaction.created_at
+        }
+        _memory_cache.set(interaction.organization_id, interaction.request_hash, dict_interaction)
     return interaction
 
 
