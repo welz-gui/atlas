@@ -379,6 +379,17 @@ class AskContext:
     provider: Optional[AIProvider] = None
 
 
+@dataclass
+class AskModelConfig:
+    context: AskContext
+    baseline: AssistantResponse
+    request_hash: str
+    retrieved: Sequence[RetrievedRule]
+    retrieved_keys: Sequence[str]
+    engine: AIProvider
+    result: AIResult
+
+
 def _return_baseline(
     context: AskContext,
     baseline: AssistantResponse,
@@ -422,36 +433,28 @@ def _return_baseline(
     return baseline
 
 
-def _process_model_response(
-    context: AskContext,
-    baseline: AssistantResponse,
-    request_hash: str,
-    retrieved: Sequence[RetrievedRule],
-    retrieved_keys: Sequence[str],
-    engine: AIProvider,
-    result: AIResult,
-) -> AssistantResponse:
-    parsed: AssistantAnswer = result.parsed  # type: ignore[assignment]
+def _process_model_response(config: AskModelConfig) -> AssistantResponse:
+    parsed: AssistantAnswer = config.result.parsed  # type: ignore[assignment]
 
     # Conferência: chave citada que não estava no contexto é descartada.
-    permitidas = set(retrieved_keys)
+    permitidas = set(config.retrieved_keys)
     citadas = [key for key in parsed.cited_rule_keys if key in permitidas]
     inventadas = [key for key in parsed.cited_rule_keys if key not in permitidas]
     grounded = not inventadas and parsed.answered_from_context
 
     if inventadas:
         return _return_baseline(
-            context,
-            baseline=baseline,
-            request_hash=request_hash,
-            retrieved_keys=retrieved_keys,
+            config.context,
+            baseline=config.baseline,
+            request_hash=config.request_hash,
+            retrieved_keys=config.retrieved_keys,
             cited_keys=citadas,
-            provider_name=engine.name,
+            provider_name=config.engine.name,
             warning=(
                 "A resposta do modelo referenciou regra fora do catálogo consultado e foi "
                 "substituída pela consulta determinística."
             ),
-            result=result,
+            result=config.result,
             response_json=parsed.model_dump(),
             grounded=False,
         )
@@ -460,24 +463,24 @@ def _process_model_response(
         # O próprio modelo disse que o contexto não bastava. Melhor entregar o
         # que o catálogo tem do que uma resposta que ele mesmo não sustenta.
         return _return_baseline(
-            context,
-            baseline=baseline,
-            request_hash=request_hash,
-            retrieved_keys=retrieved_keys,
+            config.context,
+            baseline=config.baseline,
+            request_hash=config.request_hash,
+            retrieved_keys=config.retrieved_keys,
             cited_keys=citadas,
-            provider_name=engine.name,
+            provider_name=config.engine.name,
             warning=(
                 "O modelo indicou que o catálogo não sustenta uma resposta completa para "
                 "esta consulta."
             ),
-            result=result,
+            result=config.result,
             response_json=parsed.model_dump(),
             grounded=True,
         )
 
     # A citação legal é resolvida pelo Atlas, a partir do catálogo — nunca pelo
     # texto que o modelo escreveu.
-    regras_citadas = [item.rule for item in retrieved if item.rule.rule_id in citadas]
+    regras_citadas = [item.rule for item in config.retrieved if item.rule.rule_id in citadas]
     citacoes = [f"{r.title} — {r.source.citation()}" for r in regras_citadas]
 
     warnings: List[str] = []
@@ -492,23 +495,23 @@ def _process_model_response(
         matched_rules=citadas,
         is_ai_generated=True,
         method="modelo_de_linguagem_sobre_catalogo",
-        model=result.model,
+        model=config.result.model,
         grounded=grounded,
         warnings=warnings,
     )
 
     interaction = _record(
-        context.db,
+        config.context.db,
         RecordParams(
-            organization_id=context.user.organization_id,
-            user=context.user,
-            project=context.project,
+            organization_id=config.context.user.organization_id,
+            user=config.context.user,
+            project=config.context.project,
             purpose="consulta_normativa",
-            prompt=context.query,
-            request_hash=request_hash,
-            retrieved_keys=retrieved_keys,
+            prompt=config.context.query,
+            request_hash=config.request_hash,
+            retrieved_keys=config.retrieved_keys,
             cited_keys=citadas,
-            result=result,
+            result=config.result,
             response_json={
                 k: v
                 for k, v in resposta.__dict__.items()
@@ -579,13 +582,15 @@ def _ask_model(
         )
 
     return _process_model_response(
-        context,
-        baseline=baseline,
-        request_hash=request_hash,
-        retrieved=retrieved,
-        retrieved_keys=retrieved_keys,
-        engine=engine,
-        result=result,
+        AskModelConfig(
+            context=context,
+            baseline=baseline,
+            request_hash=request_hash,
+            retrieved=retrieved,
+            retrieved_keys=retrieved_keys,
+            engine=engine,
+            result=result,
+        )
     )
 
 
