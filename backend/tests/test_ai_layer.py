@@ -542,3 +542,27 @@ def test_reset_provider_cache():
 
     provider3 = get_provider()
     assert provider1 is not provider3, "reset_provider_cache() should clear the cache so a new instance is returned"
+
+
+def test_retrieve_empty_query(catalog_rules):
+    assert retrieve("", catalog_rules) == []
+    assert retrieve("a os de", catalog_rules) == []
+
+def test_retrieve_no_rules():
+    assert retrieve("taxa de ocupacao", []) == []
+
+def test_retrieve_with_min_score(catalog_rules):
+    # A query com pouca correspondência deve ser descartada
+    assert retrieve("batata", catalog_rules) == []
+
+def test_retrieve_limit(catalog_rules):
+    # Passa limit=1 e verifica se retorna apenas 1
+    resultados = retrieve("taxa recuo", catalog_rules, limit=1)
+    assert len(resultados) <= 1
+
+def test_retrieve_case_insensitivity(catalog_rules):
+    res_lower = retrieve("taxa de permeabilidade", catalog_rules)
+    res_upper = retrieve("TAXA DE PERMEABILIDADE", catalog_rules)
+    assert len(res_lower) > 0
+    assert len(res_lower) == len(res_upper)
+    assert res_lower[0].rule_key == res_upper[0].rule_key
