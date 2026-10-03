@@ -542,3 +542,77 @@ def test_reset_provider_cache():
 
     provider3 = get_provider()
     assert provider1 is not provider3, "reset_provider_cache() should clear the cache so a new instance is returned"
+
+
+def test_ask_handles_unavailable_provider(db_session, engineer, seeded_catalog):
+    provider = NullProvider()
+    resposta = ask(AskContext(db=db_session, query="recuo frontal", user=engineer, provider=provider))
+
+    assert resposta.is_ai_generated is False
+    assert resposta.method == "busca_por_palavra_chave_no_catalogo"
+    assert resposta.interaction_id is not None
+
+def test_ask_with_project_determines_jurisdiction(db_session, engineer, seeded_catalog):
+    from app.models.domain import Project
+    project = Project(
+        name="Projeto Teste",
+        organization_id=engineer.organization_id,
+        city_ibge="BR-RS-4316907",
+        city_name="Santa Maria"
+    )
+    provider = FakeProvider(
+        parsed=AssistantAnswer(
+            answer="Resposta com jurisdiction de projeto",
+            cited_rule_keys=[],
+            answered_from_context=True,
+        )
+    )
+    resposta = ask(AskContext(db=db_session, query="recuo frontal", user=engineer, project=project, provider=provider))
+
+    # Fallback para o catálogo determinístico porque não encontra nada
+    assert resposta.is_ai_generated is False
+    assert resposta.method == "busca_por_palavra_chave_no_catalogo"
+    assert "Não encontrei" in resposta.answer
+
+def test_format_retrieved_rules_coverage(db_session, engineer, seeded_catalog):
+    from app.ai.service import _format_retrieved_rules
+    from app.models.domain import RegulatoryRule
+    from app.ai.retrieval import RetrievedRule
+    from app.regulatory.catalog import RegulatoryCatalog
+
+    catalog = RegulatoryCatalog.from_db(db_session, "BR-RS-4311403")
+
+    rule_without_check = RegulatoryRule(
+        rule_key="mock_rule_no_check",
+        jurisdiction="BR-RS-4311403",
+        title="Mock Rule No Check",
+        state="vigente",
+        severity="alerta",
+        check=None,
+        requires_manual_review=True,
+        manual_review_reason="Exigência não verificável"
+    )
+    db_session.add(rule_without_check)
+    db_session.commit()
+
+    catalog = RegulatoryCatalog.from_db(db_session, "BR-RS-4311403")
+
+    retrieved = [
+        RetrievedRule(rule=catalog.get("lajeado_recuo_frontal_z2"), score=1.0),
+        RetrievedRule(rule=catalog.get("mock_rule_no_check"), score=0.9)
+    ]
+
+    statuses = {
+        "lajeado_recuo_frontal_z2": "conforme",
+        "mock_rule_no_check": "pendente"
+    }
+
+    lines, citations, actions = _format_retrieved_rules(
+        retrieved=retrieved,
+        municipality="Lajeado",
+        statuses=statuses
+    )
+
+    assert any("conforme" in line for line in lines)
+    assert any("pendente" in line for line in lines)
+    assert len(actions) == 2
