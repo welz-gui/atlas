@@ -683,3 +683,85 @@ def test_regra_validada_continua_citando_o_artigo(
 
     assert any("Art. 45" in c for c in resposta.law_citations)
 
+
+
+# =============================================================================
+# ask(): jurisdição do projeto e formatação do que foi recuperado
+# =============================================================================
+def _projeto(cidade_ibge, cidade):
+    from app.models.domain import Project
+
+    return Project(
+        name="Projeto de Teste",
+        organization_id="org",
+        city_ibge=cidade_ibge,
+        city_name=cidade,
+    )
+
+
+def test_projeto_de_outro_municipio_nao_usa_o_catalogo_de_lajeado(
+    db_session, engineer, seeded_catalog
+):
+    provider = FakeProvider(
+        parsed=AssistantAnswer(answer="qualquer", cited_rule_keys=[], answered_from_context=True)
+    )
+
+    resposta = ask(
+        AskContext(
+            db=db_session,
+            query="recuo frontal",
+            user=engineer,
+            project=_projeto("BR-RS-4316907", "Santa Maria"),
+            provider=provider,
+        )
+    )
+
+    assert provider.calls == []  # nada recuperado: o modelo nem é consultado
+    assert resposta.matched_rules == []
+    assert "Não encontrei no catálogo de Santa Maria" in resposta.answer
+
+
+def test_projeto_de_lajeado_acrescenta_o_contexto_e_o_status_da_verificacao(
+    db_session, engineer, seeded_catalog
+):
+    resposta = ask(
+        AskContext(
+            db=db_session,
+            query="recuo frontal",
+            user=engineer,
+            project=_projeto("BR-RS-4311403", "Lajeado"),
+            statuses={"lajeado_recuo_frontal_z2": "conforme"},
+            provider=NullProvider(),
+        )
+    )
+
+    assert "lajeado_recuo_frontal_z2" in resposta.matched_rules
+    assert "esta verificação está 'conforme'" in resposta.answer
+    assert "Empreendimento em contexto: 'Projeto de Teste' — Lajeado" in resposta.answer
+
+
+def test_regra_sem_verificacao_numerica_vira_pedido_de_analise_tecnica(
+    db_session, engineer, seeded_catalog
+):
+    db_session.add(
+        RegulatoryRule(
+            rule_key="lajeado_marquise_sobre_calcada",
+            jurisdiction="BR-RS-4311403",
+            title="Marquise sobre a calçada",
+            state="vigente",
+            check=None,
+            requires_manual_review=True,
+            evidence_required=["projeto arquitetônico"],
+        )
+    )
+    db_session.commit()
+
+    resposta = ask(
+        AskContext(db=db_session, query="marquise calçada", user=engineer, provider=NullProvider())
+    )
+
+    assert resposta.matched_rules == ["lajeado_marquise_sobre_calcada"]
+    assert "verificação documental (não derivável de parâmetros numéricos)" in resposta.answer
+    assert resposta.suggested_actions == [
+        "Providenciar análise técnica de marquise sobre a calçada (projeto arquitetônico)."
+    ]
