@@ -552,14 +552,18 @@ def test_ask_handles_unavailable_provider(db_session, engineer, seeded_catalog):
     assert resposta.method == "busca_por_palavra_chave_no_catalogo"
     assert resposta.interaction_id is not None
 
-def test_ask_with_project_determines_jurisdiction(db_session, engineer, seeded_catalog):
+def test_ask_with_project_determines_jurisdiction(db_session, engineer, seeded_catalog, monkeypatch):
     from app.models.domain import Project
+    from unittest.mock import MagicMock
+
     project = Project(
         name="Projeto Teste",
         organization_id=engineer.organization_id,
         city_ibge="BR-RS-4316907",
         city_name="Santa Maria"
     )
+
+    # Provider que responde do contexto para testar também o sucesso da IA com esse project
     provider = FakeProvider(
         parsed=AssistantAnswer(
             answer="Resposta com jurisdiction de projeto",
@@ -567,12 +571,48 @@ def test_ask_with_project_determines_jurisdiction(db_session, engineer, seeded_c
             answered_from_context=True,
         )
     )
+
+    from app.ai.service import RegulatoryCatalog
+    mock_from_db = MagicMock(side_effect=RegulatoryCatalog.from_db)
+    monkeypatch.setattr(RegulatoryCatalog, "from_db", mock_from_db)
+
+    # Testando o caso onde cai pro catálogo determinístico (nenhuma candidata de fato retornada)
     resposta = ask(AskContext(db=db_session, query="recuo frontal", user=engineer, project=project, provider=provider))
 
-    # Fallback para o catálogo determinístico porque não encontra nada
+    # Verifica que o `city_ibge` do projeto foi passado corretamente
+    mock_from_db.assert_called_with(db_session, "BR-RS-4316907")
+
     assert resposta.is_ai_generated is False
     assert resposta.method == "busca_por_palavra_chave_no_catalogo"
     assert "Não encontrei" in resposta.answer
+
+def test_ask_uses_provider_with_project(db_session, engineer, seeded_catalog):
+    from app.models.domain import Project
+    from unittest.mock import MagicMock
+
+    # Criamos um projeto com a jurisdição do catálogo (lajeado),
+    # para que tenha candidatas e o LLM seja chamado.
+    project = Project(
+        name="Projeto Teste",
+        organization_id=engineer.organization_id,
+        city_ibge="BR-RS-4311403",
+        city_name="Lajeado"
+    )
+
+    provider = FakeProvider(
+        parsed=AssistantAnswer(
+            answer="Resposta com jurisdiction de projeto e LLM",
+            cited_rule_keys=["lajeado_recuo_frontal_z2"],
+            answered_from_context=True,
+        )
+    )
+
+    resposta = ask(AskContext(db=db_session, query="recuo frontal", user=engineer, project=project, provider=provider))
+
+    assert resposta.is_ai_generated is True
+    assert "Resposta com jurisdiction de projeto e LLM" in resposta.answer
+    assert "lajeado_recuo_frontal_z2" in resposta.matched_rules
+
 
 def test_format_retrieved_rules_coverage(db_session, engineer, seeded_catalog):
     from app.ai.service import _format_retrieved_rules
