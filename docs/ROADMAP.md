@@ -4,14 +4,14 @@ Documento vivo. Consolida o **roadmap estratégico** do plano (§9 e §10 de
 [`PLANO_DE_IMPLEMENTACAO_v2.md`](PLANO_DE_IMPLEMENTACAO_v2.md)) com o **estado
 real do código** e o **caminho de execução** de cada estágio.
 
-- Última atualização: **2026-10-02**
-- Base avaliada: `master` em `f24f4ba`, espelhada em
+- Última atualização: **2026-10-04**
+- Base avaliada: `master` em `04996c2`, espelhada em
   [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
   estágios foi levantado em `7dc50d2` e continua valendo, com uma exceção
   registrada abaixo: o **Estágio 6 deixou de ser "nada construído"**.
 - **A Fase D está encerrada, exceto pelo D3** — que nunca foi de engenharia.
   Ver o registro adiante.
-- Suíte: **551 casos de backend** (eram 199 em `7dc50d2`) e **65 de
+- Suíte: **554 casos de backend** (eram 199 em `7dc50d2`) e **65 de
   frontend** (8 arquivos, incluindo componentes — `ErrorBanner`, `StatusChip`,
   `EmptyState`, `OfflineBar`, `AppShell`, `Navbar` — e a fila offline).
   Mais 13 de integração e 6 de RLS, que só rodam na CI porque exigem
@@ -223,7 +223,7 @@ delas falhar, pare e conserte antes de continuar a construir.
 
 | Worktree | Branch | PR | Situação |
 |---|---|---|---|
-| `worktrees/roadmap-update-7` | `docs/atualiza-roadmap-setima-leva` | — | 🟨 A frente que trouxe esta atualização. |
+| `worktrees/roadmap-update-8` | `docs/atualiza-roadmap-oitava-leva` | — | 🟨 A frente que trouxe esta atualização. |
 
 Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
@@ -241,7 +241,7 @@ Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
 ## Estado atual em uma página
 
-**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 551 testes; RLS ativa, MFA
+**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 554 testes; RLS ativa, MFA
 por TOTP, log em JSON com correlação e sondas de vida e prontidão):
 
 ```
@@ -1346,10 +1346,10 @@ um sem escolher nenhum. Suíte: 353 → 367.
 si. Depende de decisão e de conta, não de código — e, como o D3, não é
 engenharia que o trava.
 
-### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-10-02)
+### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-10-04)
 
-Um agente externo (Jules, do Google) abriu sete levas de PRs contra o
-repositório — 30, 42, 24, 7, 38, 23 e 12 — do tipo "code health": remoção de import morto,
+Um agente externo (Jules, do Google) abriu oito levas de PRs contra o
+repositório — 30, 42, 24, 7, 38, 23, 12 e 2 — do tipo "code health": remoção de import morto,
 refator de função complexa, teste de caminho de erro, correção de N+1, e
 algumas de segurança. Nenhuma foi mesclada às cegas por CI verde; cada uma foi
 lida contra o código real antes de decidir. O que isso revelou vale mais do
@@ -1592,6 +1592,24 @@ que qualquer regra individual corrigida:
   sucesso; quem lê só o agregado concluiria que quebrou. Conferido pela lista
   de execuções;
 
+- **teste que verifica a chamada, não o efeito — e outro que não discrimina.**
+  A #278 provava a leitura da jurisdição do projeto com um `MagicMock` sobre
+  `RegulatoryCatalog.from_db` (conferia o argumento, não o que o usuário vê) e
+  usava, no teste "com projeto", um projeto de **Lajeado — a jurisdição
+  padrão**, que passaria igualmente se `ask()` ignorasse o projeto. Um terceiro
+  teste era cópia literal de um já existente. Consolidada em #279: o projeto de
+  outro município não vê o catálogo de Lajeado, o provedor nem é consultado e a
+  resposta cita o município dele; a regra sem verificação numérica passa por
+  `ask()` em vez de chamar a função privada. Seis mutações em `service.py`
+  (ignorar a jurisdição do projeto, o município, `statuses`, o contexto do
+  empreendimento, o texto da regra sem `check`, a evidência da ação) derrubam
+  um teste cada. A alegação "100% de cobertura" da PR **não foi verificada**;
+- **a tarefa vencida voltou, e a branch velha também.** A #277 chegou **sem
+  diff** ("já resolvido em `master`"), como a #231 antes dela; a branch da #252
+  (`fold_accents`) foi reempurrada **duas vezes** na mesma semana, só com um
+  commit de revert e o resto da árvore no estado antigo. Nenhuma tinha conteúdo
+  novo — conferido pelo diff contra `master`, não presumido;
+
 Resultado: **21 PRs mescladas na primeira leva**; na segunda, **21 mescladas**
 (16 diretas + 5 reescritas) e **25 fechadas**; na terceira, **12 mescladas
 diretamente**, mais **7 refeitas em 4 PRs novas** (mesmo padrão de cachos na
@@ -1615,10 +1633,11 @@ técnico em cada uma, e 5 absorvidas em duas consolidações próprias (#258,
 efeito do `exhaustive-deps` (#260); na sétima, **2 das 12 mescladas
 diretamente** (#264, depois de tirar um import sem uso, e #268), **2
 absorvidas** numa consolidação própria (#275) e **8 fechadas** com o motivo
-técnico em cada uma. Mais uma PR própria de correção (#274). Suíte: 367 → 441
-→ 452 → 453 → 469 → 534 → 551 (backend), 15 → 21 → 39 → 40 → 65 (frontend, 4
-arquivos até a quarta leva, 8 desde a quinta; a sexta e a sétima não
-acrescentaram teste de frontend).
+técnico em cada uma. Mais uma PR própria de correção (#274); na oitava, **1
+PR com teste aproveitável** (#278, consolidada e reescrita em #279) e **1 sem
+diff** (#277, fechada). Suíte: 367 → 441 → 452 → 453 → 469 → 534 → 551 → 554
+(backend), 15 → 21 → 39 → 40 → 65 (frontend, 4 arquivos até a quarta leva, 8
+desde a quinta; da sexta em diante nenhuma acrescentou teste de frontend).
 
 **Pendência sem solução de código:** branches de PRs já mescladas ou fechadas
 continuam reaparecendo em `origin` depois de apagadas — inclusive branches de
