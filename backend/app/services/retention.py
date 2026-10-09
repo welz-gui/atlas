@@ -15,8 +15,8 @@ estiver `vigente`, nada é descartado, por mais antigo que seja. A janela vem de
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, List, Optional
+from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -33,8 +33,8 @@ from app.services.storage import StorageBackend, get_storage
 
 
 def retention_deadline(
-    obsolete_at: datetime, retention_days: Optional[int] = None
-) -> Optional[datetime]:
+    obsolete_at: datetime, retention_days: int | None = None
+) -> datetime | None:
     """Data a partir da qual o binário pode ser descartado.
 
     `None` significa guardar indefinidamente — que é o comportamento padrão.
@@ -47,13 +47,13 @@ def retention_deadline(
     return obsolete_at + timedelta(days=days)
 
 
-def mark_obsolete(document: Document, when: Optional[datetime] = None) -> Document:
+def mark_obsolete(document: Document, when: datetime | None = None) -> Document:
     """Tira o documento de circulação e agenda a retenção do binário.
 
     Ponto único de saída de circulação: quem marca um documento como obsoleto
     passa por aqui, para que a data de retenção nunca fique por preencher.
     """
-    moment = when or datetime.utcnow()
+    moment = when or datetime.now(timezone.utc)
     document.status = DocumentState.OBSOLETO
     document.superseded_at = moment
     document.retention_until = retention_deadline(moment)
@@ -69,8 +69,8 @@ class PurgeReport:
     purged: int = 0
     already_missing: int = 0
     failed: int = 0
-    document_ids: List[str] = field(default_factory=list)
-    errors: List[str] = field(default_factory=list)
+    document_ids: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     @property
     def retention_enabled(self) -> bool:
@@ -79,15 +79,15 @@ class PurgeReport:
 
 def eligible_documents(
     db: Session,
-    organization_id: Optional[str] = None,
-    now: Optional[datetime] = None,
-) -> List[Document]:
+    organization_id: str | None = None,
+    now: datetime | None = None,
+) -> list[Document]:
     """Documentos obsoletos cuja janela de retenção venceu.
 
     Um documento sem `retention_until` nunca é elegível: ausência de prazo
     significa guardar, não significa 'expurgar agora'.
     """
-    moment = now or datetime.utcnow()
+    moment = now or datetime.now(timezone.utc)
     query = db.query(Document).filter(
         Document.status == DocumentState.OBSOLETO,
         Document.purged_at.is_(None),
@@ -101,14 +101,14 @@ def eligible_documents(
 
 def purge_expired_documents(
     db: Session,
-    organization_id: Optional[str] = None,
-    now: Optional[datetime] = None,
+    organization_id: str | None = None,
+    now: datetime | None = None,
     dry_run: bool = False,
-    storage: Optional[StorageBackend] = None,
+    storage: StorageBackend | None = None,
 ) -> PurgeReport:
     """Descarta o binário dos documentos vencidos, preservando os metadados."""
     backend = storage or get_storage()
-    moment = now or datetime.utcnow()
+    moment = now or datetime.now(timezone.utc)
     report = PurgeReport(dry_run=dry_run)
 
     documents = list(eligible_documents(db, organization_id, moment))
@@ -178,43 +178,41 @@ class ContentPurgeReport:
     retention_days: int = 0
     examined: int = 0
     purged: int = 0
-    record_ids: List[str] = field(default_factory=list)
+    record_ids: list[str] = field(default_factory=list)
 
     @property
     def retention_enabled(self) -> bool:
         return self.retention_days > 0
 
 
-def purge_expired_ai_interactions(
+def _purge_generic_content(
     db: Session,
-    organization_id: Optional[str] = None,
-    now: Optional[datetime] = None,
+    model: type[Any],
+    date_field: Any,
+    updates: dict[str, Any],
+    cutoff_datetime: datetime,
+    organization_id: str | None = None,
+    extra_filters: list | None = None,
     dry_run: bool = False,
-    retention_days: Optional[int] = None,
+    retention_days: int = 0,
 ) -> ContentPurgeReport:
-    """Descarta pergunta e resposta das interações vencidas."""
-    days = (
-        settings.AI_INTERACTION_RETENTION_DAYS
-        if retention_days is None
-        else retention_days
-    )
-    report = ContentPurgeReport(dry_run=dry_run, retention_days=days)
-    if days <= 0:
+    """Implementação genérica do expurgo de conteúdo."""
+    report = ContentPurgeReport(dry_run=dry_run, retention_days=retention_days)
+    if retention_days <= 0:
         return report
 
-    moment = now or datetime.utcnow()
-    cutoff = moment - timedelta(days=days)
-
-    query = db.query(AIInteraction).filter(
-        AIInteraction.created_at <= cutoff,
-        AIInteraction.content_purged_at.is_(None),
+    query = db.query(model).filter(
+        date_field <= cutoff_datetime,
+        model.content_purged_at.is_(None),
     )
+    if extra_filters is not None:
+        for f in extra_filters:
+            query = query.filter(f)
+
     if organization_id:
-        query = query.filter(AIInteraction.organization_id == organization_id)
+        query = query.filter(model.organization_id == organization_id)
 
-    records = (
-        query.with_entities(AIInteraction.id).order_by(AIInteraction.created_at).all()
-    )
+    records = query.with_entities(model.id).order_by(date_field).all()
     if not records:
         return report
 
@@ -222,29 +220,51 @@ def purge_expired_ai_interactions(
     report.record_ids = [r.id for r in records]
 
     if not dry_run:
-        # A pergunta some; o hash dela permanece. Duas consultas idênticas
-        # continuam reconhecíveis como idênticas sem que o texto exista.
-        query.update(
-            {
-                AIInteraction.prompt: "",
-                AIInteraction.response_text: None,
-                AIInteraction.response_json: None,
-                AIInteraction.content_purged_at: moment,
-            },
-            synchronize_session=False,
-        )
+        query.update(updates, synchronize_session=False)
         db.commit()
         report.purged = report.examined
 
     return report
 
 
+def purge_expired_ai_interactions(
+    db: Session,
+    organization_id: str | None = None,
+    now: datetime | None = None,
+    dry_run: bool = False,
+    retention_days: int | None = None,
+) -> ContentPurgeReport:
+    """Descarta pergunta e resposta das interações vencidas."""
+    days = (
+        settings.AI_INTERACTION_RETENTION_DAYS
+        if retention_days is None
+        else retention_days
+    )
+    moment = now or datetime.now(timezone.utc)
+
+    return _purge_generic_content(
+        db=db,
+        model=AIInteraction,
+        date_field=AIInteraction.created_at,
+        updates={
+            AIInteraction.prompt: "",
+            AIInteraction.response_text: None,
+            AIInteraction.response_json: None,
+            AIInteraction.content_purged_at: moment,
+        },
+        cutoff_datetime=moment - timedelta(days=days),
+        organization_id=organization_id,
+        dry_run=dry_run,
+        retention_days=days,
+    )
+
+
 def purge_expired_job_records(
     db: Session,
-    organization_id: Optional[str] = None,
-    now: Optional[datetime] = None,
+    organization_id: str | None = None,
+    now: datetime | None = None,
     dry_run: bool = False,
-    retention_days: Optional[int] = None,
+    retention_days: int | None = None,
 ) -> ContentPurgeReport:
     """Descarta payload e resultado dos trabalhos encerrados e vencidos.
 
@@ -254,40 +274,20 @@ def purge_expired_job_records(
     days = (
         settings.JOB_RECORD_RETENTION_DAYS if retention_days is None else retention_days
     )
-    report = ContentPurgeReport(dry_run=dry_run, retention_days=days)
-    if days <= 0:
-        return report
+    moment = now or datetime.now(timezone.utc)
 
-    moment = now or datetime.utcnow()
-    cutoff = moment - timedelta(days=days)
-
-    query = db.query(JobRecord).filter(
-        JobRecord.status.in_(tuple(JobStatus.TERMINAL)),
-        JobRecord.queued_at <= cutoff,
-        JobRecord.content_purged_at.is_(None),
+    return _purge_generic_content(
+        db=db,
+        model=JobRecord,
+        date_field=JobRecord.queued_at,
+        updates={
+            JobRecord.payload: {},
+            JobRecord.result: None,
+            JobRecord.content_purged_at: moment,
+        },
+        cutoff_datetime=moment - timedelta(days=days),
+        organization_id=organization_id,
+        extra_filters=[JobRecord.status.in_(tuple(JobStatus.TERMINAL))],
+        dry_run=dry_run,
+        retention_days=days,
     )
-    if organization_id:
-        query = query.filter(JobRecord.organization_id == organization_id)
-
-    records = query.with_entities(JobRecord.id).order_by(JobRecord.queued_at).all()
-    if not records:
-        return report
-
-    report.examined = len(records)
-    report.record_ids = [r.id for r in records]
-
-    if not dry_run:
-        # `payload` é NOT NULL desde a reconciliação do esquema: vazio é vazio,
-        # e não ausência de informação.
-        query.update(
-            {
-                JobRecord.payload: {},
-                JobRecord.result: None,
-                JobRecord.content_purged_at: moment,
-            },
-            synchronize_session=False,
-        )
-        db.commit()
-        report.purged = report.examined
-
-    return report
