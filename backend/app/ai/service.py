@@ -428,62 +428,62 @@ def _return_baseline(
     return baseline
 
 
-def _process_model_response(
-    context: AskContext,
-    baseline: AssistantResponse,
-    request_hash: str,
-    retrieved: Sequence[RetrievedRule],
-    retrieved_keys: Sequence[str],
-    engine: AIProvider,
-    result: AIResult,
-) -> AssistantResponse:
-    parsed: AssistantAnswer = result.parsed  # type: ignore[assignment]
+@dataclass
+class ModelResponseContext:
+    ask_context: AskContext
+    baseline: AssistantResponse
+    request_hash: str
+    retrieved: Sequence[RetrievedRule]
+    retrieved_keys: Sequence[str]
+    engine: AIProvider
+    result: AIResult
 
-    # Conferência: chave citada que não estava no contexto é descartada.
-    permitidas = set(retrieved_keys)
-    citadas = [key for key in parsed.cited_rule_keys if key in permitidas]
-    inventadas = [key for key in parsed.cited_rule_keys if key not in permitidas]
-    grounded = not inventadas and parsed.answered_from_context
 
-    if inventadas:
-        return _return_baseline(
-            context,
-            baseline=baseline,
-            request_hash=request_hash,
-            retrieved_keys=retrieved_keys,
-            cited_keys=citadas,
-            provider_name=engine.name,
-            warning=(
-                "A resposta do modelo referenciou regra fora do catálogo consultado e foi "
-                "substituída pela consulta determinística."
-            ),
-            result=result,
-            response_json=parsed.model_dump(),
-            grounded=False,
-        )
+def _handle_invented_citations(ctx: ModelResponseContext, citadas: List[str]) -> AssistantResponse:
+    parsed: AssistantAnswer = ctx.result.parsed  # type: ignore[assignment]
+    return _return_baseline(
+        ctx.ask_context,
+        baseline=ctx.baseline,
+        request_hash=ctx.request_hash,
+        retrieved_keys=ctx.retrieved_keys,
+        cited_keys=citadas,
+        provider_name=ctx.engine.name,
+        warning=(
+            "A resposta do modelo referenciou regra fora do catálogo consultado e foi "
+            "substituída pela consulta determinística."
+        ),
+        result=ctx.result,
+        response_json=parsed.model_dump(),
+        grounded=False,
+    )
 
-    if not parsed.answered_from_context:
-        # O próprio modelo disse que o contexto não bastava. Melhor entregar o
-        # que o catálogo tem do que uma resposta que ele mesmo não sustenta.
-        return _return_baseline(
-            context,
-            baseline=baseline,
-            request_hash=request_hash,
-            retrieved_keys=retrieved_keys,
-            cited_keys=citadas,
-            provider_name=engine.name,
-            warning=(
-                "O modelo indicou que o catálogo não sustenta uma resposta completa para "
-                "esta consulta."
-            ),
-            result=result,
-            response_json=parsed.model_dump(),
-            grounded=True,
-        )
 
+def _handle_insufficient_context(ctx: ModelResponseContext, citadas: List[str]) -> AssistantResponse:
+    parsed: AssistantAnswer = ctx.result.parsed  # type: ignore[assignment]
+    # O próprio modelo disse que o contexto não bastava. Melhor entregar o
+    # que o catálogo tem do que uma resposta que ele mesmo não sustenta.
+    return _return_baseline(
+        ctx.ask_context,
+        baseline=ctx.baseline,
+        request_hash=ctx.request_hash,
+        retrieved_keys=ctx.retrieved_keys,
+        cited_keys=citadas,
+        provider_name=ctx.engine.name,
+        warning=(
+            "O modelo indicou que o catálogo não sustenta uma resposta completa para "
+            "esta consulta."
+        ),
+        result=ctx.result,
+        response_json=parsed.model_dump(),
+        grounded=True,
+    )
+
+
+def _build_success_response(ctx: ModelResponseContext, citadas: List[str], grounded: bool) -> AssistantResponse:
+    parsed: AssistantAnswer = ctx.result.parsed  # type: ignore[assignment]
     # A citação legal é resolvida pelo Atlas, a partir do catálogo — nunca pelo
     # texto que o modelo escreveu.
-    regras_citadas = [item.rule for item in retrieved if item.rule.rule_id in citadas]
+    regras_citadas = [item.rule for item in ctx.retrieved if item.rule.rule_id in citadas]
     citacoes = [_citation(r) for r in regras_citadas]
 
     warnings: List[str] = []
@@ -498,23 +498,23 @@ def _process_model_response(
         matched_rules=citadas,
         is_ai_generated=True,
         method="modelo_de_linguagem_sobre_catalogo",
-        model=result.model,
+        model=ctx.result.model,
         grounded=grounded,
         warnings=warnings,
     )
 
     interaction = _record(
-        context.db,
+        ctx.ask_context.db,
         RecordParams(
-            organization_id=context.user.organization_id,
-            user=context.user,
-            project=context.project,
+            organization_id=ctx.ask_context.user.organization_id,
+            user=ctx.ask_context.user,
+            project=ctx.ask_context.project,
             purpose="consulta_normativa",
-            prompt=context.query,
-            request_hash=request_hash,
-            retrieved_keys=retrieved_keys,
+            prompt=ctx.ask_context.query,
+            request_hash=ctx.request_hash,
+            retrieved_keys=ctx.retrieved_keys,
             cited_keys=citadas,
-            result=result,
+            result=ctx.result,
             response_json={
                 k: v
                 for k, v in resposta.__dict__.items()
@@ -525,6 +525,24 @@ def _process_model_response(
     )
     resposta.interaction_id = interaction.id
     return resposta
+
+
+def _process_model_response(ctx: ModelResponseContext) -> AssistantResponse:
+    parsed: AssistantAnswer = ctx.result.parsed  # type: ignore[assignment]
+
+    # Conferência: chave citada que não estava no contexto é descartada.
+    permitidas = set(ctx.retrieved_keys)
+    citadas = [key for key in parsed.cited_rule_keys if key in permitidas]
+    inventadas = [key for key in parsed.cited_rule_keys if key not in permitidas]
+    grounded = not inventadas and parsed.answered_from_context
+
+    if inventadas:
+        return _handle_invented_citations(ctx, citadas)
+
+    if not parsed.answered_from_context:
+        return _handle_insufficient_context(ctx, citadas)
+
+    return _build_success_response(ctx, citadas, grounded)
 
 
 def _ask_model(
@@ -585,13 +603,15 @@ def _ask_model(
         )
 
     return _process_model_response(
-        context,
-        baseline=baseline,
-        request_hash=request_hash,
-        retrieved=retrieved,
-        retrieved_keys=retrieved_keys,
-        engine=engine,
-        result=result,
+        ModelResponseContext(
+            ask_context=context,
+            baseline=baseline,
+            request_hash=request_hash,
+            retrieved=retrieved,
+            retrieved_keys=retrieved_keys,
+            engine=engine,
+            result=result,
+        )
     )
 
 
