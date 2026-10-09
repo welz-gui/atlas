@@ -28,6 +28,7 @@ import {
   setToken,
   setUnauthorizedHandler,
   updateProjectIdentity,
+  humanize,
 } from "./api";
 
 const TOKEN = "token-de-teste";
@@ -186,5 +187,35 @@ describe("updateProjectIdentity", () => {
         body: JSON.stringify(payload),
       })
     );
+  });
+});
+
+describe("humanize", () => {
+  it("returns '—' for null", () => {
+    expect(humanize(null)).toBe("—");
+  });
+
+  it("returns '—' for undefined", () => {
+    expect(humanize(undefined)).toBe("—");
+  });
+
+  it("returns '—' for an empty string", () => {
+    expect(humanize("")).toBe("—");
+  });
+
+  it("replaces a single underscore with a space", () => {
+    expect(humanize("hello_world")).toBe("hello world");
+  });
+
+  it("replaces multiple underscores with spaces", () => {
+    expect(humanize("one_two_three")).toBe("one two three");
+  });
+
+  it("leaves a string without underscores unchanged", () => {
+    expect(humanize("hello world")).toBe("hello world");
+  });
+
+  it("handles a string with only underscores", () => {
+    expect(humanize("___")).toBe("   ");
   });
 });
