@@ -285,3 +285,41 @@ def test_parse_robots_no_matching_user_agent():
     assert regras["allow"] == ()
     assert regras["disallow"] == ()
     assert regras["delay"] is None
+
+
+def test_parse_robots_invalid_crawl_delay_logging(caplog):
+    import logging
+    with caplog.at_level(logging.WARNING, logger="app.regulatory.robots"):
+        regras = parse_robots("User-agent: *\nCrawl-delay: not-a-number")
+    assert "Falha ao ler crawl-delay: 'not-a-number'" in caplog.text
+    assert regras["delay"] is None
+
+
+def test_policy_path_allowed_when_not_fetchable():
+    policy = RobotsPolicy(origin="https://exemplo.gov.br", fetchable=False)
+    assert policy.path_allowed("https://exemplo.gov.br/a") is False
+
+
+def test_abrir_function(monkeypatch):
+    from app.regulatory.robots import _abrir, USER_AGENT
+    import urllib.request
+    called_request = None
+    def mock_urlopen(request, timeout):
+        nonlocal called_request
+        called_request = request
+        return _Resposta(b"", status=200)
+    monkeypatch.setattr("app.regulatory.robots.urlopen", mock_urlopen)
+    _abrir("https://exemplo.gov.br/robots.txt", timeout=10)
+    assert called_request is not None
+    assert called_request.full_url == "https://exemplo.gov.br/robots.txt"
+    assert called_request.headers.get("User-agent") == USER_AGENT
+
+
+def test_gate_check_path_not_allowed():
+    from app.regulatory.robots import USER_AGENT
+    gate = RobotsGate(
+        loader=lambda _u: RobotsPolicy(origin="https://exemplo.gov.br", disallow=("/",))
+    )
+    with pytest.raises(RobotsDenied) as exc_info:
+        gate.check("https://exemplo.gov.br/proibido")
+    assert f"proibido pelo robots.txt de https://exemplo.gov.br (agente {USER_AGENT})" in str(exc_info.value)
