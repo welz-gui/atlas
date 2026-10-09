@@ -24,6 +24,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   fetchProjects,
+  fetchProjectValidations,
   login,
   setToken,
   setUnauthorizedHandler,
@@ -184,6 +185,43 @@ describe("updateProjectIdentity", () => {
           Authorization: `Bearer ${TOKEN}`,
         }),
         body: JSON.stringify(payload),
+      })
+    );
+  });
+});
+
+
+describe("fetchProjectValidations", () => {
+  const TOKEN = "token-de-teste";
+
+  beforeEach(() => {
+    global.fetch = vi.fn();
+    setToken(TOKEN);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    setToken(null);
+  });
+
+  it("chama a API com a URL correta e devolve as validações do projeto", async () => {
+    const projectId = "proj-123";
+    const validacoes = [{ id: "val-1", status: "ok" }];
+
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => validacoes,
+    });
+
+    await expect(fetchProjectValidations(projectId)).resolves.toEqual(validacoes);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining(`/projects/${projectId}/validations`),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: `Bearer ${TOKEN}`,
+        }),
       })
     );
   });
