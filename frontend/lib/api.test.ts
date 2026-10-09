@@ -23,6 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   ApiError,
+  createRegulatoryDocument,
   fetchProjects,
   login,
   setToken,
@@ -179,6 +180,43 @@ describe("updateProjectIdentity", () => {
       expect.stringContaining(`/projects/${id}`),
       expect.objectContaining({
         method: "PATCH",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TOKEN}`,
+        }),
+        body: JSON.stringify(payload),
+      })
+    );
+  });
+});
+
+describe("createRegulatoryDocument", () => {
+  beforeEach(() => {
+    global.fetch = vi.fn();
+    setToken(TOKEN);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    setToken(null);
+  });
+
+  it("chama a API com POST, URL correta e payload no corpo", async () => {
+    const payload = {
+      jurisdiction: "Federal",
+      title: "Norma Teste",
+      doc_type: "Lei",
+    };
+    const documento = { id: "123", ...payload };
+
+    (global.fetch as any).mockResolvedValueOnce(respostaOk(documento));
+
+    await expect(createRegulatoryDocument(payload)).resolves.toEqual(documento);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/catalog/documents"),
+      expect.objectContaining({
+        method: "POST",
         headers: expect.objectContaining({
           "Content-Type": "application/json",
           Authorization: `Bearer ${TOKEN}`,
