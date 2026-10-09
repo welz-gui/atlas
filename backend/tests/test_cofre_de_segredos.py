@@ -12,6 +12,7 @@ O que estes testes protegem:
    variável na lista de processos.
 """
 
+import pytest
 
 from app.core import mfa
 from app.core.config import Settings
@@ -202,3 +203,10 @@ def test_pessoa_com_mfa_atravessa_a_rotacao(client, db_session, usuario_sem_mfa,
 
     monkeypatch.setattr(mfa.settings, "SECRET_KEY_PREVIOUS", "")
     assert mfa.decrypt_secret(usuario_sem_mfa.mfa_secret) == dados["secret"]
+
+
+@pytest.mark.parametrize("lixo", ["", "nao-e-um-jwt", "a.b.c", "invalid.token.format"])
+def test_token_malformado_e_recusado_sem_levantar(monkeypatch, lixo):
+    """Lixo no cabeçalho é 401, não 500: `decode_access_token` devolve None."""
+    security = _com_chaves(monkeypatch, "chave-nova", anterior="chave-velha")
+    assert security.decode_access_token(lixo) is None
