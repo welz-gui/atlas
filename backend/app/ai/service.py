@@ -385,18 +385,21 @@ class AskContext:
     provider: Optional[AIProvider] = None
 
 
-def _return_baseline(
-    context: AskContext,
-    baseline: AssistantResponse,
-    request_hash: str,
-    retrieved_keys: Sequence[str],
-    cited_keys: Sequence[str],
-    provider_name: str,
-    warning: Optional[str] = None,
-    result: Optional[AIResult] = None,
-    response_json: Optional[dict] = None,
-    grounded: bool = True,
-) -> AssistantResponse:
+@dataclass
+class BaselineContext:
+    ask_context: AskContext
+    baseline: AssistantResponse
+    request_hash: str
+    retrieved_keys: Sequence[str]
+    cited_keys: Sequence[str]
+    provider_name: str
+    warning: Optional[str] = None
+    result: Optional[AIResult] = None
+    response_json: Optional[dict] = None
+    grounded: bool = True
+
+
+def _return_baseline(ctx: BaselineContext) -> AssistantResponse:
     """Devolve a resposta determinística com a proveniência gravada.
 
     `ask` tem cinco pontos em que desiste do modelo e volta para o catálogo —
@@ -405,27 +408,27 @@ def _return_baseline(
     coisa: registram o aviso (quando há um) e gravam a interação com
     `_record`. Só o que muda entre eles são os argumentos.
     """
-    if warning:
-        baseline.warnings.append(warning)
+    if ctx.warning:
+        ctx.baseline.warnings.append(ctx.warning)
 
-    baseline.interaction_id = _record(
-        context.db,
+    ctx.baseline.interaction_id = _record(
+        ctx.ask_context.db,
         RecordParams(
-            organization_id=context.user.organization_id,
-            user=context.user,
-            project=context.project,
+            organization_id=ctx.ask_context.user.organization_id,
+            user=ctx.ask_context.user,
+            project=ctx.ask_context.project,
             purpose="consulta_normativa",
-            prompt=context.query,
-            request_hash=request_hash,
-            retrieved_keys=retrieved_keys,
-            cited_keys=cited_keys,
-            provider_name=provider_name,
-            result=result,
-            response_json=response_json,
-            grounded=grounded,
+            prompt=ctx.ask_context.query,
+            request_hash=ctx.request_hash,
+            retrieved_keys=ctx.retrieved_keys,
+            cited_keys=ctx.cited_keys,
+            provider_name=ctx.provider_name,
+            result=ctx.result,
+            response_json=ctx.response_json,
+            grounded=ctx.grounded,
         ),
     ).id
-    return baseline
+    return ctx.baseline
 
 
 def _process_model_response(
@@ -446,8 +449,8 @@ def _process_model_response(
     grounded = not inventadas and parsed.answered_from_context
 
     if inventadas:
-        return _return_baseline(
-            context,
+        return _return_baseline(BaselineContext(
+            ask_context=context,
             baseline=baseline,
             request_hash=request_hash,
             retrieved_keys=retrieved_keys,
@@ -460,13 +463,13 @@ def _process_model_response(
             result=result,
             response_json=parsed.model_dump(),
             grounded=False,
-        )
+        ))
 
     if not parsed.answered_from_context:
         # O próprio modelo disse que o contexto não bastava. Melhor entregar o
         # que o catálogo tem do que uma resposta que ele mesmo não sustenta.
-        return _return_baseline(
-            context,
+        return _return_baseline(BaselineContext(
+            ask_context=context,
             baseline=baseline,
             request_hash=request_hash,
             retrieved_keys=retrieved_keys,
@@ -479,7 +482,7 @@ def _process_model_response(
             result=result,
             response_json=parsed.model_dump(),
             grounded=True,
-        )
+        ))
 
     # A citação legal é resolvida pelo Atlas, a partir do catálogo — nunca pelo
     # texto que o modelo escreveu.
@@ -541,8 +544,8 @@ def _ask_model(
         # Sem contexto não se pergunta ao modelo: seria convidá-lo a preencher
         # a lacuna com conhecimento próprio, que é exatamente o que a política
         # proíbe. A resposta determinística já diz que o catálogo não cobre.
-        return _return_baseline(
-            context,
+        return _return_baseline(BaselineContext(
+            ask_context=context,
             baseline=baseline,
             request_hash=request_hash,
             retrieved_keys=[],
@@ -552,7 +555,7 @@ def _ask_model(
                 "O catálogo não cobre este assunto; o modelo não foi consultado para "
                 "evitar resposta sem base cadastrada."
             ),
-        )
+        ))
 
     contexto = format_context(retrieved)
     prompt = (
@@ -573,8 +576,8 @@ def _ask_model(
     if not result.ok:
         # Falha ou recusa do modelo devolve a resposta determinística — com o
         # motivo à vista, nunca disfarçada de resposta de IA.
-        return _return_baseline(
-            context,
+        return _return_baseline(BaselineContext(
+            ask_context=context,
             baseline=baseline,
             request_hash=request_hash,
             retrieved_keys=retrieved_keys,
@@ -582,7 +585,7 @@ def _ask_model(
             provider_name=engine.name,
             warning=result.error or "O modelo não respondeu; usando busca no catálogo.",
             result=result,
-        )
+        ))
 
     return _process_model_response(
         context,
@@ -622,14 +625,14 @@ def ask(context: AskContext) -> AssistantResponse:
     )
 
     if not engine.available:
-        return _return_baseline(
-            context,
+        return _return_baseline(BaselineContext(
+            ask_context=context,
             baseline=baseline,
             request_hash=_request_hash(query, _context_signature(retrieved), None),
             retrieved_keys=retrieved_keys,
             cited_keys=retrieved_keys,
             provider_name=engine.name,
-        )
+        ))
 
     request_hash = _request_hash(
         query, _context_signature(retrieved), getattr(engine, "model", None)
