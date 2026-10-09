@@ -159,6 +159,7 @@ def test_anthropic_provider_api_connection_error():
     assert "APIConnectionError" in res.error
 
 def test_anthropic_provider_api_status_error():
+    """Verifica se APIStatusError é capturado e reporta o código HTTP correto."""
     import anthropic
     from httpx import Request, Response
     client_mock = MagicMock()
@@ -168,13 +169,15 @@ def test_anthropic_provider_api_status_error():
         message="status error", response=response, body=None
     )
 
-    provider = AnthropicProvider(client=client_mock)
+    provider = AnthropicProvider(client=client_mock, model="test-model")
     req = AIRequest(system="sys", prompt="prompt", output_model=DummyModel)
     res = provider.complete(req)
 
     assert not res.ok
-    assert "erro 500" in res.error
-    assert "APIStatusError" in res.error
+    assert res.error == "O provedor respondeu com erro 500. (APIStatusError)"
+    assert res.provider == "anthropic"
+    assert res.model == "test-model"
+    assert res.latency_ms is not None
 
 def test_anthropic_provider_unexpected_error():
     client_mock = MagicMock()
