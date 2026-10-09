@@ -187,17 +187,14 @@ def _precision_metrics(
 
 
 def _unverifiable_metrics(
-    project_ids: list[str], latest_runs_by_project: dict[str, AnalysisRun]
+    latest_runs_by_project: dict[str, AnalysisRun]
 ) -> tuple[int, int]:
     """Sobre todas as análises mais recentes, não só as protocoladas: mede
     quanto do projeto o sistema não consegue avaliar por falta de dado.
     """
     total_checks = 0
     unverifiable = 0
-    for project_id in project_ids:
-        latest = latest_runs_by_project.get(project_id)
-        if not latest:
-            continue
+    for latest in latest_runs_by_project.values():
         total_checks += latest.total_checks
         unverifiable += latest.nao_verificavel_count
     return total_checks, unverifiable
@@ -258,7 +255,7 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
         processes, requirements, latest_runs_by_project
     )
     total_checks, unverifiable = _unverifiable_metrics(
-        project_ids, latest_runs_by_project
+        latest_runs_by_project
     )
     rules, publishable, jurisdictions = _catalog_metrics(db, projects)
 
