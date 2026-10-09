@@ -100,9 +100,8 @@ def _seed_organization_and_users(db):
     return org, users
 
 
-def _seed_projects(db, org, engineer):
-    print("Semeando empreendimentos...")
-    project1 = Project(
+def _seed_project_acacias(db, org, engineer):
+    project = Project(
         organization_id=org.id,
         name="Residencial das Acácias",
         description="Residencial unifamiliar de 2 pavimentos em Lajeado/RS",
@@ -122,35 +121,11 @@ def _seed_projects(db, org, engineer):
         units_count=1,
         created_by_id=engineer.id,
     )
-    project2 = Project(
-        organization_id=org.id,
-        name="Residencial Sol Nascente",
-        description="Projeto com inconsistências, para demonstrar bloqueios",
-        address="Rua do Sol",
-        address_number="88",
-        district="Florestal",
-        city_ibge="BR-RS-4311403",
-        city_name="Lajeado",
-        state="RS",
-        use_type="residencial_unifamiliar",
-        units_count=1,
-        created_by_id=engineer.id,
-    )
-    project3 = Project(
-        organization_id=org.id,
-        name="Terreno Rua das Hortênsias",
-        description="Cadastro sem medidas — demonstra o estado 'não verificável'",
-        city_ibge="BR-RS-4311403",
-        city_name="Lajeado",
-        state="RS",
-        created_by_id=engineer.id,
-    )
-    db.add_all([project1, project2, project3])
+    db.add(project)
     db.flush()
-
     project_versions.create_version(
         db,
-        project1,
+        project,
         ProjectParameters(
             zone="Z2",
             building_type="residencial_unifamiliar",
@@ -169,9 +144,29 @@ def _seed_projects(db, org, engineer):
             commit=False,
         ),
     )
+    return project
+
+
+def _seed_project_sol_nascente(db, org, engineer):
+    project = Project(
+        organization_id=org.id,
+        name="Residencial Sol Nascente",
+        description="Projeto com inconsistências, para demonstrar bloqueios",
+        address="Rua do Sol",
+        address_number="88",
+        district="Florestal",
+        city_ibge="BR-RS-4311403",
+        city_name="Lajeado",
+        state="RS",
+        use_type="residencial_unifamiliar",
+        units_count=1,
+        created_by_id=engineer.id,
+    )
+    db.add(project)
+    db.flush()
     project_versions.create_version(
         db,
-        project2,
+        project,
         ProjectParameters(
             zone="Z2",
             building_type="residencial_unifamiliar",
@@ -190,9 +185,24 @@ def _seed_projects(db, org, engineer):
             commit=False,
         ),
     )
+    return project
+
+
+def _seed_project_hortensias(db, org, engineer):
+    project = Project(
+        organization_id=org.id,
+        name="Terreno Rua das Hortênsias",
+        description="Cadastro sem medidas — demonstra o estado 'não verificável'",
+        city_ibge="BR-RS-4311403",
+        city_name="Lajeado",
+        state="RS",
+        created_by_id=engineer.id,
+    )
+    db.add(project)
+    db.flush()
     project_versions.create_version(
         db,
-        project3,
+        project,
         ProjectParameters(zone="Z2", building_type="residencial_unifamiliar"),
         config=VersionConfig(
             user=engineer,
@@ -200,11 +210,22 @@ def _seed_projects(db, org, engineer):
             commit=False,
         ),
     )
+    return project
+
+
+def _seed_projects(db, org, engineer):
+    print("Semeando empreendimentos...")
+    project1 = _seed_project_acacias(db, org, engineer)
+    project2 = _seed_project_sol_nascente(db, org, engineer)
+    project3 = _seed_project_hortensias(db, org, engineer)
+
     db.commit()
 
     for project in (project1, project2, project3):
         db.refresh(project)
-        RegulatoryEngine.evaluate_project(db, project, config=EvaluationConfig(trigger="seed", user=engineer))
+        RegulatoryEngine.evaluate_project(
+            db, project, config=EvaluationConfig(trigger="seed", user=engineer)
+        )
 
     return project1, project2, project3
 
