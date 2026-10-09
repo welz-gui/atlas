@@ -27,6 +27,7 @@ import {
   login,
   setToken,
   setUnauthorizedHandler,
+  evaluateProject,
   updateProjectIdentity,
 } from "./api";
 
@@ -184,6 +185,37 @@ describe("updateProjectIdentity", () => {
           Authorization: `Bearer ${TOKEN}`,
         }),
         body: JSON.stringify(payload),
+      })
+    );
+  });
+});
+
+describe("evaluateProject", () => {
+  beforeEach(() => {
+    global.fetch = vi.fn();
+    setToken(TOKEN);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    setToken(null);
+  });
+
+  it("chama a API com POST e a URL correta", async () => {
+    const id = "123";
+    const report = { score: 100 };
+
+    (global.fetch as any).mockResolvedValueOnce(respostaOk(report));
+
+    await expect(evaluateProject(id)).resolves.toEqual(report);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining(`/projects/${id}/evaluate`),
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: `Bearer ${TOKEN}`,
+        }),
       })
     );
   });
