@@ -24,7 +24,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from datetime import datetime
 
 from app.api.deps import get_current_user, get_project_or_404, tenant_query
@@ -194,6 +194,7 @@ def _build(db: Session, project: Project, user: User) -> PortalProject:
     protocols = (
         tenant_query(db, ProtocolProcess, user)
         .filter(ProtocolProcess.project_id == project.id)
+        .options(selectinload(ProtocolProcess.requirements))
         .order_by(ProtocolProcess.created_at.desc())
         .all()
     )
