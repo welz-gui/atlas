@@ -43,6 +43,9 @@ def db_session():
 
 @pytest.fixture
 def client(db_session):
+    from app.core.limiter import limiter
+    limiter.enabled = False
+
     app.dependency_overrides[get_db] = lambda: db_session
     yield TestClient(app)
     app.dependency_overrides.clear()

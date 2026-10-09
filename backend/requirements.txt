@@ -28,3 +28,4 @@ boto3>=1.34.0
 
 # Camada de IA. Sem AI_PROVIDER configurado nada é chamado.
 anthropic>=0.120.0
+slowapi>=0.1.9
