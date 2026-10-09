@@ -103,6 +103,11 @@ def test_fim_da_janela_invalida_o_token_antigo(monkeypatch):
     assert security.decode_access_token(token) is None
 
 
+
+def test_token_invalido_retorna_none(monkeypatch):
+    security = _com_chaves(monkeypatch, "chave-nova")
+    assert security.decode_access_token("invalid.token.format") is None
+
 def test_token_de_chave_desconhecida_e_recusado(monkeypatch):
     security = _com_chaves(monkeypatch, "intrusa")
     forjado = security.create_access_token("u1", "org1", "owner")
