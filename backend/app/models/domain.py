@@ -26,6 +26,8 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    select,
+    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -763,7 +765,25 @@ class ProtocolProcess(Base):
 
     @property
     def open_requirements_count(self) -> int:
-        return sum(1 for r in self.requirements if r.status in RequirementStatus.OPEN)
+        from sqlalchemy.orm import object_session
+        from sqlalchemy.orm.attributes import instance_state
+
+        state = instance_state(self)
+        # If requirements are already loaded, compute in memory
+        if "requirements" in state.dict:
+            return sum(1 for r in self.requirements if r.status in RequirementStatus.OPEN)
+
+        session = object_session(self)
+        if session:
+            # Query db directly to avoid N+1 full relationship load
+            return session.scalar(
+                select(func.count(ProtocolRequirement.id))
+                .where(
+                    (ProtocolRequirement.process_id == self.id) &
+                    (ProtocolRequirement.status.in_(RequirementStatus.OPEN))
+                )
+            ) or 0
+        return 0
 
 
 class ProtocolRequirement(Base):
