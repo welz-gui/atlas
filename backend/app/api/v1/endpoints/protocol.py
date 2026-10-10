@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import (
     get_project_or_404,
@@ -80,6 +80,10 @@ def list_protocols(
     return (
         tenant_query(db, ProtocolProcess, user)
         .filter(ProtocolProcess.project_id == project_id)
+        .options(
+            selectinload(ProtocolProcess.requirements),
+            selectinload(ProtocolProcess.events),
+        )
         .order_by(ProtocolProcess.created_at.desc())
         .all()
     )
@@ -318,6 +322,7 @@ def prediction_accuracy(
     processes = (
         tenant_query(db, ProtocolProcess, user)
         .filter(ProtocolProcess.project_id == project_id)
+        .options(selectinload(ProtocolProcess.requirements))
         .all()
     )
     requirements = [r for process in processes for r in process.requirements]
