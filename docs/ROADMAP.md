@@ -4,14 +4,14 @@ Documento vivo. Consolida o **roadmap estratégico** do plano (§9 e §10 de
 [`PLANO_DE_IMPLEMENTACAO_v2.md`](PLANO_DE_IMPLEMENTACAO_v2.md)) com o **estado
 real do código** e o **caminho de execução** de cada estágio.
 
-- Última atualização: **2026-10-04**
-- Base avaliada: `master` em `04996c2`, espelhada em
+- Última atualização: **2026-10-09**
+- Base avaliada: `master` em `97aca9d`, espelhada em
   [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
   estágios foi levantado em `7dc50d2` e continua valendo, com uma exceção
   registrada abaixo: o **Estágio 6 deixou de ser "nada construído"**.
 - **A Fase D está encerrada, exceto pelo D3** — que nunca foi de engenharia.
   Ver o registro adiante.
-- Suíte: **554 casos de backend** (eram 199 em `7dc50d2`) e **65 de
+- Suíte: **561 casos de backend** (eram 199 em `7dc50d2`) e **75 de
   frontend** (8 arquivos, incluindo componentes — `ErrorBanner`, `StatusChip`,
   `EmptyState`, `OfflineBar`, `AppShell`, `Navbar` — e a fila offline).
   Mais 13 de integração e 6 de RLS, que só rodam na CI porque exigem
@@ -223,7 +223,7 @@ delas falhar, pare e conserte antes de continuar a construir.
 
 | Worktree | Branch | PR | Situação |
 |---|---|---|---|
-| `worktrees/roadmap-update-8` | `docs/atualiza-roadmap-oitava-leva` | — | 🟨 A frente que trouxe esta atualização. |
+| `worktrees/roadmap-update-9` | `docs/atualiza-roadmap-nona-leva` | — | 🟨 A frente que trouxe esta atualização. |
 
 Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
@@ -241,7 +241,7 @@ Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
 ## Estado atual em uma página
 
-**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 554 testes; RLS ativa, MFA
+**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 561 testes; RLS ativa, MFA
 por TOTP, log em JSON com correlação e sondas de vida e prontidão):
 
 ```
@@ -1346,10 +1346,10 @@ um sem escolher nenhum. Suíte: 353 → 367.
 si. Depende de decisão e de conta, não de código — e, como o D3, não é
 engenharia que o trava.
 
-### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-10-04)
+### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-10-09)
 
-Um agente externo (Jules, do Google) abriu oito levas de PRs contra o
-repositório — 30, 42, 24, 7, 38, 23, 12 e 2 — do tipo "code health": remoção de import morto,
+Um agente externo (Jules, do Google) abriu nove levas de PRs contra o
+repositório — 30, 42, 24, 7, 38, 23, 12, 2 e 18 — do tipo "code health": remoção de import morto,
 refator de função complexa, teste de caminho de erro, correção de N+1, e
 algumas de segurança. Nenhuma foi mesclada às cegas por CI verde; cada uma foi
 lida contra o código real antes de decidir. O que isso revelou vale mais do
@@ -1451,6 +1451,26 @@ que qualquer regra individual corrigida:
   mesmo `citation()`, mas gravam `source_is_verified` e o laudo sai "USO
   INTERNO" sem regra conferida — **não investiguei se isso basta**. Ficou em
   *Dívidas técnicas*;
+
+- **um N+1 maior do que o relatado.** Duas PRs (#287, #289) acrescentavam
+  `joinedload` em dois endpoints com N+1 de exigências. Contando os SELECTs de 2
+  para 6 processos: portal 10 → 14, `prediction-accuracy` 5 → 9 — e a **lista de
+  protocolos**, que nenhuma das duas tocava e serializa `requirements` **e**
+  `events` de cada processo, 7 → 15 (+2 por processo). Corrigidos os três em
+  #299, com `selectinload` (o `joinedload` das PRs multiplicaria as linhas na
+  lista, que tem duas coleções) e um teste que afirma o *formato* do custo — as
+  consultas não crescem com o número de processos — em vez de um número que
+  mudaria a cada coluna nova; cada `selectinload` removido derruba o teste da
+  sua tela. Só estes três endpoints foram medidos: ficou em *Dívidas técnicas*;
+- **uma lacuna real, com a correção errada.** A #298 "corrigia falta de limite
+  de tentativas no login" — e o login de fato não tem limite (conferido em
+  `auth.py`). Mas o `slowapi` com contador em memória vale por processo (com N
+  workers o limite real é N×5/min), a chave é o IP da conexão (atrás de proxy
+  reverso, todo mundo divide um balde, e qualquer pessoa trava o login de
+  todos) e não há limite por conta, que é o que cobriria força bruta
+  distribuída e o código de MFA. Fechada sem descartar o problema: a política
+  (atraso progressivo ou bloqueio, por conta ou por IP) e o lugar do estado
+  são decisão de produto. Registrada em *Dívidas técnicas*;
 
 **Padrões que se repetiram e mudaram como a revisão foi feita:**
 
@@ -1610,6 +1630,41 @@ que qualquer regra individual corrigida:
   commit de revert e o resto da árvore no estado antigo. Nenhuma tinha conteúdo
   novo — conferido pelo diff contra `master`, não presumido;
 
+- **a "otimização" que mede pior.** A #295 trocava a carga das exigências por
+  um `COUNT` por processo em `open_requirements_count`. Sobre o mesmo teste de
+  contagem, `master` faz 7 → 15 consultas na lista de protocolos e a PR faz
+  9 → 21: a resposta serializa `requirements` logo depois, e cada processo
+  passa a pagar as duas. Só se sabe medindo — e a medição deu à PR um lugar
+  na consolidação, não um merge;
+- **equivalência medida, não lida.** As refatorações dos scripts de seed (#288,
+  #291) mexem em quem carrega a invariante "nenhum script publica regra"
+  (Estágio 0). Em vez de ler 540 linhas movidas, rodei `seed.py` e
+  `stage0_concierge_seed.py` sobre um SQLite recém-migrado, no `master` e em
+  cada PR, e comparei o estado de todas as tabelas, normalizando UUIDs,
+  timestamps e hash de senha: **idêntico**, com zero análise publicável e os
+  logs iguais. O único campo que muda entre execuções é `content_hash`,
+  porque o hash inclui o `project.id` aleatório. Mescladas por isso;
+- **três mudanças numa PR, e a pior escondida.** A #296 "removia duplicação"
+  em `retention.py`, mas trazia junto `datetime.utcnow()` →
+  `datetime.now(timezone.utc)` (num único módulo, sobre colunas e defaults
+  naive-UTC) e a troca de `Optional`/`List` por `X | None`/`list`. Não
+  reproduzi falha — as comparações são em SQL —, mas o efeito em Postgres
+  depende do fuso da sessão e **não foi verificado**; e é código de expurgo de
+  dado. Fechada; se voltar, que seja só a deduplicação;
+- **o parâmetro-objeto, de novo, em dobro.** `ModelResponseContext` (#290,
+  terceira vez) e `BaselineContext` (#297): este tem os mesmos 10 campos que
+  `_return_baseline` já recebia, montados em 5 pontos de chamada, com
+  `context: AskContext` como primeiro argumento — um objeto embrulhando outro.
+  Fechadas com o motivo escrito, para recusar de novo em minutos;
+- **uma PR por função fina, quatro no mesmo ponto do arquivo.** #281, #282,
+  #283 e #286 apendavam no fim de `api.test.ts`; uma redeclarava `TOKEN` e
+  montava a resposta à mão. Consolidadas em #301 com os helpers do arquivo,
+  e verificadas por mutação em `api.ts` (`humanize` trocando só o primeiro
+  `_`, `evaluateProject` como GET, caminho errado, documento sem corpo). O
+  teste de token malformado (#285), parametrizado em #300, pegou algo que os
+  testes de assinatura e expiração não pegavam: um `except` estreito demais em
+  `decode_access_token`;
+
 Resultado: **21 PRs mescladas na primeira leva**; na segunda, **21 mescladas**
 (16 diretas + 5 reescritas) e **25 fechadas**; na terceira, **12 mescladas
 diretamente**, mais **7 refeitas em 4 PRs novas** (mesmo padrão de cachos na
@@ -1635,9 +1690,13 @@ diretamente** (#264, depois de tirar um import sem uso, e #268), **2
 absorvidas** numa consolidação própria (#275) e **8 fechadas** com o motivo
 técnico em cada uma. Mais uma PR própria de correção (#274); na oitava, **1
 PR com teste aproveitável** (#278, consolidada e reescrita em #279) e **1 sem
-diff** (#277, fechada). Suíte: 367 → 441 → 452 → 453 → 469 → 534 → 551 → 554
-(backend), 15 → 21 → 39 → 40 → 65 (frontend, 4 arquivos até a quarta leva, 8
-desde a quinta; da sexta em diante nenhuma acrescentou teste de frontend).
+diff** (#277, fechada); na nona, **5 das 18 mescladas diretamente** (#288,
+#291, #292, #293, #294), **8 absorvidas** em três consolidações próprias (#299,
+#300, #301) e **5 fechadas** (#290, #295, #296, #297, #298) com o motivo
+técnico em cada uma. Suíte: 367 → 441 → 452 → 453 → 469 → 534 → 551 → 554 →
+561 (backend), 15 → 21 → 39 → 40 → 65 → 75 (frontend, 4 arquivos até a quarta
+leva, 8 desde a quinta; da sexta à oitava nenhuma acrescentou teste de
+frontend, a nona acrescentou 10).
 
 **Pendência sem solução de código:** branches de PRs já mescladas ou fechadas
 continuam reaparecendo em `origin` depois de apagadas — inclusive branches de
@@ -1772,6 +1831,8 @@ vazia.
 | **Servidor S3 de teste sem manutenção** | A CI usa `bitnamilegacy/minio` numa tag congelada: o MinIO encerrou a distribuição comunitária (Docker Hub 404, Quay 401, `dl.min.io` 410) e a Bitnami não atualiza o arquivo. Sem correção de segurança, mas é servidor descartável de teste. Quando a imagem sumir, o caminho é um servidor S3 mantido — não outro espelho do MinIO | `.github/workflows/ci.yml` |
 | Falha intermitente em `Integração` | `test_conteudo_grande_atravessa_em_blocos` falhou **uma vez** em ~25 execuções (`ClientDisconnected` no primeiro `PutObject` de 5 MiB) e passou na repetição. Hipótese não comprovada: o passo de espera sonda `/minio/health/live` e não `/ready`. Amostra pequena demais para afirmar | `.github/workflows/ci.yml` |
 | `RuleSource.is_verified` não quer dizer "conferido por pessoa" | Só significa "tem documento **e** artigo"; o critério real é `Rule.is_publishable` (estado + validador). O assistente já omite o artigo de regra não validada (#274), mas `ai/retrieval.py` ainda entrega ao modelo `fonte_conferida` calculado por `is_verified`, e o motor grava `source_is_verified` com o mesmo critério. Não revisado se isso basta no laudo | `regulatory/catalog.py`, `ai/retrieval.py`, `services/regulatory_engine.py` |
+| **Login sem limite de tentativas** | `POST /auth/login` não limita tentativas, nem por IP nem por conta; o código de MFA (6 dígitos) fica exposto à mesma força bruta. A tentativa do Jules (#298) não serve: contador em memória por processo, chave por IP (atrás de proxy, todos dividem o balde). Decidir a política (atraso progressivo × bloqueio, por conta × por IP) e onde guardar o estado (banco ou Redis) antes de implementar | `backend/app/api/v1/endpoints/auth.py` |
+| N+1 fora dos três endpoints medidos | Só a lista de protocolos, `prediction-accuracy` e o portal foram medidos e corrigidos (#299). Outras telas que serializam coleções não foram auditadas; `tests/test_protocol_queries.py` é o molde (conta SELECTs entre 2 e 6 filhos, sem fixar número) | `backend/app/api/v1/endpoints/` |
 | **Sem provedor de hospedagem** | A imagem e a composição existem; o ambiente, não | `docker-compose.prod.yml` |
 | **Catálogo maior, validação parada** | O coletor aumenta a fila do D3 sem que ninguém a consuma | `regulatory/discovery.py` |
 | RLS não cobre `users` | Listagem de usuários tem só o filtro de aplicação; as tabelas com trabalho de cliente estão cobertas | `alembic/.../a4d7e91c5b20` |
