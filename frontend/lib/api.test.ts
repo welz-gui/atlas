@@ -23,7 +23,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   ApiError,
+  createRegulatoryDocument,
+  evaluateProject,
   fetchProjects,
+  fetchProjectValidations,
+  humanize,
   login,
   setToken,
   setUnauthorizedHandler,
@@ -186,5 +190,80 @@ describe("updateProjectIdentity", () => {
         body: JSON.stringify(payload),
       })
     );
+  });
+});
+
+describe("chamadas finas sobre request", () => {
+  beforeEach(() => {
+    global.fetch = vi.fn();
+    setToken(TOKEN);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    setToken(null);
+  });
+
+  it("fetchProjectValidations lê as validações do projeto", async () => {
+    const validacoes = [{ id: "val-1", status: "conforme" }];
+    (global.fetch as any).mockResolvedValueOnce(respostaOk(validacoes));
+
+    await expect(fetchProjectValidations("proj-123")).resolves.toEqual(validacoes);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/projects/proj-123/validations"),
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: `Bearer ${TOKEN}` }),
+      })
+    );
+  });
+
+  it("evaluateProject dispara a análise com POST", async () => {
+    const relatorio = { score: 100 };
+    (global.fetch as any).mockResolvedValueOnce(respostaOk(relatorio));
+
+    await expect(evaluateProject("123")).resolves.toEqual(relatorio);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/projects/123/evaluate"),
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ Authorization: `Bearer ${TOKEN}` }),
+      })
+    );
+  });
+
+  it("createRegulatoryDocument envia o documento no corpo de um POST", async () => {
+    const payload = { jurisdiction: "BR-RS-4311403", title: "Plano Diretor", doc_type: "lei" };
+    const documento = { id: "123", ...payload };
+    (global.fetch as any).mockResolvedValueOnce(respostaOk(documento));
+
+    await expect(createRegulatoryDocument(payload)).resolves.toEqual(documento);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/catalog/documents"),
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TOKEN}`,
+        }),
+        body: JSON.stringify(payload),
+      })
+    );
+  });
+});
+
+describe("humanize", () => {
+  it.each([
+    [null, "—"],
+    [undefined, "—"],
+    ["", "—"],
+    ["recuo_frontal", "recuo frontal"],
+    ["em_validacao_tecnica", "em validacao tecnica"],
+    ["sem sublinhado", "sem sublinhado"],
+    ["___", "   "],
+  ])("humanize(%j) -> %j", (entrada, esperado) => {
+    expect(humanize(entrada)).toBe(esperado);
   });
 });
