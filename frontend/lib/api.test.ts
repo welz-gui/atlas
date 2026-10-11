@@ -28,6 +28,7 @@ import {
   setToken,
   setUnauthorizedHandler,
   updateProjectIdentity,
+  fetchCatalogRules,
 } from "./api";
 
 const TOKEN = "token-de-teste";
@@ -186,5 +187,58 @@ describe("updateProjectIdentity", () => {
         body: JSON.stringify(payload),
       })
     );
+  });
+});
+
+
+describe("fetchCatalogRules", () => {
+  beforeEach(() => {
+    global.fetch = vi.fn();
+    setToken(TOKEN);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    setToken(null);
+  });
+
+  it("chama a API sem query string se nenhum parâmetro for passado", async () => {
+    (global.fetch as any).mockResolvedValueOnce(respostaOk([]));
+    await fetchCatalogRules();
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\/catalog\/rules$/),
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: `Bearer ${TOKEN}` }) })
+    );
+  });
+
+  it("chama a API com jurisdiction na query string", async () => {
+    (global.fetch as any).mockResolvedValueOnce(respostaOk([]));
+    await fetchCatalogRules({ jurisdiction: "br" });
+    const [[url, init]] = (global.fetch as any).mock.calls;
+    expect(url.includes("/catalog/rules?")).toBe(true);
+    const qs = new URLSearchParams(url.split("?")[1]);
+    expect(qs.get("jurisdiction")).toBe("br");
+    expect(init).toMatchObject({ headers: { Authorization: `Bearer ${TOKEN}` } });
+  });
+
+  it("chama a API com state na query string", async () => {
+    (global.fetch as any).mockResolvedValueOnce(respostaOk([]));
+    await fetchCatalogRules({ state: "vigente" as any });
+    const [[url, init]] = (global.fetch as any).mock.calls;
+    expect(url.includes("/catalog/rules?")).toBe(true);
+    const qs = new URLSearchParams(url.split("?")[1]);
+    expect(qs.get("state")).toBe("vigente");
+    expect(init).toMatchObject({ headers: { Authorization: `Bearer ${TOKEN}` } });
+  });
+
+  it("chama a API com múltiplos parâmetros na query string", async () => {
+    (global.fetch as any).mockResolvedValueOnce(respostaOk([]));
+    await fetchCatalogRules({ jurisdiction: "sp", state: "rascunho_extraido_por_ia" as any });
+    const [[url, init]] = (global.fetch as any).mock.calls;
+    expect(url.includes("/catalog/rules?")).toBe(true);
+    const qs = new URLSearchParams(url.split("?")[1]);
+    expect(qs.get("jurisdiction")).toBe("sp");
+    expect(qs.get("state")).toBe("rascunho_extraido_por_ia");
+    expect(init).toMatchObject({ headers: { Authorization: `Bearer ${TOKEN}` } });
   });
 });
