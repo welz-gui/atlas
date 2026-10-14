@@ -4,14 +4,14 @@ Documento vivo. Consolida o **roadmap estratégico** do plano (§9 e §10 de
 [`PLANO_DE_IMPLEMENTACAO_v2.md`](PLANO_DE_IMPLEMENTACAO_v2.md)) com o **estado
 real do código** e o **caminho de execução** de cada estágio.
 
-- Última atualização: **2026-10-09**
-- Base avaliada: `master` em `97aca9d`, espelhada em
+- Última atualização: **2026-10-14**
+- Base avaliada: `master` em `dfae959`, espelhada em
   [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
   estágios foi levantado em `7dc50d2` e continua valendo, com uma exceção
   registrada abaixo: o **Estágio 6 deixou de ser "nada construído"**.
 - **A Fase D está encerrada, exceto pelo D3** — que nunca foi de engenharia.
   Ver o registro adiante.
-- Suíte: **561 casos de backend** (eram 199 em `7dc50d2`) e **75 de
+- Suíte: **561 casos de backend** (eram 199 em `7dc50d2`) e **81 de
   frontend** (8 arquivos, incluindo componentes — `ErrorBanner`, `StatusChip`,
   `EmptyState`, `OfflineBar`, `AppShell`, `Navbar` — e a fila offline).
   Mais 13 de integração e 6 de RLS, que só rodam na CI porque exigem
@@ -223,7 +223,7 @@ delas falhar, pare e conserte antes de continuar a construir.
 
 | Worktree | Branch | PR | Situação |
 |---|---|---|---|
-| `worktrees/roadmap-update-9` | `docs/atualiza-roadmap-nona-leva` | — | 🟨 A frente que trouxe esta atualização. |
+| `worktrees/roadmap-update-10` | `docs/atualiza-roadmap-decima-leva` | — | 🟨 A frente que trouxe esta atualização. |
 
 Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
@@ -1346,10 +1346,10 @@ um sem escolher nenhum. Suíte: 353 → 367.
 si. Depende de decisão e de conta, não de código — e, como o D3, não é
 engenharia que o trava.
 
-### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-10-09)
+### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-10-14)
 
-Um agente externo (Jules, do Google) abriu nove levas de PRs contra o
-repositório — 30, 42, 24, 7, 38, 23, 12, 2 e 18 — do tipo "code health": remoção de import morto,
+Um agente externo (Jules, do Google) abriu dez levas de PRs contra o
+repositório — 30, 42, 24, 7, 38, 23, 12, 2, 18 e 1 — do tipo "code health": remoção de import morto,
 refator de função complexa, teste de caminho de erro, correção de N+1, e
 algumas de segurança. Nenhuma foi mesclada às cegas por CI verde; cada uma foi
 lida contra o código real antes de decidir. O que isso revelou vale mais do
@@ -1693,10 +1693,15 @@ PR com teste aproveitável** (#278, consolidada e reescrita em #279) e **1 sem
 diff** (#277, fechada); na nona, **5 das 18 mescladas diretamente** (#288,
 #291, #292, #293, #294), **8 absorvidas** em três consolidações próprias (#299,
 #300, #301) e **5 fechadas** (#290, #295, #296, #297, #298) com o motivo
-técnico em cada uma. Suíte: 367 → 441 → 452 → 453 → 469 → 534 → 551 → 554 →
-561 (backend), 15 → 21 → 39 → 40 → 65 → 75 (frontend, 4 arquivos até a quarta
-leva, 8 desde a quinta; da sexta à oitava nenhuma acrescentou teste de
-frontend, a nona acrescentou 10).
+técnico em cada uma; na décima, **1 PR** (#303, testes de `fetchCatalogRules`),
+reescrita em #304 porque conflitava com `master` depois da #301 — a primeira
+função fina com lógica própria (monta a query string), logo com teste que vale;
+a primeira versão do *meu* teste deixou sobreviver a mutação "`?` solto quando
+não há filtro" (separava a URL no `?` e não via o sufixo), e só passou a pegá-la
+depois de conferir a URL crua. Suíte: 367 → 441 → 452 → 453 → 469 → 534 → 551 →
+554 → 561 (backend), 15 → 21 → 39 → 40 → 65 → 75 → 81 (frontend, 4 arquivos
+até a quarta leva, 8 desde a quinta; da sexta à oitava nenhuma acrescentou
+teste de frontend, a nona acrescentou 10 e a décima, 6).
 
 **Pendência sem solução de código:** branches de PRs já mescladas ou fechadas
 continuam reaparecendo em `origin` depois de apagadas — inclusive branches de
