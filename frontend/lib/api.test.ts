@@ -25,6 +25,7 @@ import {
   ApiError,
   createRegulatoryDocument,
   evaluateProject,
+  fetchCatalogRules,
   fetchProjects,
   fetchProjectValidations,
   humanize,
@@ -265,5 +266,54 @@ describe("humanize", () => {
     ["___", "   "],
   ])("humanize(%j) -> %j", (entrada, esperado) => {
     expect(humanize(entrada)).toBe(esperado);
+  });
+});
+
+describe("fetchCatalogRules — a query string", () => {
+  beforeEach(() => {
+    global.fetch = vi.fn();
+    setToken(TOKEN);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    setToken(null);
+  });
+
+  async function urlChamada(params?: Parameters<typeof fetchCatalogRules>[0]) {
+    (global.fetch as any).mockResolvedValueOnce(respostaOk([]));
+    await fetchCatalogRules(params);
+    const [url] = (global.fetch as any).mock.calls[0];
+    const [caminho, query = ""] = String(url).split("?");
+    return { url: String(url), caminho, filtros: Object.fromEntries(new URLSearchParams(query)) };
+  }
+
+  it.each([
+    ["sem filtro, não manda query string", undefined, {}],
+    ["só a jurisdição", { jurisdiction: "BR-RS-4311403" }, { jurisdiction: "BR-RS-4311403" }],
+    ["só o estado", { state: "vigente" as const }, { state: "vigente" }],
+    [
+      "os dois",
+      { jurisdiction: "BR-RS-4311403", state: "em_validacao" as const },
+      { jurisdiction: "BR-RS-4311403", state: "em_validacao" },
+    ],
+    ["filtro vazio é ignorado", { jurisdiction: "" }, {}],
+  ])("%s", async (_nome, params, esperado) => {
+    const { url, caminho, filtros } = await urlChamada(params);
+
+    expect(caminho).toMatch(/\/catalog\/rules$/);
+    expect(filtros).toEqual(esperado);
+    // Sem filtro, nem um "?" solto no fim da URL.
+    expect(url.includes("?")).toBe(Object.keys(esperado).length > 0);
+  });
+
+  it("envia o token", async () => {
+    await urlChamada({ state: "vigente" });
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: `Bearer ${TOKEN}` }),
+      })
+    );
   });
 });
