@@ -182,43 +182,72 @@ export async function flushOutbox(): Promise<FlushReport> {
   let sent = 0;
   let failed = 0;
 
+  // Group items by projectId to process different projects in parallel
+  // but strictly sequentially within the same project to preserve order.
+  const itemsByProject: Record<string, OutboxItem[]> = {};
   for (const item of items) {
-    if (item.status === "falhou") {
-      failed += 1;
-      continue;
+    if (!itemsByProject[item.projectId]) {
+      itemsByProject[item.projectId] = [];
     }
-
-    await update({ ...item, status: "enviando" });
-
-    try {
-      if (item.kind === "daily_log") {
-        await createDailyLog(item.projectId, item.payload as never);
-      } else {
-        await createProjectTask(item.projectId, item.payload as never);
-      }
-      await removeFromOutbox(item.id);
-      sent += 1;
-    } catch (error) {
-      const apiError = error instanceof ApiError ? error : null;
-      const permanente =
-        apiError !== null &&
-        apiError.status >= 400 &&
-        apiError.status < 500 &&
-        apiError.status !== 401;
-
-      await update({
-        ...item,
-        status: permanente ? "falhou" : "pendente",
-        attempts: item.attempts + 1,
-        lastError: apiError?.detail ?? (error as Error).message,
-      });
-      failed += 1;
-
-      // Falha de rede derruba o resto da tentativa: não adianta insistir nos
-      // próximos itens enquanto não há conexão.
-      if (apiError?.isOffline) break;
-    }
+    itemsByProject[item.projectId].push(item);
   }
+
+  let isOffline = false;
+
+  const processProject = async (projectItems: OutboxItem[]) => {
+    for (const item of projectItems) {
+      if (item.status === "falhou") {
+        failed += 1;
+        continue;
+      }
+
+      if (isOffline) {
+        break;
+      }
+
+      await update({ ...item, status: "enviando" });
+
+      if (isOffline) {
+        await update({ ...item, status: "pendente" });
+        break;
+      }
+
+      try {
+        if (item.kind === "daily_log") {
+          await createDailyLog(item.projectId, item.payload as never);
+        } else {
+          await createProjectTask(item.projectId, item.payload as never);
+        }
+        await removeFromOutbox(item.id);
+        sent += 1;
+      } catch (error) {
+        const apiError = error instanceof ApiError ? error : null;
+        if (apiError?.isOffline) {
+          isOffline = true;
+        }
+
+        const permanente =
+          apiError !== null &&
+          apiError.status >= 400 &&
+          apiError.status < 500 &&
+          apiError.status !== 401;
+
+        await update({
+          ...item,
+          status: permanente ? "falhou" : "pendente",
+          attempts: item.attempts + 1,
+          lastError: apiError?.detail ?? (error as Error).message,
+        });
+        failed += 1;
+
+        if (isOffline) {
+          break;
+        }
+      }
+    }
+  };
+
+  await Promise.all(Object.values(itemsByProject).map(processProject));
 
   const remaining = (await listOutbox()).length;
   return { sent, failed, remaining };
