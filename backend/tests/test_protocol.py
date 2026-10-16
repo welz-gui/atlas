@@ -244,3 +244,64 @@ def test_protocolo_de_outro_tenant_responde_404(client, db_session, process):
         headers=headers,
         json={"status": ProtocolStatus.APROVADO},
     ).status_code == 404
+
+def test_list_protocols_project_not_found(client, engineer_headers):
+    response = client.get(
+        "/api/v1/projects/invalid-project-id/protocols",
+        headers=engineer_headers
+    )
+    assert response.status_code == 404
+
+def test_create_protocol_invalid_version(client, engineer_headers, project_com_bloqueio):
+    response = client.post(
+        f"/api/v1/projects/{project_com_bloqueio['id']}/protocols",
+        headers=engineer_headers,
+        json={
+            "protocol_number": "2026/PMU-004822",
+            "agency": "Secretaria de Planejamento",
+            "project_version_id": "invalid-version-id"
+        },
+    )
+    assert response.status_code == 422
+    assert "A versão informada não pertence a este empreendimento." in response.text
+
+def test_list_requirements_process_not_found(client, engineer_headers):
+    response = client.get(
+        "/api/v1/protocols/invalid-process-id/requirements",
+        headers=engineer_headers
+    )
+    assert response.status_code == 404
+
+def test_update_requirement_invalid_status(client, engineer_headers, process):
+    requirement = client.post(
+        f"/api/v1/protocols/{process['id']}/requirements",
+        headers=engineer_headers,
+        json={"description": "Corrigir o recuo frontal."},
+    ).json()
+
+    response = client.patch(
+        f"/api/v1/requirements/{requirement['id']}",
+        headers=engineer_headers,
+        json={
+            "status": "inventado"
+        },
+    )
+    assert response.status_code == 422
+    assert "Situação inválida" in response.text
+
+def test_create_protocol_success(client, engineer_headers, project_com_bloqueio):
+    response = client.post(
+        f"/api/v1/projects/{project_com_bloqueio['id']}/protocols",
+        headers=engineer_headers,
+        json={
+            "protocol_number": "2026/PMU-004833",
+            "agency": "Secretaria de Planejamento 2",
+            "submitted_at": "2026-07-20",
+            "process_type": "Licenciamento"
+        },
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["protocol_number"] == "2026/PMU-004833"
+    assert data["agency"] == "Secretaria de Planejamento 2"
+    assert data["process_type"] == "Licenciamento"
