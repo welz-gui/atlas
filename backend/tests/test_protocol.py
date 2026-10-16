@@ -244,3 +244,18 @@ def test_protocolo_de_outro_tenant_responde_404(client, db_session, process):
         headers=headers,
         json={"status": ProtocolStatus.APROVADO},
     ).status_code == 404
+
+def test_get_protocol_success(client, engineer_headers, process):
+    response = client.get(
+        f"/api/v1/protocols/{process['id']}", headers=engineer_headers
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == process["id"]
+    assert data["protocol_number"] == process["protocol_number"]
+
+def test_get_protocol_not_found(client, engineer_headers):
+    response = client.get(
+        "/api/v1/protocols/non_existent_id", headers=engineer_headers
+    )
+    assert response.status_code == 404
