@@ -244,3 +244,77 @@ def test_protocolo_de_outro_tenant_responde_404(client, db_session, process):
         headers=headers,
         json={"status": ProtocolStatus.APROVADO},
     ).status_code == 404
+
+
+def test_list_protocols(client, engineer_headers, project_com_bloqueio, process):
+    response = client.get(
+        f"/api/v1/projects/{project_com_bloqueio['id']}/protocols",
+        headers=engineer_headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) >= 1
+    assert data[0]["id"] == process["id"]
+
+
+def test_create_protocol_invalid_version(client, engineer_headers, project_com_bloqueio):
+    response = client.post(
+        f"/api/v1/projects/{project_com_bloqueio['id']}/protocols",
+        headers=engineer_headers,
+        json={
+            "protocol_number": "2026/PMU-004821",
+            "agency": "Secretaria de Planejamento",
+            "submitted_at": "2026-07-15",
+            "project_version_id": "00000000-0000-0000-0000-000000000000"
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_list_requirements(client, engineer_headers, process):
+    client.post(
+        f"/api/v1/protocols/{process['id']}/requirements",
+        headers=engineer_headers,
+        json={"description": "Exigencia 1"},
+    )
+    response = client.get(
+        f"/api/v1/protocols/{process['id']}/requirements",
+        headers=engineer_headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) >= 1
+
+
+def test_update_requirement_invalid_status(client, engineer_headers, process):
+    requirement = client.post(
+        f"/api/v1/protocols/{process['id']}/requirements",
+        headers=engineer_headers,
+        json={"description": "Exigencia 1"},
+    ).json()
+
+    response = client.patch(
+        f"/api/v1/requirements/{requirement['id']}",
+        headers=engineer_headers,
+        json={"status": "status_invalido"},
+    )
+    assert response.status_code == 422
+
+
+def test_change_protocol_status_basic(client, engineer_headers, process):
+    response = client.patch(
+        f"/api/v1/protocols/{process['id']}/status",
+        headers=engineer_headers,
+        json={"status": "em_analise"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "em_analise"
+
+
+def test_change_protocol_status_not_found(client, engineer_headers):
+    response = client.patch(
+        f"/api/v1/protocols/00000000-0000-0000-0000-000000000000/status",
+        headers=engineer_headers,
+        json={"status": "em_analise"},
+    )
+    assert response.status_code == 404
