@@ -111,6 +111,44 @@ class RegulatoryEngine:
         }
 
     @classmethod
+    def _create_analysis_run(
+        cls,
+        project: Project,
+        target: ProjectVersion,
+        jurisdiction: str,
+        catalog_version: str,
+        config: EvaluationConfig,
+        params: dict[str, Any],
+        results: list[dict[str, Any]],
+    ) -> AnalysisRun:
+        return AnalysisRun(
+            organization_id=project.organization_id,
+            project_id=project.id,
+            project_version_id=target.id,
+            project_version_number=target.version_number,
+            jurisdiction=jurisdiction,
+            catalog_version=catalog_version,
+            engine_version=ENGINE_VERSION,
+            trigger=config.trigger,
+            total_checks=len(results),
+            conforme_count=sum(1 for r in results if r["status"] == CheckOutcome.CONFORME),
+            nao_conforme_count=sum(
+                1 for r in results if r["status"] == CheckOutcome.NAO_CONFORME
+            ),
+            atencao_count=sum(1 for r in results if r["status"] == CheckOutcome.ATENCAO),
+            nao_verificavel_count=sum(
+                1 for r in results if r["status"] == CheckOutcome.NAO_VERIFICAVEL
+            ),
+            # §7.5 — o laudo só é publicável se toda regra aplicada estiver
+            # validada. Uma análise sem regra alguma também não é publicável.
+            is_publishable=bool(results) and all(r["is_publishable"] for r in results),
+            content_hash=cls._content_hash(
+                project, target, params, results, catalog_version
+            ),
+            requested_by_id=config.user.id if config.user else None,
+        )
+
+    @classmethod
     def evaluate_project(
         cls,
         db: Session,
@@ -142,31 +180,8 @@ class RegulatoryEngine:
         ]
         results = [cls._build_result(rule, params) for rule in rules]
 
-        run = AnalysisRun(
-            organization_id=project.organization_id,
-            project_id=project.id,
-            project_version_id=target.id,
-            project_version_number=target.version_number,
-            jurisdiction=jurisdiction,
-            catalog_version=catalog_version,
-            engine_version=ENGINE_VERSION,
-            trigger=config.trigger,
-            total_checks=len(results),
-            conforme_count=sum(1 for r in results if r["status"] == CheckOutcome.CONFORME),
-            nao_conforme_count=sum(
-                1 for r in results if r["status"] == CheckOutcome.NAO_CONFORME
-            ),
-            atencao_count=sum(1 for r in results if r["status"] == CheckOutcome.ATENCAO),
-            nao_verificavel_count=sum(
-                1 for r in results if r["status"] == CheckOutcome.NAO_VERIFICAVEL
-            ),
-            # §7.5 — o laudo só é publicável se toda regra aplicada estiver
-            # validada. Uma análise sem regra alguma também não é publicável.
-            is_publishable=bool(results) and all(r["is_publishable"] for r in results),
-            content_hash=cls._content_hash(
-                project, target, params, results, catalog_version
-            ),
-            requested_by_id=config.user.id if config.user else None,
+        run = cls._create_analysis_run(
+            project, target, jurisdiction, catalog_version, config, params, results
         )
         db.add(run)
         db.flush()
