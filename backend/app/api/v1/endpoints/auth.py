@@ -209,13 +209,19 @@ def consume_second_factor(db: Session, user: User, code: str) -> bool:
             db.commit()
         return True
 
+    matched_recovery = None
     for recovery in user.recovery_codes:
         if recovery.used_at is None and mfa.verify_recovery_code(
             code, recovery.code_hash
         ):
-            recovery.used_at = datetime.utcnow()
-            db.commit()
-            return True
+            matched_recovery = recovery
+            break
+
+    if matched_recovery:
+        matched_recovery.used_at = datetime.utcnow()
+        db.commit()
+        return True
+
     return False
 
 
