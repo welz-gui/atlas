@@ -176,3 +176,33 @@ def test_hash_ignora_campos_de_controle():
     base.client_token = "token-qualquer"
 
     assert assinatura.content_hash(base) == referencia
+
+def test_reenvio_de_diario_existente_com_client_token(client, engineer_headers, project):
+    token = "token-unico-123"
+    log1 = _criar(client, engineer_headers, project["id"], client_token=token)
+    log2 = _criar(client, engineer_headers, project["id"], client_token=token)
+
+    assert log1["id"] == log2["id"]
+
+def test_sign_daily_log_diario_inexistente_retorna_404(client, engineer_headers, project):
+    resposta = client.post(
+        f"/api/v1/daily-logs/00000000-0000-0000-0000-000000000000/sign", headers=engineer_headers
+    )
+    assert resposta.status_code == 404
+
+def test_sign_daily_log_assina_e_retorna_log_valido(
+    client, engineer_headers, project, engineer
+):
+    log = _criar(client, engineer_headers, project["id"])
+
+    resposta = client.post(
+        f"/api/v1/daily-logs/{log['id']}/sign", headers=engineer_headers
+    )
+    assert resposta.status_code == 200, resposta.text
+    assinado = resposta.json()
+
+    assert assinado["status"] == DailyLogState.ASSINADO
+    assert assinado["signed_by_name"] == engineer.name
+    assert assinado["signed_at"] is not None
+    assert len(assinado["content_hash"]) == 64
+    assert assinado["signature_valid"] is True
