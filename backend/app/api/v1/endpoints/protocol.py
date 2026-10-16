@@ -5,8 +5,7 @@ pode ser vinculada à regra do catálogo que deveria tê-la antecipado, o que
 permite medir o recall de bloqueios (§11) em vez de supô-lo.
 """
 
-from dataclasses import dataclass
-from typing import List, Optional
+from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, selectinload
@@ -19,7 +18,6 @@ from app.api.deps import (
 )
 from app.core.database import get_db
 from app.models.domain import (
-    ProtocolEvent,
     ProtocolProcess,
     ProtocolRequirement,
     ProtocolStatus,
@@ -35,37 +33,9 @@ from app.schemas.domain import (
     ProtocolRequirementUpdate,
     ProtocolStatusChange,
 )
-from app.services.regulatory_engine import RegulatoryEngine
+from app.services.protocol import ProtocolService, EventPayload
 
 router = APIRouter()
-
-
-@dataclass
-class EventPayload:
-    event_type: str
-    description: Optional[str] = None
-    from_status: Optional[str] = None
-    to_status: Optional[str] = None
-
-
-def _record_event(
-    db: Session,
-    process: ProtocolProcess,
-    user: User,
-    payload: EventPayload,
-) -> None:
-    db.add(
-        ProtocolEvent(
-            organization_id=process.organization_id,
-            process_id=process.id,
-            event_type=payload.event_type,
-            from_status=payload.from_status,
-            to_status=payload.to_status,
-            description=payload.description,
-            actor_id=user.id,
-            actor_name=user.name,
-        )
-    )
 
 
 @router.get(
@@ -125,7 +95,7 @@ def create_protocol(
     db.add(process)
     db.flush()
 
-    _record_event(
+    ProtocolService.record_event(
         db,
         process,
         user,
@@ -178,7 +148,7 @@ def change_protocol_status(
     if payload.decided_at:
         process.decided_at = payload.decided_at
 
-    _record_event(
+    ProtocolService.record_event(
         db,
         process,
         user,
@@ -220,49 +190,7 @@ def create_requirement(
     """
     process = get_scoped_or_404(db, ProtocolProcess, process_id, user, "Processo")
 
-    was_predicted = None
-    if payload.linked_rule_key:
-        run = RegulatoryEngine.latest_run(db, process.project_id)
-        if run:
-            match = next(
-                (v for v in run.validations if v.rule_id == payload.linked_rule_key),
-                None,
-            )
-            if match is not None:
-                was_predicted = match.status in ("nao_conforme", "atencao")
-
-    next_sequence = len(process.requirements) + 1
-    requirement = ProtocolRequirement(
-        organization_id=user.organization_id,
-        process_id=process.id,
-        sequence=next_sequence,
-        description=payload.description,
-        origin=payload.origin,
-        raised_at=payload.raised_at,
-        due_date=payload.due_date,
-        linked_rule_key=payload.linked_rule_key,
-        was_predicted=was_predicted,
-    )
-    db.add(requirement)
-
-    _record_event(
-        db,
-        process,
-        user,
-        EventPayload(
-            event_type="exigencia_registrada",
-            description=f"Exigência {next_sequence}: {payload.description[:120]}",
-        ),
-    )
-
-    # Uma exigência aberta muda a situação do processo — a menos que já esteja
-    # em correção ou encerrado.
-    if process.status not in ProtocolStatus.TERMINAL | {ProtocolStatus.EM_CORRECAO}:
-        process.status = ProtocolStatus.NOTIFICADO
-
-    db.commit()
-    db.refresh(requirement)
-    return requirement
+    return ProtocolService.create_requirement(db, process, user, payload)
 
 
 @router.get(
