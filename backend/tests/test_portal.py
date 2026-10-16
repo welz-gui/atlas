@@ -238,3 +238,19 @@ def test_equipe_tambem_acessa_o_portal(client, engineer_headers, project):
 def test_portal_traz_a_ressalva(client, client_headers, project):
     body = _portal(client, client_headers, project["id"])
     assert "não substitui o projeto aprovado" in body["notice"]
+
+
+def test_portal_lista_empreendimentos(client, client_headers, engineer_headers, project):
+    client.post(
+        "/api/v1/projects",
+        headers=engineer_headers,
+        json={"name": "Outro Empreendimento"},
+    )
+
+    response = client.get("/api/v1/portal/projects", headers=client_headers)
+    assert response.status_code == 200
+
+    projetos = response.json()
+    assert len(projetos) == 2
+    assert projetos[0]["name"] == "Outro Empreendimento"
+    assert projetos[1]["name"] == "Residencial de Teste"
