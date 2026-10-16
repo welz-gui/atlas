@@ -99,6 +99,39 @@ def eligible_documents(
     return query.order_by(Document.retention_until).all()
 
 
+def _perform_bulk_deletion(backend: StorageBackend, keys_to_delete: list[str]) -> dict[str, str]:
+    if not keys_to_delete:
+        return {}
+    try:
+        return backend.delete_bulk(keys_to_delete)
+    except Exception:
+        return {key: "error" for key in keys_to_delete}
+
+
+def _update_document_records(
+    documents: list[Document],
+    removal_results: dict[str, str],
+    report: PurgeReport,
+    moment: datetime,
+) -> None:
+    for document in documents:
+        status = removal_results.get(document.file_path, "error")
+        if status == "error":
+            report.failed += 1
+            report.errors.append(f"{document.id}: falha na remoção do backend remoto")
+            continue
+
+        if status == "missing":
+            report.already_missing += 1
+
+        document.purged_at = moment
+        document.purge_reason = (
+            f"Retenção de {settings.OBSOLETE_RETENTION_DAYS} dia(s) após "
+            f"obsolescência (§6.6)."
+        )
+        report.purged += 1
+
+
 def purge_expired_documents(
     db: Session,
     organization_id: Optional[str] = None,
@@ -122,36 +155,11 @@ def purge_expired_documents(
         if not dry_run:
             keys_to_delete.append(document.file_path)
 
-    removal_results = {}
-    if not dry_run and keys_to_delete:
-        try:
-            removal_results = backend.delete_bulk(keys_to_delete)
-        except Exception:
-            for key in keys_to_delete:
-                removal_results[key] = "error"
-
-    for document in documents:
-        if dry_run:
-            continue
-
-        status = removal_results.get(document.file_path, "error")
-        if status == "error":
-            report.failed += 1
-            report.errors.append(f"{document.id}: falha na remoção do backend remoto")
-            continue
-
-        if status == "missing":
-            report.already_missing += 1
-
-        document.purged_at = moment
-        document.purge_reason = (
-            f"Retenção de {settings.OBSOLETE_RETENTION_DAYS} dia(s) após "
-            f"obsolescência (§6.6)."
-        )
-        report.purged += 1
-
-    if not dry_run and report.purged:
-        db.commit()
+    if not dry_run:
+        removal_results = _perform_bulk_deletion(backend, keys_to_delete)
+        _update_document_records(documents, removal_results, report, moment)
+        if report.purged:
+            db.commit()
 
     return report
 
