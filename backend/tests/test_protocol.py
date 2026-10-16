@@ -244,3 +244,58 @@ def test_protocolo_de_outro_tenant_responde_404(client, db_session, process):
         headers=headers,
         json={"status": ProtocolStatus.APROVADO},
     ).status_code == 404
+
+def test_list_requirements_empty(client, engineer_headers, process):
+    response = client.get(
+        f"/api/v1/protocols/{process['id']}/requirements",
+        headers=engineer_headers,
+    )
+    assert response.status_code == 200
+    assert response.json() == []
+
+def test_list_requirements_with_items_and_sorting(client, engineer_headers, process):
+    req1 = client.post(
+        f"/api/v1/protocols/{process['id']}/requirements",
+        headers=engineer_headers,
+        json={"description": "First requirement."},
+    ).json()
+
+    req2 = client.post(
+        f"/api/v1/protocols/{process['id']}/requirements",
+        headers=engineer_headers,
+        json={"description": "Second requirement."},
+    ).json()
+
+    response = client.get(
+        f"/api/v1/protocols/{process['id']}/requirements",
+        headers=engineer_headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 2
+    # Ensure they are sorted by sequence
+    assert data[0]["sequence"] == 1
+    assert data[1]["sequence"] == 2
+    assert data[0]["id"] == req1["id"]
+    assert data[1]["id"] == req2["id"]
+
+def test_list_requirements_not_found(client, engineer_headers):
+    response = client.get(
+        "/api/v1/protocols/nonexistent-id/requirements",
+        headers=engineer_headers,
+    )
+    assert response.status_code == 404
+
+def test_list_requirements_outro_tenant_responde_404(client, db_session, process):
+    from app.models.domain import UserRole
+    from tests.conftest import auth_headers, make_org, make_user
+
+    outra_org = make_org(db_session, "Concorrente Req S.A.")
+    intruso = make_user(db_session, outra_org, UserRole.OWNER, "intruso-reqs@atlas-qa.com")
+    headers = auth_headers(client, intruso.email)
+
+    assert client.get(
+        f"/api/v1/protocols/{process['id']}/requirements",
+        headers=headers
+    ).status_code == 404
