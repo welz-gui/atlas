@@ -721,3 +721,68 @@ def test_reset_queue_cache(monkeypatch):
         assert queue_instance_1 is not queue_instance_3, "get_queue() devolveu a instância antiga após o reset"
     finally:
         reset_queue_cache()
+
+# =============================================================================
+# Additional Jobs Endpoint Coverage
+# =============================================================================
+
+def test_enqueue_retention_purge_success(client, db_session, org):
+    from app.models.domain import UserRole
+    from tests.conftest import make_user, auth_headers
+    owner = make_user(db_session, org, UserRole.OWNER, email="owner-purge@atlas-qa.com")
+    owner_headers = auth_headers(client, owner.email)
+
+    response = client.post("/api/v1/jobs/retention-purge?dry_run=true", headers=owner_headers)
+    assert response.status_code == 200
+    job = response.json()["job"]
+    assert job["job_type"] == "expurgo_retencao"
+    assert job["payload"]["dry_run"] is True
+
+
+def test_enqueue_regulatory_discovery_success(client, db_session, org):
+    from app.models.domain import UserRole
+    from tests.conftest import make_user, auth_headers
+    validator = make_user(db_session, org, UserRole.VALIDATOR, email="validator-discovery@atlas-qa.com")
+    validator_headers = auth_headers(client, validator.email)
+
+    response = client.post("/api/v1/catalog/jobs/discovery", headers=validator_headers)
+    assert response.status_code == 200
+    job = response.json()["job"]
+    assert job["job_type"] == "descoberta_regulatoria"
+    assert job["payload"]["jurisdiction"] == "BR-RS-4311403"
+
+
+def test_enqueue_regulatory_discovery_missing_sources(client, db_session, org):
+    from app.models.domain import UserRole
+    from tests.conftest import make_user, auth_headers
+    validator = make_user(db_session, org, UserRole.VALIDATOR, email="validator-discovery-fail@atlas-qa.com")
+    validator_headers = auth_headers(client, validator.email)
+
+    response = client.post("/api/v1/catalog/jobs/discovery?jurisdiction=BR-XX-0000000", headers=validator_headers)
+    assert response.status_code == 422
+    assert "Não há fontes oficiais configuradas para" in response.json()["detail"]
+
+
+def test_enqueue_extraction_endpoint_integration(client, engineer_headers, project, upload_dir):
+    """Reforço da cobertura para o endpoint de fila de extração em jobs.py."""
+    from tests.test_documents import _upload
+
+    documento = _upload(
+        client, engineer_headers, project["id"], "teste_extra.pdf", b"%PDF-1.4 sem texto"
+    ).json()
+
+    response = client.post(
+        f"/api/v1/documents/{documento['id']}/jobs/extract", headers=engineer_headers
+    )
+
+    assert response.status_code == 200
+    job = response.json()["job"]
+    assert job["job_type"] == "extracao_documento"
+    assert job["payload"]["document_id"] == documento["id"]
+
+def test_enqueue_extraction_endpoint_integration_404_on_invalid_document(client, engineer_headers):
+    response = client.post(
+        "/api/v1/documents/00000000-0000-0000-0000-000000000000/jobs/extract",
+        headers=engineer_headers
+    )
+    assert response.status_code == 404
