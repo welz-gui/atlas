@@ -193,7 +193,7 @@ def test_situacao_invalida_e_recusada(client, engineer_headers, process):
     assert response.status_code == 422
 
 
-def test_recall_de_bloqueios(client, engineer_headers, project_com_bloqueio, process):
+def test_prediction_accuracy_recall(client, engineer_headers, project_com_bloqueio, process):
     """§11 — o que o Atlas antecipou sobre o total de exigências vinculadas."""
     for payload in (
         {"description": "Recuo frontal.", "linked_rule_key": "lajeado_recuo_frontal_z2"},
@@ -218,7 +218,7 @@ def test_recall_de_bloqueios(client, engineer_headers, project_com_bloqueio, pro
     assert metrics["recall_percent"] == 50.0
 
 
-def test_recall_sem_exigencias_nao_inventa_numero(
+def test_prediction_accuracy_sem_exigencias(
     client, engineer_headers, project_com_bloqueio
 ):
     metrics = client.get(
@@ -244,3 +244,61 @@ def test_protocolo_de_outro_tenant_responde_404(client, db_session, process):
         headers=headers,
         json={"status": ProtocolStatus.APROVADO},
     ).status_code == 404
+
+def test_prediction_accuracy_project_not_found(client, engineer_headers):
+    response = client.get(
+        "/api/v1/projects/00000000-0000-0000-0000-000000000000/prediction-accuracy",
+        headers=engineer_headers,
+    )
+    assert response.status_code == 404
+
+def test_list_protocols(client, engineer_headers, project_com_bloqueio, process):
+    response = client.get(
+        f"/api/v1/projects/{project_com_bloqueio['id']}/protocols",
+        headers=engineer_headers,
+    )
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["id"] == process["id"]
+
+def test_create_protocol_invalid_version(client, engineer_headers, project_com_bloqueio):
+    response = client.post(
+        f"/api/v1/projects/{project_com_bloqueio['id']}/protocols",
+        headers=engineer_headers,
+        json={
+            "protocol_number": "2026/PMU-004822",
+            "agency": "Secretaria de Planejamento",
+            "submitted_at": "2026-07-16",
+            "project_version_id": "00000000-0000-0000-0000-000000000000"
+        },
+    )
+    assert response.status_code == 422
+    assert "A versão informada não pertence a este empreendimento." in response.text
+
+def test_list_requirements(client, engineer_headers, process):
+    client.post(
+        f"/api/v1/protocols/{process['id']}/requirements",
+        headers=engineer_headers,
+        json={"description": "Corrigir o recuo frontal."},
+    )
+    response = client.get(
+        f"/api/v1/protocols/{process['id']}/requirements",
+        headers=engineer_headers,
+    )
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+
+def test_update_requirement_invalid_status(client, engineer_headers, process):
+    requirement = client.post(
+        f"/api/v1/protocols/{process['id']}/requirements",
+        headers=engineer_headers,
+        json={"description": "Corrigir o recuo frontal."},
+    ).json()
+
+    response = client.patch(
+        f"/api/v1/requirements/{requirement['id']}",
+        headers=engineer_headers,
+        json={"status": "status_invalido"},
+    )
+    assert response.status_code == 422
+    assert "Situação inválida. Válidas:" in response.text
