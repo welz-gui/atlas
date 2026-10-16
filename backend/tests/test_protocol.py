@@ -244,3 +244,90 @@ def test_protocolo_de_outro_tenant_responde_404(client, db_session, process):
         headers=headers,
         json={"status": ProtocolStatus.APROVADO},
     ).status_code == 404
+
+def test_exigencia_linked_rule_without_run(client, engineer_headers, db_session):
+    """Testa quando linked_rule_key é fornecido mas não há run."""
+    # Criar um novo projeto sem run (project_com_bloqueio tem run implicitamente através do seeded_catalog?)
+    # Vamos criar um projeto limpo.
+    response = client.post(
+        "/api/v1/projects",
+        headers=engineer_headers,
+        json={
+            "name": "Projeto Sem Run",
+            "zone": "Z2",
+            "building_type": "residencial_unifamiliar",
+            "lot_area": 360.0,
+            "built_area": 220.0,
+            "floors": 2,
+            "front_setback": 5.0,
+            "rear_setback": 5.0,
+            "permeability_rate": 22.0,
+            "parking_spaces": 1,
+        },
+    )
+    project = response.json()
+
+    # Excluir a run gerada no post_project se houver
+    from app.models.domain import AnalysisRun
+    runs = db_session.query(AnalysisRun).filter_by(project_id=project["id"]).all()
+    for run in runs:
+        db_session.delete(run)
+    db_session.commit()
+
+    # Criar processo
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/protocols",
+        headers=engineer_headers,
+        json={
+            "protocol_number": "2026/PMU-9999",
+            "agency": "Secretaria",
+            "submitted_at": "2026-07-15",
+        },
+    )
+    process = response.json()
+
+    response = client.post(
+        f"/api/v1/protocols/{process['id']}/requirements",
+        headers=engineer_headers,
+        json={
+            "description": "Exigência sem run",
+            "linked_rule_key": "lajeado_recuo_frontal_z2",
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["was_predicted"] is None
+
+
+def test_exigencia_linked_rule_without_match(client, engineer_headers, process):
+    """Testa quando linked_rule_key é fornecido, tem run mas não tem match."""
+    response = client.post(
+        f"/api/v1/protocols/{process['id']}/requirements",
+        headers=engineer_headers,
+        json={
+            "description": "Exigência sem match no run.",
+            "linked_rule_key": "outra_regra_nao_existente",
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["was_predicted"] is None
+
+
+def test_exigencia_process_status_in_em_correcao(client, engineer_headers, process):
+    """Testa quando o processo já está EM_CORRECAO, status não deve mudar para NOTIFICADO."""
+    client.patch(
+        f"/api/v1/protocols/{process['id']}/status",
+        headers=engineer_headers,
+        json={"status": ProtocolStatus.EM_CORRECAO},
+    )
+
+    response = client.post(
+        f"/api/v1/protocols/{process['id']}/requirements",
+        headers=engineer_headers,
+        json={"description": "Exigência extra."},
+    )
+    assert response.status_code == 201
+
+    detalhe = client.get(
+        f"/api/v1/protocols/{process['id']}", headers=engineer_headers
+    ).json()
+    assert detalhe["status"] == ProtocolStatus.EM_CORRECAO
