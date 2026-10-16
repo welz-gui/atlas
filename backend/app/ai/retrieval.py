@@ -16,7 +16,6 @@ pgvector é aqui: a interface `retrieve()` não muda.
 
 from __future__ import annotations
 
-import math
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -136,7 +135,7 @@ def retrieve(
             continue
         # Normaliza pelo tamanho da regra, para que uma regra com muitos termos
         # não vença apenas por ter mais superfície de colisão.
-        score = score / math.sqrt(len(terms) or 1)
+        score = score / (len(terms) or 1) ** 0.5
         scored.append(RetrievedRule(rule=rule, score=round(score, 4)))
 
     scored.sort(key=lambda item: (-item.score, item.rule.rule_id))
