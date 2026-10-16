@@ -30,6 +30,35 @@ def test_validador_le_metricas(client, validator_headers):
     assert client.get("/api/v1/metrics", headers=validator_headers).status_code == 200
 
 
+def test_admin_and_owner_le_metricas(client, db_session):
+    org = make_org(db_session, name="Org Admin/Owner Metrics")
+    admin = make_user(db_session, org, UserRole.ADMIN, email="admin_metrics@example.com")
+    owner = make_user(db_session, org, UserRole.OWNER, email="owner_metrics@example.com")
+
+    admin_headers = auth_headers(client, admin.email)
+    owner_headers = auth_headers(client, owner.email)
+
+    response_admin = client.get("/api/v1/metrics", headers=admin_headers)
+    assert response_admin.status_code == 200
+
+    data_admin = response_admin.json()
+    assert data_admin["organization_id"] == org.id
+    assert "approval" in data_admin
+    assert "ai" in data_admin
+    assert "gate_0_to_1" in data_admin
+
+    response_owner = client.get("/api/v1/metrics", headers=owner_headers)
+    assert response_owner.status_code == 200
+
+    data_owner = response_owner.json()
+    assert data_owner["organization_id"] == org.id
+    assert "approval" in data_owner
+    assert "ai" in data_owner
+    assert "gate_0_to_1" in data_owner
+
+
+
+
 def test_sem_autenticacao_e_recusado(client):
     assert client.get("/api/v1/metrics").status_code == 401
 
