@@ -27,6 +27,7 @@ omissão.
 from typing import Sequence, Union
 
 from alembic import op
+from sqlalchemy import text
 
 revision: str = "d259cb880f7b"
 down_revision: Union[str, Sequence[str], None] = "a2e165918066"
@@ -55,14 +56,14 @@ def upgrade() -> None:
         return
 
     for table in TENANT_TABLES:
-        op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
-        op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
+        op.execute(text(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY"))
+        op.execute(text(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY"))
         op.execute(
-            f"""
+            text(f"""
             CREATE POLICY {table}_tenant_isolation ON {table}
             USING (organization_id = current_setting('atlas.organization_id', true))
             WITH CHECK (organization_id = current_setting('atlas.organization_id', true))
-            """
+            """)
         )
 
 
@@ -71,5 +72,5 @@ def downgrade() -> None:
         return
 
     for table in TENANT_TABLES:
-        op.execute(f"DROP POLICY IF EXISTS {table}_tenant_isolation ON {table}")
-        op.execute(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")
+        op.execute(text(f"DROP POLICY IF EXISTS {table}_tenant_isolation ON {table}"))
+        op.execute(text(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY"))
