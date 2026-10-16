@@ -361,3 +361,80 @@ def test_get_project_validations_projeto_inexistente_responde_404(
     )
     assert response.status_code == 404
     assert response.json()["detail"] == "Empreendimento não encontrado."
+
+def test_list_analysis_runs_returns_runs_in_order(client, engineer_headers, db_session, seeded_catalog):
+    """Test that listing analysis runs returns them in descending order of creation."""
+    projeto = _criar_projeto(client, engineer_headers, "Histórico Multiplo", front_setback=3.00)
+
+    # Criar uma segunda análise
+    client.post(
+        f"/api/v1/projects/{projeto['id']}/versions",
+        headers=engineer_headers,
+        json={"front_setback": 4.50},
+    )
+
+    response = client.get(
+        f"/api/v1/projects/{projeto['id']}/analysis-runs", headers=engineer_headers
+    )
+    assert response.status_code == 200
+    runs = response.json()
+    assert len(runs) == 2
+    # Ensure they are in descending order by created_at
+    # The first one in the list should be the most recently created
+    assert runs[0]["created_at"] > runs[1]["created_at"]
+
+
+def test_list_analysis_runs_nonexistent_project_returns_404(client, engineer_headers):
+    """Test that listing analysis runs for a nonexistent project returns 404."""
+    response = client.get(
+        f"/api/v1/projects/{uuid.uuid4()}/analysis-runs", headers=engineer_headers
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Empreendimento não encontrado."
+
+def test_get_analysis_run_exists(client, engineer_headers, db_session, seeded_catalog):
+    """Test retrieving an existing analysis run."""
+    projeto = _criar_projeto(client, engineer_headers, "Histórico Singular", front_setback=3.00)
+    runs = client.get(
+        f"/api/v1/projects/{projeto['id']}/analysis-runs", headers=engineer_headers
+    ).json()
+    run_id = runs[0]["id"]
+
+    response = client.get(
+        f"/api/v1/analysis-runs/{run_id}", headers=engineer_headers
+    )
+    assert response.status_code == 200
+    assert response.json()["id"] == run_id
+
+def test_get_analysis_run_not_found(client, engineer_headers):
+    """Test retrieving a nonexistent analysis run returns 404."""
+    response = client.get(
+        f"/api/v1/analysis-runs/{uuid.uuid4()}", headers=engineer_headers
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Análise não encontrada."
+
+def test_generate_regulatory_pdf_report_with_specific_run_id(client, engineer_headers, db_session, seeded_catalog):
+    """Test generating a PDF report for a specific historical run."""
+    projeto = _criar_projeto(client, engineer_headers, "Report_Historico", front_setback=3.00)
+    runs = client.get(
+        f"/api/v1/projects/{projeto['id']}/analysis-runs", headers=engineer_headers
+    ).json()
+    run_id = runs[0]["id"]
+
+    response = client.get(
+        f"/api/v1/projects/{projeto['id']}/report/pdf?run_id={run_id}",
+        headers=engineer_headers,
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+
+def test_generate_regulatory_pdf_report_with_invalid_run_id(client, engineer_headers, db_session, seeded_catalog):
+    """Test generating a PDF report for an invalid historical run returns 404."""
+    projeto = _criar_projeto(client, engineer_headers, "PDF com run_id invalido", front_setback=3.00)
+    response = client.get(
+        f"/api/v1/projects/{projeto['id']}/report/pdf?run_id={uuid.uuid4()}",
+        headers=engineer_headers,
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Análise não encontrada."
