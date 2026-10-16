@@ -54,12 +54,16 @@ def upgrade() -> None:
     if op.get_bind().dialect.name != "postgresql":
         return
 
+    preparer = op.get_bind().dialect.identifier_preparer
     for table in TENANT_TABLES:
-        op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
-        op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
+        table_q = preparer.quote(table)
+        policy_q = preparer.quote(f"{table}_tenant_isolation")
+
+        op.execute(f"ALTER TABLE {table_q} ENABLE ROW LEVEL SECURITY")
+        op.execute(f"ALTER TABLE {table_q} FORCE ROW LEVEL SECURITY")
         op.execute(
             f"""
-            CREATE POLICY {table}_tenant_isolation ON {table}
+            CREATE POLICY {policy_q} ON {table_q}
             USING (organization_id = current_setting('atlas.organization_id', true))
             WITH CHECK (organization_id = current_setting('atlas.organization_id', true))
             """
@@ -70,6 +74,9 @@ def downgrade() -> None:
     if op.get_bind().dialect.name != "postgresql":
         return
 
+    preparer = op.get_bind().dialect.identifier_preparer
     for table in TENANT_TABLES:
-        op.execute(f"DROP POLICY IF EXISTS {table}_tenant_isolation ON {table}")
-        op.execute(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")
+        table_q = preparer.quote(table)
+        policy_q = preparer.quote(f"{table}_tenant_isolation")
+        op.execute(f"DROP POLICY IF EXISTS {policy_q} ON {table_q}")
+        op.execute(f"ALTER TABLE {table_q} DISABLE ROW LEVEL SECURITY")
