@@ -9,6 +9,7 @@ laudo, sem exceção.
 from __future__ import annotations
 
 import io
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -50,6 +51,13 @@ DISCLAIMERS = [
     "tomadas com base neste documento.",
 ]
 
+
+
+@dataclass
+class PDFReportContext:
+    project_data: Dict[str, Any]
+    validations: List[Dict[str, Any]]
+    run_data: Optional[Dict[str, Any]] = field(default_factory=dict)
 
 class RegulatoryReportGenerator:
     """Renderiza o laudo de uma análise já persistida."""
@@ -319,11 +327,11 @@ class RegulatoryReportGenerator:
     @classmethod
     def generate_pdf(
         cls,
-        project_data: Dict[str, Any],
-        validations: List[Dict[str, Any]],
-        run_data: Optional[Dict[str, Any]] = None,
+        context: PDFReportContext,
     ) -> bytes:
-        run_data = run_data or {}
+        project_data = context.project_data
+        validations = context.validations
+        run_data = context.run_data or {}
         styles = cls._styles()
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(

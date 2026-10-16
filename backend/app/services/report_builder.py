@@ -15,7 +15,7 @@ import hashlib
 from typing import Any, Dict, List, Tuple
 
 from app.models.domain import AnalysisRun, Project
-from app.services.pdf_report_generator import RegulatoryReportGenerator
+from app.services.pdf_report_generator import RegulatoryReportGenerator, PDFReportContext
 
 
 def project_payload(project: Project, run: AnalysisRun) -> Dict[str, Any]:
@@ -82,9 +82,12 @@ def report_filename(project: Project, run: AnalysisRun) -> str:
 
 def build_report(project: Project, run: AnalysisRun) -> Tuple[bytes, str, str]:
     """Devolve `(pdf, nome do arquivo, sha256 do pdf)`."""
-    pdf_bytes = RegulatoryReportGenerator.generate_pdf(
-        project_payload(project, run), validation_payload(run), run_payload(run)
+    context = PDFReportContext(
+        project_data=project_payload(project, run),
+        validations=validation_payload(run),
+        run_data=run_payload(run)
     )
+    pdf_bytes = RegulatoryReportGenerator.generate_pdf(context)
     return (
         pdf_bytes,
         report_filename(project, run),

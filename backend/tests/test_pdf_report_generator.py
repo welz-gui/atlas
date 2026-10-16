@@ -5,7 +5,7 @@ import io
 import pytest
 from pypdf import PdfReader
 
-from app.services.pdf_report_generator import RegulatoryReportGenerator
+from app.services.pdf_report_generator import RegulatoryReportGenerator, PDFReportContext
 
 
 def _texto_do_pdf(pdf: bytes) -> str:
@@ -101,7 +101,7 @@ def test_fmt_zero_e_valor_nao_e_ausencia():
 
 
 def test_gera_pdf_de_verdade():
-    pdf = RegulatoryReportGenerator.generate_pdf(_projeto(), _validacoes(), _run(False))
+    pdf = RegulatoryReportGenerator.generate_pdf(PDFReportContext(project_data=_projeto(), validations=_validacoes(), run_data=_run(False)))
 
     assert pdf.startswith(b"%PDF")
     texto = _texto_do_pdf(pdf)
@@ -111,13 +111,13 @@ def test_gera_pdf_de_verdade():
 
 def test_laudo_sem_regra_conferida_sai_marcado_como_uso_interno():
     """§7.5 — regra não validada por pessoa não vai ao cliente."""
-    pdf = RegulatoryReportGenerator.generate_pdf(_projeto(), _validacoes(), _run(False))
+    pdf = RegulatoryReportGenerator.generate_pdf(PDFReportContext(project_data=_projeto(), validations=_validacoes(), run_data=_run(False)))
 
     assert "USO INTERNO" in _texto_do_pdf(pdf)
 
 
 def test_laudo_publicavel_nao_leva_a_marca_de_uso_interno():
-    pdf = RegulatoryReportGenerator.generate_pdf(_projeto(), _validacoes(), _run(True))
+    pdf = RegulatoryReportGenerator.generate_pdf(PDFReportContext(project_data=_projeto(), validations=_validacoes(), run_data=_run(True)))
 
     assert "USO INTERNO" not in _texto_do_pdf(pdf)
 
@@ -126,6 +126,6 @@ def test_parametro_ausente_e_dito_no_laudo_e_nao_vira_zero():
     projeto = _projeto()
     projeto["lot_area"] = None
 
-    pdf = RegulatoryReportGenerator.generate_pdf(projeto, _validacoes(), _run(False))
+    pdf = RegulatoryReportGenerator.generate_pdf(PDFReportContext(project_data=projeto, validations=_validacoes(), run_data=_run(False)))
 
     assert "não informado" in _texto_do_pdf(pdf)
