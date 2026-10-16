@@ -244,3 +244,50 @@ def test_protocolo_de_outro_tenant_responde_404(client, db_session, process):
         headers=headers,
         json={"status": ProtocolStatus.APROVADO},
     ).status_code == 404
+
+def test_update_requirement_invalid_status(client, engineer_headers, process):
+    requirement = client.post(
+        f"/api/v1/protocols/{process['id']}/requirements",
+        headers=engineer_headers,
+        json={"description": "Corrigir o recuo frontal."},
+    ).json()
+
+    response = client.patch(
+        f"/api/v1/requirements/{requirement['id']}",
+        headers=engineer_headers,
+        json={
+            "status": "invalido",
+        },
+    )
+    assert response.status_code == 422
+    assert "Situação inválida" in response.json()["detail"]
+
+
+def test_update_requirement_partial_update(client, engineer_headers, process):
+    requirement = client.post(
+        f"/api/v1/protocols/{process['id']}/requirements",
+        headers=engineer_headers,
+        json={"description": "Corrigir o recuo frontal."},
+    ).json()
+
+    response = client.patch(
+        f"/api/v1/requirements/{requirement['id']}",
+        headers=engineer_headers,
+        json={
+            "due_date": "2026-10-10",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["due_date"] == "2026-10-10"
+    assert response.json()["status"] == requirement["status"]
+
+
+def test_update_requirement_not_found(client, engineer_headers):
+    response = client.patch(
+        "/api/v1/requirements/invalid_id",
+        headers=engineer_headers,
+        json={
+            "due_date": "2026-10-10",
+        },
+    )
+    assert response.status_code == 404
