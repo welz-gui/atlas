@@ -244,3 +244,38 @@ def test_protocolo_de_outro_tenant_responde_404(client, db_session, process):
         headers=headers,
         json={"status": ProtocolStatus.APROVADO},
     ).status_code == 404
+
+def test_list_protocols_returns_protocols_for_project(client, engineer_headers, project_com_bloqueio, process):
+    # Add a second protocol to verify list and ordering
+    response = client.post(
+        f"/api/v1/projects/{project_com_bloqueio['id']}/protocols",
+        headers=engineer_headers,
+        json={
+            "protocol_number": "2026/PMU-004822",
+            "agency": "Secretaria de Planejamento — Lajeado/RS",
+            "submitted_at": "2026-07-16",
+        },
+    )
+    assert response.status_code == 201
+
+    list_response = client.get(
+        f"/api/v1/projects/{project_com_bloqueio['id']}/protocols",
+        headers=engineer_headers,
+    )
+    assert list_response.status_code == 200
+    data = list_response.json()
+    assert len(data) == 2
+    # Should be ordered by created_at desc (newest first)
+    assert data[0]["protocol_number"] == "2026/PMU-004822"
+    assert data[1]["protocol_number"] == "2026/PMU-004821"
+
+    # Verify relationships are loaded
+    assert "events" in data[0]
+    assert "requirements" in data[0]
+
+def test_list_protocols_returns_404_for_invalid_project(client, engineer_headers):
+    list_response = client.get(
+        "/api/v1/projects/non_existent_id/protocols",
+        headers=engineer_headers,
+    )
+    assert list_response.status_code == 404
