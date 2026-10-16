@@ -721,3 +721,20 @@ def test_reset_queue_cache(monkeypatch):
         assert queue_instance_1 is not queue_instance_3, "get_queue() devolveu a instância antiga após o reset"
     finally:
         reset_queue_cache()
+
+def test_expurgo_como_trabalho_funciona_para_gestor(client, db_session):
+    from app.models.domain import UserRole
+    from tests.conftest import auth_headers, make_org, make_user
+
+    org = make_org(db_session, "Org Teste")
+    owner = make_user(db_session, org, UserRole.OWNER, "gestor@teste.com")
+    headers = auth_headers(client, owner.email)
+
+    response = client.post("/api/v1/jobs/retention-purge", headers=headers)
+    assert response.status_code == 200, response.text
+
+    body = response.json()
+    assert body["job"]["job_type"] == "expurgo_retencao"
+    assert body["job"]["status"] == "concluido"
+    assert body["job"]["executed_inline"] is True
+    assert body["job"]["result"]["dry_run"] is True
