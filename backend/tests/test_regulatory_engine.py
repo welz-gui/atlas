@@ -361,3 +361,33 @@ def test_get_project_validations_projeto_inexistente_responde_404(
     )
     assert response.status_code == 404
     assert response.json()["detail"] == "Empreendimento não encontrado."
+
+
+def test_get_analysis_run_success(client, engineer_headers, seeded_catalog):
+    # Setup: Create a project and an analysis run
+    projeto = _criar_projeto(client, engineer_headers, "Conforme")
+    runs_response = client.get(
+        f"/api/v1/projects/{projeto['id']}/analysis-runs", headers=engineer_headers
+    )
+    assert runs_response.status_code == 200
+    runs = runs_response.json()
+    assert len(runs) > 0
+    run_id = runs[0]['id']
+
+    # Test the get_analysis_run endpoint
+    response = client.get(
+        f"/api/v1/analysis-runs/{run_id}", headers=engineer_headers
+    )
+    assert response.status_code == 200
+    assert response.json()['id'] == run_id
+
+
+def test_get_analysis_run_not_found(client, engineer_headers):
+    # Test getting a non-existent run
+    import uuid
+    run_id = str(uuid.uuid4())
+    response = client.get(
+        f"/api/v1/analysis-runs/{run_id}", headers=engineer_headers
+    )
+    assert response.status_code == 404
+    assert response.json()['detail'] == "Análise não encontrada."
