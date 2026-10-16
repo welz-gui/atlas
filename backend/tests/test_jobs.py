@@ -11,6 +11,8 @@ O que precisa ficar provado:
 from datetime import datetime, timedelta
 
 import pytest
+from tests.conftest import auth_headers, make_user
+from app.models.domain import UserRole
 
 from app.core.config import settings
 from app.models.domain import JobRecord, JobStatus, JobType
@@ -339,7 +341,6 @@ def test_extracao_de_documento_expurgado_falha(
 def test_worker_nao_alcanca_projeto_de_outra_organizacao(db_session, org, project):
     """O worker roda sem `get_current_user`; o isolamento é refeito à mão."""
     from tests.conftest import make_org, make_user
-    from app.models.domain import UserRole
 
     outra = make_org(db_session, "Concorrente S.A.")
     intruso = make_user(db_session, outra, UserRole.OWNER, "intruso-job@atlas-qa.com")
@@ -363,7 +364,6 @@ def test_trabalho_de_outra_organizacao_responde_404(
     client, db_session, engineer_headers, project
 ):
     from tests.conftest import auth_headers, make_org, make_user
-    from app.models.domain import UserRole
 
     trabalho = client.post(
         f"/api/v1/projects/{project['id']}/jobs/analysis", headers=engineer_headers
@@ -474,7 +474,6 @@ def test_token_de_outra_organizacao_nao_colide(
     client, db_session, engineer_headers, project
 ):
     """Token é escopo de tenant: dois clientes podem gerar o mesmo por azar."""
-    from app.models.domain import UserRole
     from tests.conftest import auth_headers, make_org, make_user
 
     payload = {
@@ -721,3 +720,57 @@ def test_reset_queue_cache(monkeypatch):
         assert queue_instance_1 is not queue_instance_3, "get_queue() devolveu a instância antiga após o reset"
     finally:
         reset_queue_cache()
+
+def test_enqueue_retention_purge_success(client, db_session, engineer_headers, org):
+    from tests.conftest import make_user, auth_headers
+    # manage permission needed ("org:manage") -> Owner role
+    owner = make_user(db_session, org, UserRole.OWNER, "owner@purge.com")
+    headers = auth_headers(client, owner.email)
+
+    response = client.post("/api/v1/jobs/retention-purge?dry_run=true", headers=headers)
+    assert response.status_code in [200, 202]
+
+    body = response.json()
+    assert body["job"]["job_type"] == "expurgo_retencao"
+
+def test_enqueue_regulatory_discovery_missing_source(client, validator_headers):
+    # This should trigger the 422 if no official source exists
+    response = client.post(
+        "/api/v1/catalog/jobs/discovery?jurisdiction=BR-XX-9999999",
+        headers=validator_headers
+    )
+    assert response.status_code == 422
+    assert "Não há fontes oficiais configuradas" in response.json()["detail"]
+
+
+def test_enqueue_regulatory_discovery_success(client, validator_headers, db_session, project):
+    # Tests a successful queueing using the default project's jurisdiction
+    response = client.post(
+        f"/api/v1/catalog/jobs/discovery?project_id={project['id']}",
+        headers=validator_headers
+    )
+    assert response.status_code in [200, 202]
+    body = response.json()
+    assert body["job"]["job_type"] == "descoberta_regulatoria"
+
+def test_enqueue_analysis_happy_path(client, engineer_headers, project):
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/jobs/analysis", headers=engineer_headers
+    )
+    assert response.status_code in [200, 202]
+    body = response.json()
+    assert body["job"]["job_type"] == "analise_regulatoria"
+
+def test_enqueue_analysis_project_not_found(client, engineer_headers):
+    response = client.post(
+        "/api/v1/projects/nonexistent-project-id/jobs/analysis", headers=engineer_headers
+    )
+    assert response.status_code == 404
+
+def test_enqueue_analysis_permission_denied(client, db_session, org, project):
+    viewer = make_user(db_session, org, UserRole.CLIENT, "viewer@test.com")
+    headers = auth_headers(client, viewer.email)
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/jobs/analysis", headers=headers
+    )
+    assert response.status_code == 403
