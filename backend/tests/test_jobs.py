@@ -721,3 +721,34 @@ def test_reset_queue_cache(monkeypatch):
         assert queue_instance_1 is not queue_instance_3, "get_queue() devolveu a instância antiga após o reset"
     finally:
         reset_queue_cache()
+
+def test_enqueue_report_success(client, engineer_headers, project):
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/jobs/report",
+        headers=engineer_headers
+    )
+    assert response.status_code == 200
+    job = response.json()["job"]
+    assert job["job_type"] == "geracao_laudo"
+    assert job["payload"]["project_id"] == project["id"]
+    assert job["payload"].get("analysis_run_id") is None
+
+def test_enqueue_report_with_analysis_run_id(client, engineer_headers, project):
+    run_id = "fake-run-id-123"
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/jobs/report",
+        params={"analysis_run_id": run_id},
+        headers=engineer_headers
+    )
+    assert response.status_code == 200
+    job = response.json()["job"]
+    assert job["job_type"] == "geracao_laudo"
+    assert job["payload"]["project_id"] == project["id"]
+    assert job["payload"]["analysis_run_id"] == run_id
+
+def test_enqueue_report_project_not_found(client, engineer_headers):
+    response = client.post(
+        "/api/v1/projects/projeto-que-nao-existe/jobs/report",
+        headers=engineer_headers
+    )
+    assert response.status_code == 404
