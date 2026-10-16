@@ -238,3 +238,17 @@ def test_equipe_tambem_acessa_o_portal(client, engineer_headers, project):
 def test_portal_traz_a_ressalva(client, client_headers, project):
     body = _portal(client, client_headers, project["id"])
     assert "não substitui o projeto aprovado" in body["notice"]
+
+def test_portal_compliance_sem_run(client, client_headers, db_session, project):
+    from sqlalchemy import delete
+    from app.models.domain import AnalysisRun
+
+    # Ensure there's no run
+    db_session.execute(delete(AnalysisRun).where(AnalysisRun.project_id == project["id"]))
+    db_session.commit()
+
+    body = _portal(client, client_headers, project["id"])
+    conformidade = body["compliance"]
+
+    assert conformidade["available"] is False
+    assert "Ainda não há pré-análise regulatória registrada" in conformidade["reason"]
