@@ -244,3 +244,157 @@ def test_protocolo_de_outro_tenant_responde_404(client, db_session, process):
         headers=headers,
         json={"status": ProtocolStatus.APROVADO},
     ).status_code == 404
+
+
+# =============================================================================
+# Bordas dos endpoints de protocolo
+# =============================================================================
+def _exigencia(client, headers, process_id, **extras):
+    response = client.post(
+        f"/api/v1/protocols/{process_id}/requirements",
+        headers=headers,
+        json={"description": "Corrigir o recuo frontal.", **extras},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_lista_de_protocolos_vem_do_mais_novo_para_o_mais_antigo(
+    client, engineer_headers, project_com_bloqueio, process
+):
+    segundo = client.post(
+        f"/api/v1/projects/{project_com_bloqueio['id']}/protocols",
+        headers=engineer_headers,
+        json={"protocol_number": "2026/PMU-004822", "agency": "Secretaria", "submitted_at": "2026-07-16"},
+    ).json()
+
+    lista = client.get(
+        f"/api/v1/projects/{project_com_bloqueio['id']}/protocols", headers=engineer_headers
+    ).json()
+
+    assert [p["id"] for p in lista] == [segundo["id"], process["id"]]
+
+
+def test_recursos_inexistentes_respondem_404(client, engineer_headers):
+    """Projeto, processo, exigência: id que não existe é 404 em toda rota."""
+    for metodo, caminho, corpo in (
+        ("get", "/api/v1/projects/nao-existe/protocols", None),
+        ("get", "/api/v1/projects/nao-existe/prediction-accuracy", None),
+        ("get", "/api/v1/protocols/nao-existe", None),
+        ("patch", "/api/v1/protocols/nao-existe/status", {"status": ProtocolStatus.EM_ANALISE}),
+        ("get", "/api/v1/protocols/nao-existe/requirements", None),
+        ("patch", "/api/v1/requirements/nao-existe", {"due_date": "2026-10-10"}),
+    ):
+        kwargs = {"json": corpo} if corpo else {}
+        response = getattr(client, metodo)(caminho, headers=engineer_headers, **kwargs)
+        assert response.status_code == 404, (caminho, response.status_code)
+
+
+def test_protocolo_recusa_versao_que_nao_e_do_empreendimento(
+    client, engineer_headers, project_com_bloqueio, seeded_catalog
+):
+    outro = client.post(
+        "/api/v1/projects", headers=engineer_headers, json={"name": "Outro", "zone": "Z2"}
+    ).json()
+    versao_alheia = client.get(
+        f"/api/v1/projects/{outro['id']}", headers=engineer_headers
+    ).json()["current_version"]["id"]
+
+    for versao in (versao_alheia, "nao-existe"):
+        response = client.post(
+            f"/api/v1/projects/{project_com_bloqueio['id']}/protocols",
+            headers=engineer_headers,
+            json={"protocol_number": "2026/PMU-9", "agency": "Secretaria", "project_version_id": versao},
+        )
+        assert response.status_code == 422, versao
+        assert "não pertence a este empreendimento" in response.json()["detail"]
+
+
+def test_exigencias_listam_na_ordem_de_registro(client, engineer_headers, process):
+    assert client.get(
+        f"/api/v1/protocols/{process['id']}/requirements", headers=engineer_headers
+    ).json() == []
+
+    primeira = _exigencia(client, engineer_headers, process["id"], description="Primeira.")
+    segunda = _exigencia(client, engineer_headers, process["id"], description="Segunda.")
+
+    lista = client.get(
+        f"/api/v1/protocols/{process['id']}/requirements", headers=engineer_headers
+    ).json()
+    assert [(r["sequence"], r["id"]) for r in lista] == [(1, primeira["id"]), (2, segunda["id"])]
+
+
+def test_exigencias_de_outro_tenant_respondem_404(client, db_session, process):
+    from app.models.domain import UserRole
+    from tests.conftest import auth_headers, make_org, make_user
+
+    intruso = make_user(
+        db_session, make_org(db_session, "Concorrente Req S.A."), UserRole.OWNER, "intruso-reqs@atlas-qa.com"
+    )
+    headers = auth_headers(client, intruso.email)
+
+    assert client.get(
+        f"/api/v1/protocols/{process['id']}/requirements", headers=headers
+    ).status_code == 404
+
+
+def test_atualizar_exigencia_so_mexe_no_que_veio(client, engineer_headers, process):
+    exigencia = _exigencia(client, engineer_headers, process["id"])
+
+    response = client.patch(
+        f"/api/v1/requirements/{exigencia['id']}",
+        headers=engineer_headers,
+        json={"due_date": "2026-10-10"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["due_date"] == "2026-10-10"
+    assert response.json()["status"] == exigencia["status"]
+    assert response.json()["description"] == exigencia["description"]
+
+
+def test_atualizar_exigencia_recusa_situacao_inventada(client, engineer_headers, process):
+    exigencia = _exigencia(client, engineer_headers, process["id"])
+
+    response = client.patch(
+        f"/api/v1/requirements/{exigencia['id']}",
+        headers=engineer_headers,
+        json={"status": "inventado"},
+    )
+
+    assert response.status_code == 422
+    assert "Situação inválida" in response.json()["detail"]
+
+
+def test_exigencia_vinculada_sem_analise_ou_sem_correspondencia_nao_e_prevista_nem_imprevista(
+    client, engineer_headers, db_session, project_com_bloqueio, process
+):
+    """`was_predicted` só vale quando houve análise *e* ela falou da regra."""
+    # Há análise, mas ela não tem essa regra.
+    sem_correspondencia = _exigencia(
+        client, engineer_headers, process["id"], linked_rule_key="regra_que_nao_existe"
+    )
+    assert sem_correspondencia["was_predicted"] is None
+
+    # Não há análise alguma.
+    from app.models.domain import AnalysisRun
+
+    db_session.query(AnalysisRun).filter_by(project_id=project_com_bloqueio["id"]).delete()
+    db_session.commit()
+    sem_analise = _exigencia(
+        client, engineer_headers, process["id"], linked_rule_key="lajeado_recuo_frontal_z2"
+    )
+    assert sem_analise["was_predicted"] is None
+
+
+def test_exigencia_nao_tira_o_processo_de_correcao(client, engineer_headers, process):
+    client.patch(
+        f"/api/v1/protocols/{process['id']}/status",
+        headers=engineer_headers,
+        json={"status": ProtocolStatus.EM_CORRECAO},
+    )
+
+    _exigencia(client, engineer_headers, process["id"], description="Exigência extra.")
+
+    detalhe = client.get(f"/api/v1/protocols/{process['id']}", headers=engineer_headers).json()
+    assert detalhe["status"] == ProtocolStatus.EM_CORRECAO

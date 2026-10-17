@@ -721,3 +721,58 @@ def test_reset_queue_cache(monkeypatch):
         assert queue_instance_1 is not queue_instance_3, "get_queue() devolveu a instância antiga após o reset"
     finally:
         reset_queue_cache()
+
+
+# =============================================================================
+# Rotas de enfileiramento: permissão, 404 e o que vai no payload
+# =============================================================================
+def test_expurgo_como_trabalho_para_gestor_nasce_em_ensaio(client, db_session, org):
+    """Sem `dry_run` explícito, o expurgo só ensaia: apagar exige pedir."""
+    from app.models.domain import UserRole
+    from tests.conftest import auth_headers, make_user
+
+    gestor = make_user(db_session, org, UserRole.OWNER, "gestor-expurgo@atlas-qa.com")
+    headers = auth_headers(client, gestor.email)
+
+    padrao = client.post("/api/v1/jobs/retention-purge", headers=headers)
+    assert padrao.status_code == 200, padrao.text
+    assert padrao.json()["job"]["job_type"] == "expurgo_retencao"
+    assert padrao.json()["job"]["payload"] == {"dry_run": True}
+    assert padrao.json()["job"]["result"]["dry_run"] is True
+
+    real = client.post("/api/v1/jobs/retention-purge?dry_run=false", headers=headers)
+    assert real.json()["job"]["payload"] == {"dry_run": False}
+
+
+def test_laudo_assincrono_leva_a_analise_pedida_no_payload(client, engineer_headers, project):
+    padrao = client.post(
+        f"/api/v1/projects/{project['id']}/jobs/report", headers=engineer_headers
+    ).json()["job"]
+    assert padrao["payload"] == {"project_id": project["id"], "analysis_run_id": None}
+
+    pedida = client.post(
+        f"/api/v1/projects/{project['id']}/jobs/report?analysis_run_id=run-123",
+        headers=engineer_headers,
+    ).json()["job"]
+    assert pedida["payload"]["analysis_run_id"] == "run-123"
+
+
+def test_enfileirar_o_que_nao_existe_responde_404(client, engineer_headers):
+    for caminho in (
+        "/api/v1/projects/nao-existe/jobs/analysis",
+        "/api/v1/projects/nao-existe/jobs/report",
+        "/api/v1/documents/nao-existe/jobs/extract",
+    ):
+        assert client.post(caminho, headers=engineer_headers).status_code == 404, caminho
+
+
+def test_cliente_nao_dispara_analise(client, db_session, org, project):
+    from app.models.domain import UserRole
+    from tests.conftest import auth_headers, make_user
+
+    cliente = make_user(db_session, org, UserRole.CLIENT, "cliente-job@atlas-qa.com")
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/jobs/analysis",
+        headers=auth_headers(client, cliente.email),
+    )
+    assert response.status_code == 403

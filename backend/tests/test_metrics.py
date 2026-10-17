@@ -7,6 +7,8 @@ atravessado por isso.
 """
 
 
+import pytest
+
 from tests.conftest import auth_headers, make_org, make_user
 from app.models.domain import UserRole
 
@@ -261,3 +263,14 @@ def test_custo_e_reportado_em_tokens_e_nunca_em_dinheiro(client, validator_heade
 
     assert "input_tokens" in ia and "output_tokens" in ia
     assert not any("cost" in chave or "custo" in chave for chave in ia)
+
+
+@pytest.mark.parametrize("papel", [UserRole.OWNER, UserRole.ADMIN])
+def test_gestao_le_metricas_da_propria_organizacao(client, db_session, papel):
+    org = make_org(db_session, name=f"Org {papel}")
+    gestor = make_user(db_session, org, papel, email=f"{papel}-metricas@atlas-qa.com")
+
+    response = client.get("/api/v1/metrics", headers=auth_headers(client, gestor.email))
+
+    assert response.status_code == 200
+    assert response.json()["organization_id"] == org.id
