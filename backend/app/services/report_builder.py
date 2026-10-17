@@ -12,6 +12,7 @@ Nada aqui decide se o laudo pode ser entregue: essa resposta já está gravada e
 from __future__ import annotations
 
 import hashlib
+import unicodedata
 from typing import Any, Dict, List, Tuple
 
 from app.models.domain import AnalysisRun, Project
@@ -73,8 +74,11 @@ def run_payload(run: AnalysisRun) -> Dict[str, Any]:
 
 def report_filename(project: Project, run: AnalysisRun) -> str:
     """Nome do arquivo — com o prefixo de uso interno quando for o caso (§7.5)."""
+    # O nome vai no Content-Disposition, que é ASCII: `str.isalnum` aceita "ç" e
+    # "á", e o byte fora da faixa quebra quem decodifica o cabeçalho em UTF-8.
+    ascii_name = unicodedata.normalize("NFKD", project.name).encode("ascii", "ignore").decode()
     safe_name = "".join(
-        c if c.isalnum() or c in "-_" else "_" for c in project.name
+        c if c.isalnum() or c in "-_" else "_" for c in ascii_name
     )[:60] or "empreendimento"
     prefix = "" if run.is_publishable else "USO_INTERNO_"
     return f"{prefix}Pre_Analise_{safe_name}.pdf"
