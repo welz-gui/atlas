@@ -427,3 +427,97 @@ def test_expurgo_pela_api_e_simulacao_por_padrao(client, db_session, org, upload
     body = response.json()
     assert body["dry_run"] is True
     assert body["retention_enabled"] is False
+
+
+# =============================================================================
+# Expurgo: o que acontece quando o storage falha, já perdeu o arquivo ou só ensaia
+# =============================================================================
+
+class _Storage:
+    """Só o que o expurgo usa: `delete_bulk`, devolvendo o que o teste mandar."""
+
+    def __init__(self, resultado=None, erro=None):
+        self.resultado, self.erro, self.pedidos = resultado, erro, []
+
+    def delete_bulk(self, keys):
+        self.pedidos.append(list(keys))
+        if self.erro:
+            raise self.erro
+        return {key: (self.resultado or {}).get(key, "deleted") for key in keys}
+
+
+def _vencido(db_session, org, project, key):
+    return _documento_obsoleto(
+        db_session, org, project["id"], key, datetime.utcnow() - timedelta(days=1)
+    )
+
+
+def test_simulacao_nao_marca_falha_nem_toca_no_registro(db_session, org, project):
+    documento = _vencido(db_session, org, project, "a.pdf")
+    storage = _Storage()
+
+    relatorio = purge_expired_documents(db_session, org.id, dry_run=True, storage=storage)
+
+    assert (relatorio.examined, relatorio.purged, relatorio.failed) == (1, 0, 0)
+    assert relatorio.errors == []
+    assert relatorio.document_ids == [documento.id]
+    assert storage.pedidos == []  # nem pergunta ao storage
+    db_session.refresh(documento)
+    assert documento.purged_at is None
+
+
+def test_arquivo_que_ja_nao_existia_conta_como_ausente_e_ainda_assim_expurga(
+    db_session, org, project
+):
+    documento = _vencido(db_session, org, project, "sumiu.pdf")
+
+    relatorio = purge_expired_documents(
+        db_session, org.id, storage=_Storage({"sumiu.pdf": "missing"})
+    )
+
+    assert (relatorio.purged, relatorio.already_missing, relatorio.failed) == (1, 1, 0)
+    db_session.refresh(documento)
+    assert documento.purged_at is not None
+
+
+def test_falha_num_arquivo_nao_marca_o_registro_e_nao_impede_os_outros(
+    db_session, org, project
+):
+    bom = _vencido(db_session, org, project, "bom.pdf")
+    ruim = _vencido(db_session, org, project, "ruim.pdf")
+
+    relatorio = purge_expired_documents(
+        db_session, org.id, storage=_Storage({"ruim.pdf": "error"})
+    )
+
+    assert (relatorio.purged, relatorio.failed) == (1, 1)
+    assert relatorio.errors == [f"{ruim.id}: falha na remoção do backend remoto"]
+    db_session.refresh(bom)
+    db_session.refresh(ruim)
+    assert bom.purged_at is not None
+    # Sem confirmação do storage o registro continua pendente: o próximo ciclo tenta de novo.
+    assert ruim.purged_at is None
+
+
+def test_storage_fora_do_ar_nao_marca_ninguem_como_expurgado(db_session, org, project):
+    documentos = [_vencido(db_session, org, project, f"{i}.pdf") for i in range(2)]
+
+    relatorio = purge_expired_documents(
+        db_session, org.id, storage=_Storage(erro=ConnectionError("fora do ar"))
+    )
+
+    assert (relatorio.purged, relatorio.failed) == (0, 2)
+    for documento in documentos:
+        db_session.refresh(documento)
+        assert documento.purged_at is None
+
+
+def test_expurgo_e_gravado_no_banco(db_session, org, project):
+    documento = _vencido(db_session, org, project, "gravado.pdf")
+
+    purge_expired_documents(db_session, org.id, storage=_Storage())
+
+    db_session.rollback()  # o que não foi commitado se perderia aqui
+    db_session.refresh(documento)
+    assert documento.purged_at is not None
+    assert documento.purge_reason
