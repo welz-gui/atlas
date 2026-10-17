@@ -256,3 +256,14 @@ def test_build_report(mock_generator):
     assert sha256 == hashlib.sha256(b"fake-pdf-content").hexdigest()
 
     mock_generator.generate_pdf.assert_called_once()
+
+
+def test_report_filename_so_tem_ascii_porque_vai_no_content_disposition():
+    """Cabeçalho HTTP com byte fora do ASCII quebra clientes que o decodificam em UTF-8."""
+    project = Project(name="Residência das Acácias")
+    run = AnalysisRun(is_publishable=True)
+
+    filename = report_filename(project, run)
+
+    assert filename == "Pre_Analise_Residencia_das_Acacias.pdf"
+    filename.encode("ascii")
