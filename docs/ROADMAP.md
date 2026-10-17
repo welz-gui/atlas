@@ -4,14 +4,14 @@ Documento vivo. Consolida o **roadmap estratégico** do plano (§9 e §10 de
 [`PLANO_DE_IMPLEMENTACAO_v2.md`](PLANO_DE_IMPLEMENTACAO_v2.md)) com o **estado
 real do código** e o **caminho de execução** de cada estágio.
 
-- Última atualização: **2026-10-14**
-- Base avaliada: `master` em `dfae959`, espelhada em
+- Última atualização: **2026-10-17**
+- Base avaliada: `master` em `f6e9341`, espelhada em
   [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
   estágios foi levantado em `7dc50d2` e continua valendo, com uma exceção
   registrada abaixo: o **Estágio 6 deixou de ser "nada construído"**.
 - **A Fase D está encerrada, exceto pelo D3** — que nunca foi de engenharia.
   Ver o registro adiante.
-- Suíte: **561 casos de backend** (eram 199 em `7dc50d2`) e **81 de
+- Suíte: **596 casos de backend** (eram 199 em `7dc50d2`) e **83 de
   frontend** (8 arquivos, incluindo componentes — `ErrorBanner`, `StatusChip`,
   `EmptyState`, `OfflineBar`, `AppShell`, `Navbar` — e a fila offline).
   Mais 13 de integração e 6 de RLS, que só rodam na CI porque exigem
@@ -223,7 +223,7 @@ delas falhar, pare e conserte antes de continuar a construir.
 
 | Worktree | Branch | PR | Situação |
 |---|---|---|---|
-| `worktrees/roadmap-update-10` | `docs/atualiza-roadmap-decima-leva` | — | 🟨 A frente que trouxe esta atualização. |
+| `worktrees/roadmap-update-11` | `docs/atualiza-roadmap-decima-primeira-leva` | — | 🟨 A frente que trouxe esta atualização. |
 
 Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
@@ -241,7 +241,7 @@ Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
 ## Estado atual em uma página
 
-**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 561 testes; RLS ativa, MFA
+**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 596 testes; RLS ativa, MFA
 por TOTP, log em JSON com correlação e sondas de vida e prontidão):
 
 ```
@@ -1346,10 +1346,10 @@ um sem escolher nenhum. Suíte: 353 → 367.
 si. Depende de decisão e de conta, não de código — e, como o D3, não é
 engenharia que o trava.
 
-### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-10-14)
+### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-10-17)
 
-Um agente externo (Jules, do Google) abriu dez levas de PRs contra o
-repositório — 30, 42, 24, 7, 38, 23, 12, 2, 18 e 1 — do tipo "code health": remoção de import morto,
+Um agente externo (Jules, do Google) abriu onze levas de PRs contra o
+repositório — 30, 42, 24, 7, 38, 23, 12, 2, 18, 1 e 30 — do tipo "code health": remoção de import morto,
 refator de função complexa, teste de caminho de erro, correção de N+1, e
 algumas de segurança. Nenhuma foi mesclada às cegas por CI verde; cada uma foi
 lida contra o código real antes de decidir. O que isso revelou vale mais do
@@ -1471,6 +1471,32 @@ que qualquer regra individual corrigida:
   distribuída e o código de MFA. Fechada sem descartar o problema: a política
   (atraso progressivo ou bloqueio, por conta ou por IP) e o lugar do estado
   são decisão de produto. Registrada em *Dívidas técnicas*;
+
+- **uma função que apaga arquivo de cliente, quase sem teste.** A #326 só
+  reorganizava `purge_expired_documents`; para saber se o refator preservava o
+  comportamento, rodei as suítes existentes sob mutação — e **cinco das seis
+  mutações sobreviveram**: contar arquivo ausente ou falha, marcar o registro
+  como expurgado sem confirmação do storage, tratar a falha do lote, gravar o
+  `commit`. Só o caminho feliz, a simulação (sem checar falhas) e o isolamento
+  entre organizações eram testados. Escritos cinco testes (#338) com um storage
+  de mentira — `deleted`/`missing`/`error`/exceção —, 8 de 9 mutações mortas (a
+  que sobrevive é equivalente: a guarda `not dry_run` existe duas vezes no
+  código). Só **depois** a #326 foi comparada com eles e mesclada. A ordem
+  importa: um refator só se verifica contra testes que falham de verdade;
+- **um defeito achado pelo teste de outra PR.** Ao consolidar o teste de laudo
+  com `run_id` (#331), usei um nome de projeto acentuado e o cliente de teste
+  quebrou com `UnicodeDecodeError` — não o servidor. `report_filename` filtrava
+  com `str.isalnum`, que aceita letras acentuadas, e o nome vai no
+  `Content-Disposition` (ASCII; RFC 6266 pede `filename*` para o resto). O
+  projeto de demonstração do seed, *Residencial das Acácias*, mandava o byte
+  `0xE1`. Navegadores costumam tolerar; clientes que decodificam o cabeçalho
+  como UTF-8, não. Corrigido em #337 (NFKD e descarte do que não for ASCII), com
+  o teste vermelho em `master` antes;
+- **teste que sairia da suíte para a rede.** As #321 e #335 testavam
+  `/catalog/jobs/discovery` até o sucesso: o job roda inline e o handler real
+  buscaria páginas de órgãos públicos. Os testes existentes trocam o handler por
+  isso; nas PRs o HTTP 200 mascarava a tentativa (o job falhava, o endpoint
+  respondia 200 e o teste só olhava `job_type`). Não entraram;
 
 **Padrões que se repetiram e mudaram como a revisão foi feita:**
 
@@ -1665,6 +1691,49 @@ que qualquer regra individual corrigida:
   testes de assinatura e expiração não pegavam: um `except` estreito demais em
   `decode_access_token`;
 
+- **a leva dos 20 testes que se repetem.** Oito PRs apendavam no mesmo ponto
+  de `test_protocol.py`; a lista de protocolos, o 422 de situação inválida e o
+  404 de projeto apareciam em quatro a seis delas, e três tinham um teste com o
+  mesmo nome (`test_create_protocol_invalid_version`) e asserções diferentes.
+  Consolidadas em #336: só o que a suíte não cobria e que
+  discrimina (ordem das listas, 404 de projeto/tenant/id, permissão, `dry_run`
+  do expurgo nascendo ensaio, `analysis_run_id` no payload do laudo,
+  `exclude_unset` no PATCH, `was_predicted` sem análise ou sem correspondência,
+  `EM_CORRECAO` que não volta a `NOTIFICADO`). Duas melhorias sobre as PRs: a
+  versão de *outro projeto* na criação de protocolo (a PR usava id inexistente,
+  mesmo caminho de código) e a análise de *outro projeto* no laudo. E a ordem das
+  listas é conferida pela identidade das linhas, não por comparação de
+  timestamps. 23 mutações, todas mortas. Renomear testes existentes
+  (`recall` → `prediction_accuracy`, #333) apagaria o nome de domínio do §11;
+- **a segurança que não é.** Duas PRs (#315, #328) "corrigiam injeção de SQL"
+  numa migração já aplicada cuja lista de tabelas é uma tupla constante — a
+  mesma alegação de levas anteriores. Envolver uma f-string em `text()` não
+  parametriza nada (e `text()` lê `:nome` como bind); reescrever a migração faz o
+  código-fonte divergir do que de fato rodou. Fechadas;
+- **o "perf" cuja alegação é falsa.** #317: "mover `db.commit` para fora do
+  laço" em `consume_second_factor` — o laço já retorna na primeira
+  correspondência, então havia um `commit` por chamada; o custo real é o argon2
+  por código. #323: paralelizar o esvaziamento da fila de campo por projeto, sem
+  medir nada, com um flag `isOffline` compartilhado entre promessas e sem teste
+  do novo comportamento — numa fila cuja ordem já foi um bug (#228). #311:
+  "import sem uso" que estava em uso (`math.sqrt`);
+- **o desenho recusado, agora com um módulo novo.** #325 movia 45 linhas de
+  `create_requirement` e o `EventPayload` para `ProtocolService`, uma classe só
+  de `staticmethod`; #332 embrulhava três argumentos de `generate_pdf` num
+  `PDFReportContext`. Mesma família de #218/#221/#290/#297. O corte natural, se a
+  função precisa encolher, é um helper no próprio arquivo;
+- **uma PR sem teste que merecia um.** A #307 desregistra o service worker em
+  desenvolvimento: o comentário do `OfflineBar` já explicava por que ele só é
+  registrado em produção, mas a defesa só valia para quem nunca rodou um build.
+  Mesclada como #339, com dois testes sobre `navigator.serviceWorker` simulado e
+  4 mutações mortas;
+- **a ferramenta que falha em silêncio.** O executor de mutação que escrevi
+  rodava o `pytest` com `-q` duas vezes; sem linha de resumo, "nenhuma falha"
+  e "nada rodou" ficavam parecidos. Confirmei o baseline (15 passando) antes de
+  confiar em "sobreviveu" — e a segunda tentativa, com `test_storage.py` incluído,
+  mostrou que eu tinha deixado de rodar o arquivo certo. Mutação só vale com o
+  baseline à vista;
+
 Resultado: **21 PRs mescladas na primeira leva**; na segunda, **21 mescladas**
 (16 diretas + 5 reescritas) e **25 fechadas**; na terceira, **12 mescladas
 diretamente**, mais **7 refeitas em 4 PRs novas** (mesmo padrão de cachos na
@@ -1698,10 +1767,16 @@ reescrita em #304 porque conflitava com `master` depois da #301 — a primeira
 função fina com lógica própria (monta a query string), logo com teste que vale;
 a primeira versão do *meu* teste deixou sobreviver a mutação "`?` solto quando
 não há filtro" (separava a URL no `?` e não via o sufixo), e só passou a pegá-la
-depois de conferir a URL crua. Suíte: 367 → 441 → 452 → 453 → 469 → 534 → 551 →
-554 → 561 (backend), 15 → 21 → 39 → 40 → 65 → 75 → 81 (frontend, 4 arquivos
-até a quarta leva, 8 desde a quinta; da sexta à oitava nenhuma acrescentou
-teste de frontend, a nona acrescentou 10 e a décima, 6).
+depois de conferir a URL crua; na décima primeira, **30 PRs**: **2 mescladas
+diretamente** (#326 e #329, ambas depois de verificadas — a primeira contra os
+testes novos da #338, a segunda comparando o estado das tabelas após rodar os
+seeds), **21 absorvidas** em duas consolidações próprias (#336, com 20, e #339,
+a #307) e **7 fechadas** (#311, #315, #317, #323, #325, #328, #332). Mais duas
+PRs próprias fora da revisão de conteúdo (#337, o nome do laudo, e #338, o
+expurgo). Suíte: 367 → 441 → 452 → 453 → 469 → 534 → 551 → 554 → 561 → 596
+(backend), 15 → 21 → 39 → 40 → 65 → 75 → 81 → 83 (frontend, 4 arquivos até a
+quarta leva, 8 desde a quinta; da sexta à oitava nenhuma acrescentou teste de
+frontend, a nona acrescentou 10, a décima 6 e a décima primeira 2).
 
 **Pendência sem solução de código:** branches de PRs já mescladas ou fechadas
 continuam reaparecendo em `origin` depois de apagadas — inclusive branches de
@@ -1838,6 +1913,7 @@ vazia.
 | `RuleSource.is_verified` não quer dizer "conferido por pessoa" | Só significa "tem documento **e** artigo"; o critério real é `Rule.is_publishable` (estado + validador). O assistente já omite o artigo de regra não validada (#274), mas `ai/retrieval.py` ainda entrega ao modelo `fonte_conferida` calculado por `is_verified`, e o motor grava `source_is_verified` com o mesmo critério. Não revisado se isso basta no laudo | `regulatory/catalog.py`, `ai/retrieval.py`, `services/regulatory_engine.py` |
 | **Login sem limite de tentativas** | `POST /auth/login` não limita tentativas, nem por IP nem por conta; o código de MFA (6 dígitos) fica exposto à mesma força bruta. A tentativa do Jules (#298) não serve: contador em memória por processo, chave por IP (atrás de proxy, todos dividem o balde). Decidir a política (atraso progressivo × bloqueio, por conta × por IP) e onde guardar o estado (banco ou Redis) antes de implementar | `backend/app/api/v1/endpoints/auth.py` |
 | N+1 fora dos três endpoints medidos | Só a lista de protocolos, `prediction-accuracy` e o portal foram medidos e corrigidos (#299). Outras telas que serializam coleções não foram auditadas; `tests/test_protocol_queries.py` é o molde (conta SELECTs entre 2 e 6 filhos, sem fixar número) | `backend/app/api/v1/endpoints/` |
+| Testes que dependem de a ordem ser a de criação | As listas ordenadas por `created_at` (portal, histórico de análises) são testadas criando os itens em sequência; se dois forem criados no mesmo instante, a ordem esperada deixa de ser determinística. Não falhou até hoje; se falhar, ordenar também por `id` no endpoint e no teste | `backend/tests/test_portal.py`, `test_regulatory_engine.py` |
 | **Sem provedor de hospedagem** | A imagem e a composição existem; o ambiente, não | `docker-compose.prod.yml` |
 | **Catálogo maior, validação parada** | O coletor aumenta a fila do D3 sem que ninguém a consuma | `regulatory/discovery.py` |
 | RLS não cobre `users` | Listagem de usuários tem só o filtro de aplicação; as tabelas com trabalho de cliente estão cobertas | `alembic/.../a4d7e91c5b20` |
