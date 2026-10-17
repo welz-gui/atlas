@@ -37,12 +37,17 @@ export default function OfflineBar() {
   useEffect(() => {
     // O service worker só é registrado em produção: em desenvolvimento ele
     // serviria bundles antigos e faria perder tempo caçando bug que não existe.
-    if (
-      typeof navigator !== "undefined" &&
-      "serviceWorker" in navigator &&
-      process.env.NODE_ENV === "production"
-    ) {
-      navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+    // E quem já rodou um build de produção neste mesmo endereço ainda tem um
+    // registrado: em desenvolvimento ele é removido.
+    if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+      if (process.env.NODE_ENV === "production") {
+        navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+      } else {
+        navigator.serviceWorker
+          .getRegistrations()
+          .then((registrations) => registrations.forEach((r) => void r.unregister()))
+          .catch(() => undefined);
+      }
     }
 
     setOnline(isOnline());

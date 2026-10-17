@@ -131,4 +131,46 @@ describe("OfflineBar", () => {
     expect(screen.getByText(/Erro muito específico/i)).toBeInTheDocument();
     expect(screen.getByText("recusado")).toBeInTheDocument();
   });
+
+  describe("service worker", () => {
+    const remover = vi.fn(() => Promise.resolve(true));
+    const registrar = vi.fn(() => Promise.resolve());
+    const listar = vi.fn(() => Promise.resolve([{ unregister: remover }]));
+
+    beforeEach(() => {
+      Object.defineProperty(navigator, "serviceWorker", {
+        configurable: true,
+        value: { register: registrar, getRegistrations: listar },
+      });
+    });
+
+    afterEach(() => {
+      delete (navigator as { serviceWorker?: unknown }).serviceWorker;
+      vi.unstubAllEnvs();
+    });
+
+    it("em desenvolvimento remove o que um build de produção deixou e não registra outro", async () => {
+      vi.stubEnv("NODE_ENV", "development");
+
+      await act(async () => {
+        render(<OfflineBar />);
+      });
+
+      expect(listar).toHaveBeenCalledOnce();
+      expect(remover).toHaveBeenCalledOnce();
+      expect(registrar).not.toHaveBeenCalled();
+    });
+
+    it("em produção registra /sw.js e não remove nada", async () => {
+      vi.stubEnv("NODE_ENV", "production");
+
+      await act(async () => {
+        render(<OfflineBar />);
+      });
+
+      expect(registrar).toHaveBeenCalledWith("/sw.js");
+      expect(listar).not.toHaveBeenCalled();
+      expect(remover).not.toHaveBeenCalled();
+    });
+  });
 });
