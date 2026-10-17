@@ -238,3 +238,29 @@ def test_equipe_tambem_acessa_o_portal(client, engineer_headers, project):
 def test_portal_traz_a_ressalva(client, client_headers, project):
     body = _portal(client, client_headers, project["id"])
     assert "não substitui o projeto aprovado" in body["notice"]
+
+
+def test_portal_lista_do_empreendimento_mais_novo_para_o_mais_antigo(
+    client, client_headers, engineer_headers, project
+):
+    outro = client.post(
+        "/api/v1/projects", headers=engineer_headers, json={"name": "Outro Empreendimento"}
+    ).json()
+
+    projetos = client.get("/api/v1/portal/projects", headers=client_headers).json()
+
+    assert [p["id"] for p in projetos] == [outro["id"], project["id"]]
+
+
+def test_portal_sem_analise_diz_que_nao_ha_em_vez_de_inventar_conformidade(
+    client, client_headers, db_session, project
+):
+    from app.models.domain import AnalysisRun
+
+    db_session.query(AnalysisRun).filter_by(project_id=project["id"]).delete()
+    db_session.commit()
+
+    conformidade = _portal(client, client_headers, project["id"])["compliance"]
+
+    assert conformidade["available"] is False
+    assert "Ainda não há pré-análise regulatória registrada" in conformidade["reason"]

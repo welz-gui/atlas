@@ -361,3 +361,76 @@ def test_get_project_validations_projeto_inexistente_responde_404(
     )
     assert response.status_code == 404
     assert response.json()["detail"] == "Empreendimento não encontrado."
+
+
+# =============================================================================
+# Histórico de análises: ordem, busca por id e reemissão do laudo
+# =============================================================================
+def test_historico_vem_da_analise_mais_nova_para_a_mais_antiga(
+    client, engineer_headers, seeded_catalog
+):
+    projeto = _criar_projeto(client, engineer_headers, "Histórico", front_setback=3.00)
+    client.post(
+        f"/api/v1/projects/{projeto['id']}/versions",
+        headers=engineer_headers,
+        json={"front_setback": 4.50},
+    )
+
+    runs = client.get(
+        f"/api/v1/projects/{projeto['id']}/analysis-runs", headers=engineer_headers
+    ).json()
+
+    assert [r["project_version_number"] for r in runs] == [2, 1]
+
+
+def test_analise_por_id_e_404_quando_nao_e_do_tenant(
+    client, db_session, engineer_headers, seeded_catalog
+):
+    from tests.conftest import auth_headers, make_org, make_user
+    from app.models.domain import UserRole
+
+    projeto = _criar_projeto(client, engineer_headers, "Dono da análise")
+    run_id = client.get(
+        f"/api/v1/projects/{projeto['id']}/analysis-runs", headers=engineer_headers
+    ).json()[0]["id"]
+
+    assert client.get(f"/api/v1/analysis-runs/{run_id}", headers=engineer_headers).json()["id"] == run_id
+
+    inexistente = client.get(f"/api/v1/analysis-runs/{uuid.uuid4()}", headers=engineer_headers)
+    assert inexistente.status_code == 404
+    assert inexistente.json()["detail"] == "Análise não encontrada."
+
+    intruso = make_user(
+        db_session, make_org(db_session, "Outra Construtora"), UserRole.OWNER, "intruso-run@atlas-qa.com"
+    )
+    assert client.get(
+        f"/api/v1/analysis-runs/{run_id}", headers=auth_headers(client, intruso.email)
+    ).status_code == 404
+
+
+def test_laudo_reemitido_de_uma_analise_antiga_e_so_do_proprio_projeto(
+    client, engineer_headers, seeded_catalog
+):
+    projeto = _criar_projeto(client, engineer_headers, "Laudo historico")
+    outro = _criar_projeto(client, engineer_headers, "Outro projeto")
+    run_proprio = client.get(
+        f"/api/v1/projects/{projeto['id']}/analysis-runs", headers=engineer_headers
+    ).json()[0]["id"]
+    run_alheio = client.get(
+        f"/api/v1/projects/{outro['id']}/analysis-runs", headers=engineer_headers
+    ).json()[0]["id"]
+
+    ok = client.get(
+        f"/api/v1/projects/{projeto['id']}/report/pdf?run_id={run_proprio}", headers=engineer_headers
+    )
+    assert ok.status_code == 200
+    assert ok.headers["content-type"] == "application/pdf"
+    assert ok.content.startswith(b"%PDF")
+
+    # Uma análise que existe, mas é de outro projeto, não sai no laudo deste.
+    for run_id in (run_alheio, str(uuid.uuid4())):
+        recusado = client.get(
+            f"/api/v1/projects/{projeto['id']}/report/pdf?run_id={run_id}", headers=engineer_headers
+        )
+        assert recusado.status_code == 404, run_id
+        assert recusado.json()["detail"] == "Análise não encontrada."
