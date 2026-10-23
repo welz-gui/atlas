@@ -13,7 +13,7 @@ import ssl
 import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
@@ -356,16 +356,8 @@ def _sync_candidate(
     candidate: DiscoveredDocument,
     source: DiscoverySource,
     now: datetime,
+    existing: RegulatoryDocument | None = None,
 ) -> tuple[str, str]:
-    existing = (
-        db.query(RegulatoryDocument)
-        .filter(
-            RegulatoryDocument.jurisdiction == jurisdiction,
-            RegulatoryDocument.url == candidate.url,
-        )
-        .order_by(RegulatoryDocument.created_at.desc())
-        .first()
-    )
     if existing is None:
         existing = RegulatoryDocument(
             jurisdiction=jurisdiction,
@@ -425,9 +417,31 @@ def discover_regulations(
     unchanged = 0
     document_ids: list[str] = []
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
+
+    # Bulk fetch existing documents to avoid N+1 queries
+    candidate_urls = [c.url for c, _ in candidates.values()]
+    existing_docs = []
+    if candidate_urls:
+        existing_docs = (
+            db.query(RegulatoryDocument)
+            .filter(
+                RegulatoryDocument.jurisdiction == jurisdiction,
+                RegulatoryDocument.url.in_(candidate_urls),
+            )
+            .order_by(RegulatoryDocument.created_at.desc())
+            .all()
+        )
+
+    existing_map = {}
+    for doc in existing_docs:
+        # Since it's ordered by created_at desc, the first one seen per URL is the most recent
+        if doc.url not in existing_map:
+            existing_map[doc.url] = doc
+
     for candidate, source in candidates.values():
-        status, doc_id = _sync_candidate(db, jurisdiction, candidate, source, now)
+        existing = existing_map.get(candidate.url)
+        status, doc_id = _sync_candidate(db, jurisdiction, candidate, source, now, existing=existing)
         if status == "created":
             created += 1
         elif status == "updated":
