@@ -24,6 +24,83 @@ from collections import defaultdict
 from app.regulatory.catalog import RuleState
 
 
+def _get_rule_metrics(db):
+    regras = db.query(RegulatoryRule).filter_by(jurisdiction="BR-RS-4311403").all()
+    vigentes = sum(1 for r in regras if r.state == RuleState.VIGENTE)
+    em_validacao = sum(1 for r in regras if r.state == RuleState.EM_VALIDACAO)
+    return vigentes, em_validacao, len(regras)
+
+
+def _get_protocol_metrics(db, project_ids):
+    processes = db.query(ProtocolProcess).filter(ProtocolProcess.project_id.in_(project_ids)).all()
+    proc_ids = [pr.id for pr in processes]
+    reqs = db.query(ProtocolRequirement).filter(ProtocolRequirement.process_id.in_(proc_ids)).all() if proc_ids else []
+
+    total_reqs = len(reqs)
+    predicted_reqs = sum(1 for r in reqs if r.was_predicted)
+    unpredicted_reqs = total_reqs - predicted_reqs
+    recall = (predicted_reqs / total_reqs * 100.0) if total_reqs > 0 else 100.0
+
+    proc_to_proj = {pr.id: pr.project_id for pr in processes}
+    proj_req_count = defaultdict(int)
+    for r in reqs:
+        proj_id = proc_to_proj.get(r.process_id)
+        if proj_id:
+            proj_req_count[proj_id] += 1
+
+    return total_reqs, predicted_reqs, unpredicted_reqs, recall, proj_req_count
+
+
+def _get_validation_metrics(db, project_ids):
+    val_records = db.query(ValidationRecord).filter(
+        ValidationRecord.analysis_run_id.in_(
+            db.query(AnalysisRun.id).filter(AnalysisRun.project_id.in_(project_ids))
+        )
+    ).all()
+
+    nao_verificaveis = sum(1 for v in val_records if v.status == "nao_verificavel")
+    bloqueios = sum(1 for v in val_records if v.status == "nao_conforme")
+    conformes = sum(1 for v in val_records if v.status == "conforme")
+
+    return conformes, bloqueios, nao_verificaveis
+
+
+def _print_report(org_name, total_projects, total_analyses, rule_metrics, protocol_metrics, validation_metrics, projects):
+    regras_vigentes, regras_em_validacao, total_regras = rule_metrics
+    total_reqs, predicted_reqs, unpredicted_reqs, recall, proj_req_count = protocol_metrics
+    conformes, bloqueios, nao_verificaveis = validation_metrics
+
+    print("=" * 70)
+    print("         ATLAS — RELATÓRIO DE DESEMPENHO DO ESTÁGIO 0 (CONCIERGE)")
+    print("=" * 70)
+    print(f"Organização:             {org_name}")
+    print(f"Projetos de Pré-análise: {total_projects}")
+    print(f"Análises Executadas:    {total_analyses}")
+    print("-" * 70)
+    print("MÉTRICAS DO CATÁLOGO REGULATÓRIO (Lajeado/RS BR-RS-4311403)")
+    print(f"  * Regras Vigentes (Conferidas):    {regras_vigentes}")
+    print(f"  * Regras em Validação:            {regras_em_validacao}")
+    print(f"  * Total de Regras no Catálogo:    {total_regras}")
+    print("-" * 70)
+    print("MÉTRICAS DE ACURÁCIA PREDITIVA E RECALL (§11 DO PLANO)")
+    print(f"  * Exigências Reais Registradas:   {total_reqs}")
+    print(f"  * Exigências Previstas pelo Atlas: {predicted_reqs}")
+    print(f"  * Recall de Bloqueios/Exigências:  {recall:.1f}%")
+    print(f"  * Falsos Negativos Críticos:      {unpredicted_reqs}")
+    print("-" * 70)
+    print("DISTRIBUIÇÃO DOS VEREDICTOS DE ANÁLISE")
+    print(f"  * Verificações Conformes:          {conformes}")
+    print(f"  * Verificações Não Conformes:      {bloqueios}")
+    print(f"  * Verificações Não Verificáveis:   {nao_verificaveis}")
+    print("=" * 70)
+
+    print("\nDETALHAMENTO POR PROJETO:")
+    for p in projects:
+        print(f"  - [{p.name}] | Tipologia: {p.use_type} | Exigências: {proj_req_count[p.id]}")
+
+    print("\n[OK] Relatório concluído. Estágio 0 pronto para validação operacional.")
+
+
 def generate_stage0_report():
     db = SessionLocal()
     try:
@@ -33,72 +110,19 @@ def generate_stage0_report():
             return
 
         projects = db.query(Project).filter_by(organization_id=org.id).all()
-        regras = db.query(RegulatoryRule).filter_by(jurisdiction="BR-RS-4311403").all()
-
-        regras_vigentes = sum(1 for r in regras if r.state == RuleState.VIGENTE)
-        regras_em_validacao = sum(1 for r in regras if r.state == RuleState.EM_VALIDACAO)
+        project_ids = [p.id for p in projects]
 
         total_projects = len(projects)
-        total_analyses = db.query(AnalysisRun).filter(AnalysisRun.project_id.in_([p.id for p in projects])).count()
+        total_analyses = db.query(AnalysisRun).filter(AnalysisRun.project_id.in_(project_ids)).count()
 
-        # Requisitos de protocolo
-        processes = db.query(ProtocolProcess).filter(ProtocolProcess.project_id.in_([p.id for p in projects])).all()
-        proc_ids = [pr.id for pr in processes]
-        reqs = db.query(ProtocolRequirement).filter(ProtocolRequirement.process_id.in_(proc_ids)).all() if proc_ids else []
+        rule_metrics = _get_rule_metrics(db)
+        protocol_metrics = _get_protocol_metrics(db, project_ids)
+        validation_metrics = _get_validation_metrics(db, project_ids)
 
-        total_reqs = len(reqs)
-        predicted_reqs = sum(1 for r in reqs if r.was_predicted)
-        unpredicted_reqs = total_reqs - predicted_reqs
-
-        recall = (predicted_reqs / total_reqs * 100.0) if total_reqs > 0 else 100.0
-
-        # Não verificáveis nos ValidationRecords
-        val_records = db.query(ValidationRecord).filter(
-            ValidationRecord.analysis_run_id.in_(
-                db.query(AnalysisRun.id).filter(AnalysisRun.project_id.in_([p.id for p in projects]))
-            )
-        ).all()
-
-        nao_verificaveis = sum(1 for v in val_records if v.status == "nao_verificavel")
-        bloqueios = sum(1 for v in val_records if v.status == "nao_conforme")
-        conformes = sum(1 for v in val_records if v.status == "conforme")
-
-        print("=" * 70)
-        print("         ATLAS — RELATÓRIO DE DESEMPENHO DO ESTÁGIO 0 (CONCIERGE)")
-        print("=" * 70)
-        print(f"Organização:             {org.name}")
-        print(f"Projetos de Pré-análise: {total_projects}")
-        print(f"Análises Executadas:    {total_analyses}")
-        print("-" * 70)
-        print("MÉTRICAS DO CATÁLOGO REGULATÓRIO (Lajeado/RS BR-RS-4311403)")
-        print(f"  * Regras Vigentes (Conferidas):    {regras_vigentes}")
-        print(f"  * Regras em Validação:            {regras_em_validacao}")
-        print(f"  * Total de Regras no Catálogo:    {len(regras)}")
-        print("-" * 70)
-        print("MÉTRICAS DE ACURÁCIA PREDITIVA E RECALL (§11 DO PLANO)")
-        print(f"  * Exigências Reais Registradas:   {total_reqs}")
-        print(f"  * Exigências Previstas pelo Atlas: {predicted_reqs}")
-        print(f"  * Recall de Bloqueios/Exigências:  {recall:.1f}%")
-        print(f"  * Falsos Negativos Críticos:      {unpredicted_reqs}")
-        print("-" * 70)
-        print("DISTRIBUIÇÃO DOS VEREDICTOS DE ANÁLISE")
-        print(f"  * Verificações Conformes:          {conformes}")
-        print(f"  * Verificações Não Conformes:      {bloqueios}")
-        print(f"  * Verificações Não Verificáveis:   {nao_verificaveis}")
-        print("=" * 70)
-
-        proc_to_proj = {pr.id: pr.project_id for pr in processes}
-        proj_req_count = defaultdict(int)
-        for r in reqs:
-            proj_id = proc_to_proj.get(r.process_id)
-            if proj_id:
-                proj_req_count[proj_id] += 1
-
-        print("\nDETALHAMENTO POR PROJETO:")
-        for p in projects:
-            print(f"  - [{p.name}] | Tipologia: {p.use_type} | Exigências: {proj_req_count[p.id]}")
-
-        print("\n[OK] Relatório concluído. Estágio 0 pronto para validação operacional.")
+        _print_report(
+            org.name, total_projects, total_analyses,
+            rule_metrics, protocol_metrics, validation_metrics, projects
+        )
 
     finally:
         db.close()
