@@ -284,7 +284,7 @@ def fetch_source(
 
     portao = gate or RobotsGate()
     policy = portao.check(url)
-    portao.wait(url, policy)
+    portao.wait(policy)
 
     # O portal de Lajeado escolhe o template por um cookie de mídia e, na
     # primeira resposta sem ele, devolve apenas JavaScript para recarregar a
