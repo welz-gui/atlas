@@ -214,9 +214,12 @@ def consume_second_factor(db: Session, user: User, code: str) -> bool:
             code, recovery.code_hash
         ):
             recovery.used_at = datetime.utcnow()
-            db.commit()
-            return True
-    return False
+            break
+    else:
+        return False
+
+    db.commit()
+    return True
 
 
 @router.post("/auth/mfa/enroll", response_model=MFAEnrollResponse)
