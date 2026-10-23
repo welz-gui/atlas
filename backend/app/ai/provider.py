@@ -76,8 +76,7 @@ class AIProvider(ABC):
     available: bool = False
 
     @abstractmethod
-    def complete(self, request: AIRequest) -> AIResult:
-        ...
+    def complete(self, request: AIRequest) -> AIResult: ...
 
     def describe(self) -> str:
         return self.name
@@ -121,7 +120,9 @@ class AnthropicProvider(AIProvider):
 
     name = "anthropic"
 
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None, client=None):
+    def __init__(
+        self, api_key: Optional[str] = None, model: Optional[str] = None, client=None
+    ):
         self.api_key = api_key if api_key is not None else settings.ANTHROPIC_API_KEY
         self.model = model or settings.AI_MODEL
         self._client = client
@@ -145,12 +146,10 @@ class AnthropicProvider(AIProvider):
             )
         return self._client
 
-    def complete(self, request: AIRequest) -> AIResult:
-        import anthropic
-
+    def _build_system_blocks(self, request: AIRequest) -> list[Dict[str, Any]]:
         # O prefixo estável (instruções e política) vai num bloco marcado para
         # cache; o que muda a cada consulta fica fora dele.
-        system_blocks = []
+        system_blocks: list[Dict[str, Any]] = []
         if request.cacheable_prefix:
             system_blocks.append(
                 {
@@ -160,29 +159,9 @@ class AnthropicProvider(AIProvider):
                 }
             )
         system_blocks.append({"type": "text", "text": request.system})
+        return system_blocks
 
-        started = time.monotonic()
-        try:
-            message = self.client.messages.parse(
-                model=self.model,
-                max_tokens=request.max_tokens,
-                system=system_blocks,
-                messages=[{"role": "user", "content": request.prompt}],
-                thinking={"type": "adaptive"},
-                output_format=request.output_model,
-            )
-        except anthropic.RateLimitError as exc:
-            return self._failure("Limite de requisições do provedor atingido.", exc, started)
-        except anthropic.APIConnectionError as exc:
-            return self._failure("Não foi possível alcançar o provedor.", exc, started)
-        except anthropic.APIStatusError as exc:
-            return self._failure(
-                f"O provedor respondeu com erro {exc.status_code}.", exc, started
-            )
-        except Exception as exc:  # noqa: BLE001 — falha de IA nunca derruba o request
-            return self._failure("Falha inesperada ao consultar o provedor.", exc, started)
-
-        latency = int((time.monotonic() - started) * 1000)
+    def _build_success_result(self, message: Any, latency: int) -> AIResult:
         usage = getattr(message, "usage", None)
 
         # Recusa do modelo é resposta legítima e precisa chegar como tal: sem
@@ -208,6 +187,39 @@ class AnthropicProvider(AIProvider):
             output_tokens=getattr(usage, "output_tokens", None),
             latency_ms=latency,
         )
+
+    def complete(self, request: AIRequest) -> AIResult:
+        import anthropic
+
+        system_blocks = self._build_system_blocks(request)
+
+        started = time.monotonic()
+        try:
+            message = self.client.messages.parse(
+                model=self.model,
+                max_tokens=request.max_tokens,
+                system=system_blocks,
+                messages=[{"role": "user", "content": request.prompt}],
+                thinking={"type": "adaptive"},
+                output_format=request.output_model,
+            )
+        except anthropic.RateLimitError as exc:
+            return self._failure(
+                "Limite de requisições do provedor atingido.", exc, started
+            )
+        except anthropic.APIConnectionError as exc:
+            return self._failure("Não foi possível alcançar o provedor.", exc, started)
+        except anthropic.APIStatusError as exc:
+            return self._failure(
+                f"O provedor respondeu com erro {exc.status_code}.", exc, started
+            )
+        except Exception as exc:  # noqa: BLE001 — falha de IA nunca derruba o request
+            return self._failure(
+                "Falha inesperada ao consultar o provedor.", exc, started
+            )
+
+        latency = int((time.monotonic() - started) * 1000)
+        return self._build_success_result(message, latency)
 
     def _failure(self, message: str, exc: Exception, started: float) -> AIResult:
         logger.warning("%s (%s: %s)", message, type(exc).__name__, exc)
