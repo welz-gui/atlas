@@ -527,6 +527,51 @@ def _process_model_response(
     return resposta
 
 
+def _handle_missing_context(
+    context: AskContext,
+    baseline: AssistantResponse,
+    request_hash: str,
+    engine: AIProvider,
+) -> AssistantResponse:
+    # Sem contexto não se pergunta ao modelo: seria convidá-lo a preencher
+    # a lacuna com conhecimento próprio, que é exatamente o que a política
+    # proíbe. A resposta determinística já diz que o catálogo não cobre.
+    return _return_baseline(
+        context,
+        baseline=baseline,
+        request_hash=request_hash,
+        retrieved_keys=[],
+        cited_keys=[],
+        provider_name=engine.name,
+        warning=(
+            "O catálogo não cobre este assunto; o modelo não foi consultado para "
+            "evitar resposta sem base cadastrada."
+        ),
+    )
+
+
+def _handle_model_failure(
+    context: AskContext,
+    baseline: AssistantResponse,
+    request_hash: str,
+    retrieved_keys: Sequence[str],
+    engine: AIProvider,
+    result: AIResult,
+) -> AssistantResponse:
+    # Falha ou recusa do modelo devolve a resposta determinística — com o
+    # motivo à vista, nunca disfarçada de resposta de IA.
+    return _return_baseline(
+        context,
+        baseline=baseline,
+        request_hash=request_hash,
+        retrieved_keys=retrieved_keys,
+        cited_keys=retrieved_keys,
+        provider_name=engine.name,
+        warning=result.error or "O modelo não respondeu; usando busca no catálogo.",
+        result=result,
+    )
+
+
 def _ask_model(
     context: AskContext,
     baseline: AssistantResponse,
@@ -538,21 +583,7 @@ def _ask_model(
     jurisdiction: str,
 ) -> AssistantResponse:
     if not retrieved:
-        # Sem contexto não se pergunta ao modelo: seria convidá-lo a preencher
-        # a lacuna com conhecimento próprio, que é exatamente o que a política
-        # proíbe. A resposta determinística já diz que o catálogo não cobre.
-        return _return_baseline(
-            context,
-            baseline=baseline,
-            request_hash=request_hash,
-            retrieved_keys=[],
-            cited_keys=[],
-            provider_name=engine.name,
-            warning=(
-                "O catálogo não cobre este assunto; o modelo não foi consultado para "
-                "evitar resposta sem base cadastrada."
-            ),
-        )
+        return _handle_missing_context(context, baseline, request_hash, engine)
 
     contexto = format_context(retrieved)
     prompt = (
@@ -571,17 +602,8 @@ def _ask_model(
     )
 
     if not result.ok:
-        # Falha ou recusa do modelo devolve a resposta determinística — com o
-        # motivo à vista, nunca disfarçada de resposta de IA.
-        return _return_baseline(
-            context,
-            baseline=baseline,
-            request_hash=request_hash,
-            retrieved_keys=retrieved_keys,
-            cited_keys=retrieved_keys,
-            provider_name=engine.name,
-            warning=result.error or "O modelo não respondeu; usando busca no catálogo.",
-            result=result,
+        return _handle_model_failure(
+            context, baseline, request_hash, retrieved_keys, engine, result
         )
 
     return _process_model_response(
