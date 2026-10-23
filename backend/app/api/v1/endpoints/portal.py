@@ -169,18 +169,21 @@ def _compliance(db: Session, project: Project) -> PortalComplianceSummary:
     )
 
 
-def _build(db: Session, project: Project, user: User) -> PortalProject:
+def _get_physical_progress_and_milestones(db: Session, project: Project, user: User) -> tuple[float, list[PortalMilestone]]:
     eap = (
         tenant_query(db, EAPItem, user)
         .filter(EAPItem.project_id == project.id)
         .order_by(EAPItem.code)
         .all()
     )
-    # Progresso físico é a média simples das etapas cadastradas. Sem etapa
-    # cadastrada o valor é zero — e zero aqui significa "nada medido", não
-    # "obra parada". A interface diz isso.
     progress = round(sum(item.progress_percent for item in eap) / len(eap), 1) if eap else 0.0
+    milestones = [
+        PortalMilestone(name=item.name, progress_percent=item.progress_percent)
+        for item in eap
+    ]
+    return progress, milestones
 
+def _get_current_documents(db: Session, project: Project, user: User) -> list[PortalDocument]:
     documents = (
         tenant_query(db, Document, user)
         .filter(
@@ -190,7 +193,9 @@ def _build(db: Session, project: Project, user: User) -> PortalProject:
         .order_by(Document.created_at.desc())
         .all()
     )
+    return [PortalDocument.model_validate(d) for d in documents]
 
+def _get_protocols(db: Session, project: Project, user: User) -> list[PortalProtocol]:
     protocols = (
         tenant_query(db, ProtocolProcess, user)
         .filter(ProtocolProcess.project_id == project.id)
@@ -198,12 +203,39 @@ def _build(db: Session, project: Project, user: User) -> PortalProject:
         .order_by(ProtocolProcess.created_at.desc())
         .all()
     )
+    return [
+        PortalProtocol(
+            protocol_number=p.protocol_number,
+            agency=p.agency,
+            status=p.status,
+            submitted_at=p.submitted_at,
+            decided_at=p.decided_at,
+            open_requirements=[
+                PortalRequirement(
+                    description=r.description,
+                    status=r.status,
+                    raised_at=r.raised_at,
+                    due_date=r.due_date,
+                )
+                for r in p.requirements
+                if r.status in RequirementStatus.OPEN
+            ],
+        )
+        for p in protocols
+    ]
 
-    open_tasks = (
+def _get_open_tasks_count(db: Session, project: Project, user: User) -> int:
+    return (
         tenant_query(db, TaskItem, user)
         .filter(TaskItem.project_id == project.id, TaskItem.status != "concluido")
         .count()
     )
+
+def _build(db: Session, project: Project, user: User) -> PortalProject:
+    progress, milestones = _get_physical_progress_and_milestones(db, project, user)
+    documents = _get_current_documents(db, project, user)
+    protocols = _get_protocols(db, project, user)
+    open_tasks = _get_open_tasks_count(db, project, user)
 
     version = project.current_version
 
@@ -222,32 +254,10 @@ def _build(db: Session, project: Project, user: User) -> PortalProject:
         version_state=version.state if version else None,
         has_official_baseline=project.official_baseline is not None,
         physical_progress_percent=progress,
-        milestones=[
-            PortalMilestone(name=item.name, progress_percent=item.progress_percent)
-            for item in eap
-        ],
+        milestones=milestones,
         open_tasks=open_tasks,
-        current_documents=[PortalDocument.model_validate(d) for d in documents],
-        protocols=[
-            PortalProtocol(
-                protocol_number=p.protocol_number,
-                agency=p.agency,
-                status=p.status,
-                submitted_at=p.submitted_at,
-                decided_at=p.decided_at,
-                open_requirements=[
-                    PortalRequirement(
-                        description=r.description,
-                        status=r.status,
-                        raised_at=r.raised_at,
-                        due_date=r.due_date,
-                    )
-                    for r in p.requirements
-                    if r.status in RequirementStatus.OPEN
-                ],
-            )
-            for p in protocols
-        ],
+        current_documents=documents,
+        protocols=protocols,
         compliance=_compliance(db, project),
     )
 
