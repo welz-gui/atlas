@@ -6,7 +6,7 @@ from __future__ import annotations
 def jurisdiction_chain(jurisdiction: str) -> tuple[str, ...]:
     """Devolve os escopos aplicáveis, do nacional ao mais específico."""
     parts = jurisdiction.strip().upper().split("-")
-    if not parts or parts[0] != "BR":
+    if parts[0] != "BR":
         return (jurisdiction,)
     if len(parts) == 1:
         return ("BR",)
