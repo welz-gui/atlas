@@ -107,6 +107,7 @@ antes de ser conferida e publicada por uma pessoa.\
 # Resultado do assistente
 # =============================================================================
 
+
 @dataclass
 class AssistantResponse:
     answer: str
@@ -221,6 +222,7 @@ def _record(db: Session, params: RecordParams) -> AIInteraction:
 # Resposta determinística — o piso, não o improviso
 # =============================================================================
 
+
 def _citation(rule: Rule) -> str:
     """Fonte como o usuário a vê. O artigo só aparece se a regra foi validada
     por pessoa: é a promessa que `_unvalidated_warning` faz na mesma resposta."""
@@ -258,7 +260,9 @@ def _format_retrieved_rules(
             if rule.check
             else "verificação documental (não derivável de parâmetros numéricos)"
         )
-        pendente = "" if rule.is_publishable else " — regra ainda não validada tecnicamente"
+        pendente = (
+            "" if rule.is_publishable else " — regra ainda não validada tecnicamente"
+        )
         linha = f"• {rule.title}: {limite}{pendente}."
         if rule.rule_id in statuses:
             linha += (
@@ -428,59 +432,70 @@ def _return_baseline(
     return baseline
 
 
-def _process_model_response(
+def _handle_invented_citations(
     context: AskContext,
     baseline: AssistantResponse,
     request_hash: str,
-    retrieved: Sequence[RetrievedRule],
     retrieved_keys: Sequence[str],
+    citadas: List[str],
     engine: AIProvider,
     result: AIResult,
+    parsed: AssistantAnswer,
 ) -> AssistantResponse:
-    parsed: AssistantAnswer = result.parsed  # type: ignore[assignment]
+    return _return_baseline(
+        context,
+        baseline=baseline,
+        request_hash=request_hash,
+        retrieved_keys=retrieved_keys,
+        cited_keys=citadas,
+        provider_name=engine.name,
+        warning=(
+            "A resposta do modelo referenciou regra fora do catálogo consultado e foi "
+            "substituída pela consulta determinística."
+        ),
+        result=result,
+        response_json=parsed.model_dump(),
+        grounded=False,
+    )
 
-    # Conferência: chave citada que não estava no contexto é descartada.
-    permitidas = set(retrieved_keys)
-    citadas = [key for key in parsed.cited_rule_keys if key in permitidas]
-    inventadas = [key for key in parsed.cited_rule_keys if key not in permitidas]
-    grounded = not inventadas and parsed.answered_from_context
 
-    if inventadas:
-        return _return_baseline(
-            context,
-            baseline=baseline,
-            request_hash=request_hash,
-            retrieved_keys=retrieved_keys,
-            cited_keys=citadas,
-            provider_name=engine.name,
-            warning=(
-                "A resposta do modelo referenciou regra fora do catálogo consultado e foi "
-                "substituída pela consulta determinística."
-            ),
-            result=result,
-            response_json=parsed.model_dump(),
-            grounded=False,
-        )
+def _handle_insufficient_context(
+    context: AskContext,
+    baseline: AssistantResponse,
+    request_hash: str,
+    retrieved_keys: Sequence[str],
+    citadas: List[str],
+    engine: AIProvider,
+    result: AIResult,
+    parsed: AssistantAnswer,
+) -> AssistantResponse:
+    return _return_baseline(
+        context,
+        baseline=baseline,
+        request_hash=request_hash,
+        retrieved_keys=retrieved_keys,
+        cited_keys=citadas,
+        provider_name=engine.name,
+        warning=(
+            "O modelo indicou que o catálogo não sustenta uma resposta completa para "
+            "esta consulta."
+        ),
+        result=result,
+        response_json=parsed.model_dump(),
+        grounded=True,
+    )
 
-    if not parsed.answered_from_context:
-        # O próprio modelo disse que o contexto não bastava. Melhor entregar o
-        # que o catálogo tem do que uma resposta que ele mesmo não sustenta.
-        return _return_baseline(
-            context,
-            baseline=baseline,
-            request_hash=request_hash,
-            retrieved_keys=retrieved_keys,
-            cited_keys=citadas,
-            provider_name=engine.name,
-            warning=(
-                "O modelo indicou que o catálogo não sustenta uma resposta completa para "
-                "esta consulta."
-            ),
-            result=result,
-            response_json=parsed.model_dump(),
-            grounded=True,
-        )
 
+def _handle_successful_response(
+    context: AskContext,
+    request_hash: str,
+    retrieved_keys: Sequence[str],
+    retrieved: Sequence[RetrievedRule],
+    citadas: List[str],
+    result: AIResult,
+    parsed: AssistantAnswer,
+    grounded: bool,
+) -> AssistantResponse:
     # A citação legal é resolvida pelo Atlas, a partir do catálogo — nunca pelo
     # texto que o modelo escreveu.
     regras_citadas = [item.rule for item in retrieved if item.rule.rule_id in citadas]
@@ -525,6 +540,59 @@ def _process_model_response(
     )
     resposta.interaction_id = interaction.id
     return resposta
+
+
+def _process_model_response(
+    context: AskContext,
+    baseline: AssistantResponse,
+    request_hash: str,
+    retrieved: Sequence[RetrievedRule],
+    retrieved_keys: Sequence[str],
+    engine: AIProvider,
+    result: AIResult,
+) -> AssistantResponse:
+    parsed: AssistantAnswer = result.parsed  # type: ignore[assignment]
+
+    # Conferência: chave citada que não estava no contexto é descartada.
+    permitidas = set(retrieved_keys)
+    citadas = [key for key in parsed.cited_rule_keys if key in permitidas]
+    inventadas = [key for key in parsed.cited_rule_keys if key not in permitidas]
+    grounded = not inventadas and parsed.answered_from_context
+
+    if inventadas:
+        return _handle_invented_citations(
+            context,
+            baseline,
+            request_hash,
+            retrieved_keys,
+            citadas,
+            engine,
+            result,
+            parsed,
+        )
+
+    if not parsed.answered_from_context:
+        return _handle_insufficient_context(
+            context,
+            baseline,
+            request_hash,
+            retrieved_keys,
+            citadas,
+            engine,
+            result,
+            parsed,
+        )
+
+    return _handle_successful_response(
+        context,
+        request_hash,
+        retrieved_keys,
+        retrieved,
+        citadas,
+        result,
+        parsed,
+        grounded,
+    )
 
 
 def _ask_model(
@@ -658,6 +726,7 @@ def ask(context: AskContext) -> AssistantResponse:
 # Extração de rascunhos de regra
 # =============================================================================
 
+
 @dataclass
 class DraftResult:
     created_rule_ids: List[str] = field(default_factory=list)
@@ -696,7 +765,9 @@ def _draft_to_rule(
         jurisdiction=jurisdiction,
         title=draft.title,
         state=RuleState.RASCUNHO_EXTRAIDO_POR_IA,
-        severity=draft.severity if draft.severity in {"bloqueio", "alerta"} else "alerta",
+        severity=draft.severity
+        if draft.severity in {"bloqueio", "alerta"}
+        else "alerta",
         applies_to=applies_to,
         check=check,
         requires_manual_review=check is None,
@@ -878,7 +949,9 @@ def extract_rule_drafts(legal_text: str, context: ExtractionContext) -> DraftRes
     user = context.user
     jurisdiction = context.jurisdiction
     engine = context.provider or get_provider()
-    request_hash = _request_hash(legal_text, [jurisdiction], getattr(engine, "model", None))
+    request_hash = _request_hash(
+        legal_text, [jurisdiction], getattr(engine, "model", None)
+    )
 
     if not engine.available:
         return _handle_unavailable_provider(db, user, engine, legal_text, request_hash)
@@ -898,5 +971,12 @@ def extract_rule_drafts(legal_text: str, context: ExtractionContext) -> DraftRes
 
     batch: RuleDraftBatch = result.parsed  # type: ignore[assignment]
     return _handle_successful_extraction(
-        db, user, result, batch, jurisdiction, legal_text, request_hash, context.document
+        db,
+        user,
+        result,
+        batch,
+        jurisdiction,
+        legal_text,
+        request_hash,
+        context.document,
     )
