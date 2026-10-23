@@ -16,7 +16,6 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
-    Form,
     HTTPException,
     Response,
     UploadFile,
@@ -86,6 +85,62 @@ def _get_superseded_document(
     return superseded
 
 
+def _validate_file_extension(filename: str) -> tuple[str, str]:
+    # O nome enviado pelo cliente é tratado como dado hostil: dele só se
+    # aproveita a extensão, e ainda assim contra uma allowlist. A chave no
+    # armazenamento é opaca e gerada pelo servidor, de modo que sequências como
+    # "../" não têm efeito algum.
+    original_filename = secure_filename(filename)
+    extension = os.path.splitext(original_filename)[1].lower()
+    if extension not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=(
+                f"Extensão '{extension or 'desconhecida'}' não permitida. "
+                f"Aceitas: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
+            ),
+        )
+    return original_filename, extension
+
+
+def _create_document_record(
+    db: Session,
+    user: User,
+    project_id: str,
+    project_version_id: str | None,
+    payload: DocumentUpload,
+    original_filename: str | None,
+    content_type: str | None,
+    stored: StoredObject,
+    scan: ScanResult,
+    supersedes_id: str | None,
+) -> Document:
+    document = Document(
+        organization_id=user.organization_id,
+        project_id=project_id,
+        project_version_id=project_version_id,
+        title=payload.title,
+        category=payload.category,
+        version=payload.version,
+        file_path=stored.key,
+        storage_backend=stored.backend,
+        original_filename=original_filename or None,
+        content_type=content_type,
+        size_bytes=stored.size_bytes,
+        hash_sha256=stored.sha256,
+        antivirus_status=scan.status,
+        antivirus_engine=scan.engine,
+        antivirus_engine_version=scan.engine_version,
+        antivirus_signature=scan.signature,
+        antivirus_scanned_at=scan.scanned_at,
+        status=DocumentState.VIGENTE,
+        supersedes_id=supersedes_id,
+        uploaded_by_id=user.id,
+    )
+    db.add(document)
+    return document
+
+
 def _process_upload_file(file: UploadFile, extension: str) -> tuple[StoredObject, ScanResult]:
     storage = get_storage()
     key = build_key(extension)
@@ -153,49 +208,23 @@ def upload_document(
     db: Session = Depends(get_db),
 ):
     project = get_project_or_404(db, project_id, user)
-
     superseded = _get_superseded_document(db, user, project_id, payload.supersedes_id)
 
-    # O nome enviado pelo cliente é tratado como dado hostil: dele só se
-    # aproveita a extensão, e ainda assim contra uma allowlist. A chave no
-    # armazenamento é opaca e gerada pelo servidor, de modo que sequências como
-    # "../" não têm efeito algum.
-    original_filename = secure_filename(file.filename or "")
-    extension = os.path.splitext(original_filename)[1].lower()
-    if extension not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=(
-                f"Extensão '{extension or 'desconhecida'}' não permitida. "
-                f"Aceitas: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
-            ),
-        )
-
+    original_filename, extension = _validate_file_extension(file.filename or "")
     stored, scan = _process_upload_file(file, extension)
 
-    document = Document(
-        organization_id=user.organization_id,
+    document = _create_document_record(
+        db=db,
+        user=user,
         project_id=project_id,
         project_version_id=project.current_version.id if project.current_version else None,
-        title=payload.title,
-        category=payload.category,
-        version=payload.version,
-        file_path=stored.key,
-        storage_backend=stored.backend,
-        original_filename=original_filename or None,
+        payload=payload,
+        original_filename=original_filename,
         content_type=file.content_type,
-        size_bytes=stored.size_bytes,
-        hash_sha256=stored.sha256,
-        antivirus_status=scan.status,
-        antivirus_engine=scan.engine,
-        antivirus_engine_version=scan.engine_version,
-        antivirus_signature=scan.signature,
-        antivirus_scanned_at=scan.scanned_at,
-        status=DocumentState.VIGENTE,
+        stored=stored,
+        scan=scan,
         supersedes_id=superseded.id if superseded else None,
-        uploaded_by_id=user.id,
     )
-    db.add(document)
 
     # A versão anterior sai de circulação no mesmo ato (§8.3 — bloqueio de
     # versão obsoleta). Duas versões vigentes do mesmo documento seriam uma
