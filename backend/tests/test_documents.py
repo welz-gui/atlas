@@ -409,3 +409,58 @@ def test_extracao_arquivo_ausente_no_storage_responde_410(
 
     assert response.status_code == 410
     assert "armazenamento" in response.json()["detail"].lower()
+
+
+# --- Extração de ponta a ponta: PDF de verdade, parser de verdade -----------
+
+def _pdf_com_texto(*linhas):
+    import io
+
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    y = 800
+    for linha in linhas:
+        pdf.drawString(50, y, linha)
+        y -= 18
+    pdf.save()
+    return buffer.getvalue()
+
+
+def test_extracao_devolve_o_que_o_documento_diz_e_so_isso(
+    client, engineer_headers, project, upload_dir
+):
+    documento = _upload(
+        client, engineer_headers, project["id"], "quadro.pdf",
+        _pdf_com_texto(
+            "QUADRO DE AREAS",
+            "Area do Terreno: 512,40 m²",
+            "Area Construida: 268,15 m²",
+            "Recuo Frontal: 5,10 m",
+            "N de Pavimentos: 3",
+        ),
+    ).json()
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/documents/{documento['id']}/extract",
+        headers=engineer_headers,
+    )
+
+    assert response.status_code == 200, response.text
+    corpo = response.json()
+    assert corpo["document_id"] == documento["id"]
+    assert corpo["status"] == "extraido_parcial"
+    assert (corpo["fields_found"], corpo["fields_expected"]) == (4, 6)
+    assert corpo["extracted_parameters"] == {
+        "lot_area": 512.40,
+        "built_area": 268.15,
+        "front_setback": 5.10,
+        "rear_setback": None,
+        "permeability_rate": None,
+        "floors": 3,
+    }
+    # Cada campo ausente é dito, e cada valor cita o trecho de onde veio.
+    assert any("Recuo dos Fundos" in aviso for aviso in corpo["warnings"])
+    assert any("Area do Terreno: 512,40" in item for item in corpo["evidence"])

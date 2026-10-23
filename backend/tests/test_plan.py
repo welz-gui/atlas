@@ -59,3 +59,43 @@ def test_list_project_eap_different_tenant(client, db_session, project):
 
     response = client.get(f"/api/v1/projects/{project['id']}/eap", headers=headers)
     assert response.status_code == 404
+
+
+def test_lista_de_tarefas_vem_da_mais_recente_para_a_mais_antiga(
+    client, engineer_headers, db_session, org, project, engineer
+):
+    from datetime import datetime, timedelta
+
+    from app.models.domain import TaskItem
+
+    caminho = f"/api/v1/projects/{project['id']}/tasks"
+    assert client.get(caminho, headers=engineer_headers).json() == []
+
+    agora = datetime.utcnow()
+    for titulo, idade in (("Antiga", 2), ("Recente", 1)):
+        db_session.add(
+            TaskItem(
+                organization_id=org.id,
+                project_id=project["id"],
+                title=titulo,
+                created_by_id=engineer.id,
+                created_at=agora - timedelta(days=idade),
+            )
+        )
+    db_session.commit()
+
+    titulos = [t["title"] for t in client.get(caminho, headers=engineer_headers).json()]
+    assert titulos == ["Recente", "Antiga"]
+
+
+def test_tarefas_de_projeto_inexistente_ou_de_outro_tenant_respondem_404(
+    client, db_session, engineer_headers, project
+):
+    from tests.conftest import auth_headers, make_org, make_user
+
+    intruso = make_user(db_session, make_org(db_session, "Outra Construtora"), email="intruso-tarefas@atlas-qa.com")
+
+    assert client.get("/api/v1/projects/nao-existe/tasks", headers=engineer_headers).status_code == 404
+    assert client.get(
+        f"/api/v1/projects/{project['id']}/tasks", headers=auth_headers(client, intruso.email)
+    ).status_code == 404
