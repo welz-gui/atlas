@@ -23,62 +23,77 @@ def import_seed_catalog(
     summary = {"created": 0, "updated": 0, "skipped_validated": 0}
 
     for catalog in RegulatoryCatalog.load_seed_files():
-        jurisdiction = catalog["jurisdiction"]
-        catalog_version = catalog["catalog_version"]
-
-        rule_keys = [raw["rule_id"] for raw in catalog["rules"]]
-        existing_rules_query = (
-            db.query(RegulatoryRule)
-            .filter(
-                RegulatoryRule.jurisdiction == jurisdiction,
-                RegulatoryRule.rule_key.in_(rule_keys),
-            )
-            .all()
-        )
-        existing_rules = {r.rule_key: r for r in existing_rules_query}
-
-        for raw in catalog["rules"]:
-            rule_key = raw["rule_id"]
-            existing = existing_rules.get(rule_key)
-
-            if (
-                existing
-                and existing.state == RuleState.VIGENTE
-                and not overwrite_validated
-            ):
-                summary["skipped_validated"] += 1
-                continue
-
-            source = raw.get("source") or {}
-            values = dict(
-                jurisdiction=jurisdiction,
-                rule_key=rule_key,
-                title=raw.get("title", rule_key),
-                state=raw["state"],
-                severity=raw.get("severity", "bloqueio"),
-                applies_to=raw.get("applies_to") or {},
-                check=raw.get("check"),
-                requires_manual_review=bool(raw.get("requires_manual_review", False)),
-                manual_review_reason=raw.get("manual_review_reason"),
-                evidence_required=raw.get("evidence_required") or [],
-                source_document_label=source.get("document"),
-                source_article=source.get("article"),
-                effective_from=_as_text(raw.get("effective_from")),
-                effective_until=_as_text(raw.get("effective_until")),
-                notes=raw.get("notes"),
-                catalog_version=catalog_version,
-            )
-
-            if existing:
-                for key, value in values.items():
-                    setattr(existing, key, value)
-                summary["updated"] += 1
-            else:
-                db.add(RegulatoryRule(**values))
-                summary["created"] += 1
+        _sync_catalog(db, catalog, overwrite_validated, summary)
 
     db.commit()
     return summary
+
+
+def _sync_catalog(
+    db: Session, catalog: dict, overwrite_validated: bool, summary: Dict[str, int]
+) -> None:
+    jurisdiction = catalog["jurisdiction"]
+    catalog_version = catalog["catalog_version"]
+    rules = catalog.get("rules", [])
+
+    if not rules:
+        return
+
+    rule_keys = [raw["rule_id"] for raw in rules]
+    existing_rules_query = (
+        db.query(RegulatoryRule)
+        .filter(
+            RegulatoryRule.jurisdiction == jurisdiction,
+            RegulatoryRule.rule_key.in_(rule_keys),
+        )
+        .all()
+    )
+    existing_rules = {r.rule_key: r for r in existing_rules_query}
+
+    for raw in rules:
+        rule_key = raw["rule_id"]
+        existing = existing_rules.get(rule_key)
+
+        if (
+            existing
+            and existing.state == RuleState.VIGENTE
+            and not overwrite_validated
+        ):
+            summary["skipped_validated"] += 1
+            continue
+
+        values = _parse_rule_values(raw, jurisdiction, catalog_version)
+
+        if existing:
+            for key, value in values.items():
+                setattr(existing, key, value)
+            summary["updated"] += 1
+        else:
+            db.add(RegulatoryRule(**values))
+            summary["created"] += 1
+
+
+def _parse_rule_values(raw: dict, jurisdiction: str, catalog_version: str) -> dict:
+    rule_key = raw["rule_id"]
+    source = raw.get("source") or {}
+    return dict(
+        jurisdiction=jurisdiction,
+        rule_key=rule_key,
+        title=raw.get("title", rule_key),
+        state=raw["state"],
+        severity=raw.get("severity", "bloqueio"),
+        applies_to=raw.get("applies_to") or {},
+        check=raw.get("check"),
+        requires_manual_review=bool(raw.get("requires_manual_review", False)),
+        manual_review_reason=raw.get("manual_review_reason"),
+        evidence_required=raw.get("evidence_required") or [],
+        source_document_label=source.get("document"),
+        source_article=source.get("article"),
+        effective_from=_as_text(raw.get("effective_from")),
+        effective_until=_as_text(raw.get("effective_until")),
+        notes=raw.get("notes"),
+        catalog_version=catalog_version,
+    )
 
 
 def _as_text(value) -> str | None:
