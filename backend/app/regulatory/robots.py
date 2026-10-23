@@ -96,12 +96,7 @@ class RobotsPolicy:
         return max(self.crawl_delay, MIN_REQUEST_INTERVAL)
 
 
-def parse_robots(texto: str, user_agent: str = USER_AGENT) -> dict:
-    """Extrai as diretivas do grupo aplicável.
-
-    Grupo nomeado para este agente prevalece sobre `*`, e só um dos dois é
-    aplicado — acumular os dois inventaria uma regra que o arquivo não expressa.
-    """
+def _parse_groups(texto: str) -> dict[str, dict]:
     grupos: dict[str, dict] = {}
     atuais: list[str] = []
     agente_esperando = False
@@ -144,14 +139,25 @@ def parse_robots(texto: str, user_agent: str = USER_AGENT) -> dict:
                 except ValueError:
                     logger.warning("Falha ao ler crawl-delay: %r", valor)
 
+    return grupos
+
+
+def _select_group(grupos: dict[str, dict], user_agent: str) -> dict | None:
     agente = user_agent.lower()
-    escolhido = None
     for nome in grupos:
         if nome != "*" and nome in agente:
-            escolhido = grupos[nome]
-            break
-    if escolhido is None:
-        escolhido = grupos.get("*")
+            return grupos[nome]
+    return grupos.get("*")
+
+
+def parse_robots(texto: str, user_agent: str = USER_AGENT) -> dict:
+    """Extrai as diretivas do grupo aplicável.
+
+    Grupo nomeado para este agente prevalece sobre `*`, e só um dos dois é
+    aplicado — acumular os dois inventaria uma regra que o arquivo não expressa.
+    """
+    grupos = _parse_groups(texto)
+    escolhido = _select_group(grupos, user_agent)
 
     if escolhido is None:
         return {"allow": (), "disallow": (), "delay": None}
