@@ -274,3 +274,70 @@ def test_gestao_le_metricas_da_propria_organizacao(client, db_session, papel):
 
     assert response.status_code == 200
     assert response.json()["organization_id"] == org.id
+
+def _interacao(org, **campos):
+    from app.models.domain import AIInteraction
+
+    base = dict(
+        organization_id=org.id,
+        provider="fake",
+        prompt="uma pergunta longa " * 50,
+        response_text="uma resposta longa " * 100,
+        request_hash="h" * 64,
+    )
+    return AIInteraction(**{**base, **campos})
+
+
+def test_metricas_de_ia_somam_so_o_que_o_provedor_informou(client, db_session, org, validator_headers):
+    db_session.add_all([
+        _interacao(org, input_tokens=100, output_tokens=40, grounded=True),
+        _interacao(org, input_tokens=60, output_tokens=None, grounded=True, served_from_cache=True),
+        _interacao(org, grounded=False, error="falhou"),  # sem token nenhum
+        _interacao(org, grounded=True),
+    ])
+    db_session.commit()
+
+    ia = _metrics(client, validator_headers)["ai"]
+
+    assert ia["interactions"] == 4
+    assert ia["grounded_percent"] == 75.0
+    assert ia["served_from_cache_percent"] == 25.0
+    assert ia["failed"] == 1
+    # 160 de entrada e 40 de saída; a chamada sem token não entra na soma.
+    assert (ia["input_tokens"], ia["output_tokens"]) == (160, 40)
+
+
+def test_metricas_de_ia_nao_carregam_o_texto_das_conversas(client, db_session, org, validator_headers):
+    """Somar token não precisa da pergunta nem da resposta, que são o que mais pesa na tabela."""
+    from sqlalchemy import event
+
+    db_session.add(_interacao(org, input_tokens=1, output_tokens=1))
+    db_session.commit()
+
+    selects = []
+    engine = db_session.get_bind()
+
+    def capturar(conn, cursor, statement, *args):
+        if "FROM ai_interactions" in statement and statement.lstrip().upper().startswith("SELECT"):
+            selects.append(statement.split("FROM ai_interactions")[0])
+
+    event.listen(engine, "before_cursor_execute", capturar)
+    try:
+        assert _metrics(client, validator_headers)["ai"]["interactions"] == 1
+    finally:
+        event.remove(engine, "before_cursor_execute", capturar)
+
+    assert selects, "a consulta de interações não foi emitida"
+    for colunas in selects:
+        for texto in ("prompt", "response_text", "response_json"):
+            assert texto not in colunas, f"{texto} foi lido só para somar tokens"
+
+def test_sem_nenhum_token_informado_a_soma_e_ausente_e_nao_zero(client, db_session, org, validator_headers):
+    """Nenhum provedor informou token: não há consumo medido, e zero seria afirmar que foi nulo."""
+    db_session.add_all([_interacao(org, grounded=True), _interacao(org, error="falhou")])
+    db_session.commit()
+
+    ia = _metrics(client, validator_headers)["ai"]
+
+    assert ia["interactions"] == 2
+    assert ia["input_tokens"] is None and ia["output_tokens"] is None
