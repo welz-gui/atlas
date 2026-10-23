@@ -21,6 +21,7 @@ def import_seed_catalog(
 ) -> Dict[str, int]:
     """Sincroniza os YAML de semente com a tabela `regulatory_rules`."""
     summary = {"created": 0, "updated": 0, "skipped_validated": 0}
+    new_rules = []
 
     for catalog in RegulatoryCatalog.load_seed_files():
         jurisdiction = catalog["jurisdiction"]
@@ -74,8 +75,11 @@ def import_seed_catalog(
                     setattr(existing, key, value)
                 summary["updated"] += 1
             else:
-                db.add(RegulatoryRule(**values))
+                new_rules.append(RegulatoryRule(**values))
                 summary["created"] += 1
+
+    if new_rules:
+        db.add_all(new_rules)
 
     db.commit()
     return summary
