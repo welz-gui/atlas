@@ -434,3 +434,43 @@ def test_laudo_reemitido_de_uma_analise_antiga_e_so_do_proprio_projeto(
         )
         assert recusado.status_code == 404, run_id
         assert recusado.json()["detail"] == "Análise não encontrada."
+
+def test_list_analysis_runs(client, engineer_headers, seeded_catalog, db_session):
+    from tests.conftest import auth_headers, make_org, make_user
+    from app.models.domain import UserRole
+
+    projeto = _criar_projeto(client, engineer_headers, 'Teste List Analysis Runs', front_setback=3.00)
+
+    # Check that a run was generated upon creation
+    runs = client.get(
+        f'/api/v1/projects/{projeto["id"]}/analysis-runs', headers=engineer_headers
+    )
+    assert runs.status_code == 200
+    data = runs.json()
+    assert len(data) == 1
+    assert data[0]['project_id'] == projeto['id']
+
+    # Create another version which triggers another run
+    client.post(
+        f'/api/v1/projects/{projeto["id"]}/versions',
+        headers=engineer_headers,
+        json={'front_setback': 4.50},
+    )
+
+    runs = client.get(
+        f'/api/v1/projects/{projeto["id"]}/analysis-runs', headers=engineer_headers
+    )
+    assert runs.status_code == 200
+    data = runs.json()
+    assert len(data) == 2
+    assert data[0]['project_version_number'] == 2
+    assert data[1]['project_version_number'] == 1
+
+    # Unauthorized / 404 test
+    intruso = make_user(
+        db_session, make_org(db_session, 'Outra Construtora list runs'), UserRole.OWNER, 'intruso-list@atlas-qa.com'
+    )
+    runs_intruder = client.get(
+        f'/api/v1/projects/{projeto["id"]}/analysis-runs', headers=auth_headers(client, intruso.email)
+    )
+    assert runs_intruder.status_code == 404
