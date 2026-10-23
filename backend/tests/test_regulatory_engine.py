@@ -434,3 +434,25 @@ def test_laudo_reemitido_de_uma_analise_antiga_e_so_do_proprio_projeto(
         )
         assert recusado.status_code == 404, run_id
         assert recusado.json()["detail"] == "Análise não encontrada."
+def test_get_analysis_run(client, engineer_headers, seeded_catalog):
+    projeto = _criar_projeto(client, engineer_headers, "Analysis Run By ID")
+    runs = client.get(
+        f"/api/v1/projects/{projeto['id']}/analysis-runs", headers=engineer_headers
+    ).json()
+    assert len(runs) > 0
+    run_id = runs[0]["id"]
+
+    response = client.get(
+        f"/api/v1/analysis-runs/{run_id}", headers=engineer_headers
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == run_id
+    assert data["project_id"] == projeto["id"]
+
+def test_get_analysis_run_not_found(client, engineer_headers):
+    response = client.get(
+        f"/api/v1/analysis-runs/{uuid.uuid4()}", headers=engineer_headers
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Análise não encontrada."
