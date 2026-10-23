@@ -409,3 +409,42 @@ def test_extracao_arquivo_ausente_no_storage_responde_410(
 
     assert response.status_code == 410
     assert "armazenamento" in response.json()["detail"].lower()
+
+# --- Retenção / Purge (§6.6) -------------------------------------------------
+
+def test_purge_expired_requires_permission(client, engineer_headers):
+    """Apenas org:manage pode acionar a retenção manual (§8.1)."""
+    response = client.post("/api/v1/storage/purge-expired", headers=engineer_headers)
+    assert response.status_code == 403
+
+
+def test_purge_expired_success(client, db_session, org):
+    """Execução padrão é dry_run=True."""
+    from app.models.domain import UserRole
+    from tests.conftest import auth_headers, make_user
+
+    owner = make_user(db_session, org, UserRole.OWNER, email="owner-purge@atlas-qa.com")
+    headers = auth_headers(client, owner.email)
+
+    response = client.post("/api/v1/storage/purge-expired", headers=headers)
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["dry_run"] is True
+    assert "examined" in data
+    assert "purged" in data
+
+
+def test_purge_expired_dry_run_false(client, db_session, org):
+    """Com dry_run=false executa a retenção de fato."""
+    from app.models.domain import UserRole
+    from tests.conftest import auth_headers, make_user
+
+    owner = make_user(db_session, org, UserRole.OWNER, email="owner-purge2@atlas-qa.com")
+    headers = auth_headers(client, owner.email)
+
+    response = client.post("/api/v1/storage/purge-expired?dry_run=false", headers=headers)
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["dry_run"] is False
