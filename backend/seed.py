@@ -292,7 +292,7 @@ def _seed_documents_and_processes(db, org, engineer, project1, project2):
     project2.licensing_status = "notificado"
 
 
-def _seed_construction_management(db, org, engineer, project1):
+def _seed_eap_items(db, org, project1):
     eap_items = [
         EAPItem(
             organization_id=org.id,
@@ -330,7 +330,10 @@ def _seed_construction_management(db, org, engineer, project1):
     ]
     db.add_all(eap_items)
     db.flush()
+    return eap_items
 
+
+def _seed_task_items(db, org, engineer, project1, eap_items):
     db.add(
         TaskItem(
             organization_id=org.id,
@@ -345,6 +348,9 @@ def _seed_construction_management(db, org, engineer, project1):
             created_by_id=engineer.id,
         )
     )
+
+
+def _seed_daily_logs(db, org, engineer, project1):
     db.add_all(
         [
             DailyLog(
@@ -372,6 +378,12 @@ def _seed_construction_management(db, org, engineer, project1):
             ),
         ]
     )
+
+
+def _seed_construction_management(db, org, engineer, project1):
+    eap_items = _seed_eap_items(db, org, project1)
+    _seed_task_items(db, org, engineer, project1, eap_items)
+    _seed_daily_logs(db, org, engineer, project1)
     db.commit()
 
 
