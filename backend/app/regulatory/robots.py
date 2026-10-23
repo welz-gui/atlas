@@ -266,7 +266,7 @@ class RobotsGate:
             )
         return policy
 
-    def wait(self, url: str, policy: RobotsPolicy) -> None:
+    def wait(self, policy: RobotsPolicy) -> None:
         """Aguarda o que faltar do intervalo desde a última busca ao host.
 
         Nota de desempenho: esta função é intencionalmente síncrona. Ela

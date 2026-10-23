@@ -186,7 +186,7 @@ def test_primeira_busca_nao_espera():
         clock=lambda: next(relogio),
     )
     policy = gate.check("https://exemplo.gov.br/a")
-    gate.wait("https://exemplo.gov.br/a", policy)
+    gate.wait(policy)
 
     assert dormidas == []
 
@@ -200,8 +200,8 @@ def test_segunda_busca_ao_mesmo_host_respeita_o_intervalo():
         clock=lambda: next(tempos),
     )
     policy = gate.policy_for("https://exemplo.gov.br/a")
-    gate.wait("https://exemplo.gov.br/a", policy)
-    gate.wait("https://exemplo.gov.br/b", policy)
+    gate.wait(policy)
+    gate.wait(policy)
 
     # Piso de 2 s, 0,5 s decorrido → dorme 1,5 s.
     assert dormidas == [pytest.approx(1.5)]
