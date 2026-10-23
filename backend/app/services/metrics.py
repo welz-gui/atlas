@@ -187,7 +187,7 @@ def _precision_metrics(
 
 
 def _unverifiable_metrics(
-    latest_runs_by_project: dict[str, AnalysisRun]
+    latest_runs_by_project: dict[str, AnalysisRun],
 ) -> tuple[int, int]:
     """Sobre todas as análises mais recentes, não só as protocoladas: mede
     quanto do projeto o sistema não consegue avaliar por falta de dado.
@@ -254,9 +254,7 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
     confirmed, flagged_pairs_count = _precision_metrics(
         processes, requirements, latest_runs_by_project
     )
-    total_checks, unverifiable = _unverifiable_metrics(
-        latest_runs_by_project
-    )
+    total_checks, unverifiable = _unverifiable_metrics(latest_runs_by_project)
     rules, publishable, jurisdictions = _catalog_metrics(db, projects)
 
     return {
@@ -282,7 +280,10 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
 
 # --- IA (§11) ----------------------------------------------------------------
 
-def _calculate_token_metrics(interactions: list[AIInteraction], analyses: int, projects: int) -> dict[str, Any]:
+
+def _calculate_token_metrics(
+    interactions: Any, analyses: int, projects: int
+) -> dict[str, Any]:
     # Tokens são somados só onde o provedor os informou. Chamada servida do
     # cache não gasta token, e chamada sem provedor não tem token nenhum.
     with_tokens = [
@@ -313,7 +314,9 @@ def _calculate_token_metrics(interactions: list[AIInteraction], analyses: int, p
     }
 
 
-def _get_draft_counts(events: list[RuleValidationEvent], rules: list[RegulatoryRule]) -> tuple[int, int, int]:
+def _get_draft_counts(
+    events: list[RuleValidationEvent], rules: list[RegulatoryRule]
+) -> tuple[int, int, int]:
     # Um rascunho aceito é o que saiu de `rascunho_extraido_por_ia` para
     # `em_validacao`; um recusado é o que foi revogado direto.
     from_draft = [
@@ -328,7 +331,9 @@ def _get_draft_counts(events: list[RuleValidationEvent], rules: list[RegulatoryR
     return drafts_total, accepted, rejected
 
 
-def _calculate_draft_metrics(db: Session, projects_list: list[Project]) -> dict[str, Any]:
+def _calculate_draft_metrics(
+    db: Session, projects_list: list[Project]
+) -> dict[str, Any]:
     # -- Rascunhos de regra: aceitação e correção humana -------------------
     # O catálogo é **global por jurisdição**, não por organização (I4 — fonte
     # legal única). Logo estes números são recortados pelas jurisdições em que
@@ -357,7 +362,8 @@ def _calculate_draft_metrics(db: Session, projects_list: list[Project]) -> dict[
         db.query(RuleValidationEvent)
         .filter(RuleValidationEvent.rule_id.in_(rule_ids))
         .all()
-        if rule_ids else []
+        if rule_ids
+        else []
     )
 
     drafts_total, accepted, rejected = _get_draft_counts(events, rules)
@@ -372,7 +378,13 @@ def _calculate_draft_metrics(db: Session, projects_list: list[Project]) -> dict[
 
 def ai_metrics(db: Session, organization_id: str) -> dict[str, Any]:
     interactions = (
-        db.query(AIInteraction)
+        db.query(
+            AIInteraction.input_tokens,
+            AIInteraction.output_tokens,
+            AIInteraction.grounded,
+            AIInteraction.served_from_cache,
+            AIInteraction.error,
+        )
         .filter(AIInteraction.organization_id == organization_id)
         .all()
     )
