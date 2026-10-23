@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, Optional
 
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.models.domain import Project, ProjectVersion, ProjectVersionState, User
@@ -117,7 +118,13 @@ def derive_next_version(
     base: Dict[str, Any] = (
         {field: getattr(current, field) for field in VERSION_FIELDS} if current else {}
     )
-    base.update({k: v for k, v in updates.model_dump(exclude_unset=True).items() if k in VERSION_FIELDS})
+    base.update(
+        {
+            k: v
+            for k, v in updates.model_dump(exclude_unset=True).items()
+            if k in VERSION_FIELDS
+        }
+    )
     new_params = ProjectParameters.model_validate(base)
 
     resolved_state = config.state or (
@@ -153,9 +160,15 @@ def set_official_baseline(
             f"oficial. Estado atual: '{version.state}'."
         )
 
-    for other in project.versions:
-        if other.id != version.id and other.is_official_baseline:
-            other.is_official_baseline = False
+    db.execute(
+        update(ProjectVersion)
+        .where(
+            ProjectVersion.project_id == project.id,
+            ProjectVersion.id != version.id,
+            ProjectVersion.is_official_baseline.is_(True),
+        )
+        .values(is_official_baseline=False)
+    )
 
     version.is_official_baseline = True
     version.baseline_marked_at = datetime.utcnow()
