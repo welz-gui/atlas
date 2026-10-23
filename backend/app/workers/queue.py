@@ -30,9 +30,9 @@ import socket
 import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from functools import lru_cache
-from typing import Any, Dict, Optional
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -60,7 +60,7 @@ class QueueBackend(ABC):
         """Avisa que há trabalho a fazer."""
 
     @abstractmethod
-    def consume(self, queue: str = "default", timeout: int = 5) -> Optional[str]:
+    def consume(self, queue: str = "default", timeout: int = 5) -> str | None:
         """Bloqueia até haver trabalho, ou devolve None ao esgotar o tempo."""
 
     @property
@@ -84,7 +84,7 @@ class InlineQueue(QueueBackend):
     def publish(self, job_id: str, queue: str = "default") -> None:
         return None
 
-    def consume(self, queue: str = "default", timeout: int = 5) -> Optional[str]:
+    def consume(self, queue: str = "default", timeout: int = 5) -> str | None:
         return None
 
     @property
@@ -106,7 +106,7 @@ class RedisQueue(QueueBackend):
 
     name = "redis"
 
-    def __init__(self, url: Optional[str] = None, client=None):
+    def __init__(self, url: str | None = None, client=None):
         self.url = url or settings.REDIS_URL
         if not self.url:
             raise RuntimeError("QUEUE_BACKEND=redis exige REDIS_URL configurado.")
@@ -116,7 +116,7 @@ class RedisQueue(QueueBackend):
     def client(self):
         if self._client is None:
             try:
-                import redis  # noqa: PLC0415 — dependência opcional
+                import redis
             except ImportError as exc:  # pragma: no cover - depende do ambiente
                 raise RuntimeError(
                     "QUEUE_BACKEND=redis exige o pacote redis instalado."
@@ -133,7 +133,7 @@ class RedisQueue(QueueBackend):
     def publish(self, job_id: str, queue: str = "default") -> None:
         self.client.lpush(self._key(queue), job_id)
 
-    def consume(self, queue: str = "default", timeout: int = 5) -> Optional[str]:
+    def consume(self, queue: str = "default", timeout: int = 5) -> str | None:
         return self.client.blmove(
             self._key(queue), self._processing_key(queue), timeout, "RIGHT", "LEFT"
         )
@@ -168,12 +168,12 @@ def reset_queue_cache() -> None:
 
 @dataclass
 class JobConfig:
-    payload: Optional[Dict[str, Any]] = field(default_factory=dict)
-    user: Optional[User] = None
-    organization_id: Optional[str] = None
-    project_id: Optional[str] = None
+    payload: dict[str, Any] | None = field(default_factory=dict)
+    user: User | None = None
+    organization_id: str | None = None
+    project_id: str | None = None
     queue: str = "default"
-    backend: Optional[QueueBackend] = None
+    backend: QueueBackend | None = None
 
 
 # =============================================================================
@@ -183,7 +183,7 @@ class JobConfig:
 def enqueue(
     db: Session,
     job_type: str,
-    config: Optional[JobConfig] = None,
+    config: JobConfig | None = None,
 ) -> JobRecord:
     """Cria o registro do trabalho e o entrega — ao broker ou a si mesmo.
 
@@ -232,6 +232,39 @@ def enqueue(
     return record
 
 
+def _mark_job_failed(db: Session, record: JobRecord, error_msg: str) -> JobRecord:
+    record.status = JobStatus.FALHOU
+    record.error = error_msg
+    record.finished_at = datetime.now(UTC)
+    db.commit()
+    return record
+
+
+def _handle_job_exception(db: Session, job_id: str, exc: Exception) -> JobRecord:
+    db.rollback()
+    record = db.query(JobRecord).filter(JobRecord.id == job_id).first()
+    record.error = f"{type(exc).__name__}: {exc}"
+    record.finished_at = datetime.now(UTC)
+    # Esgotadas as tentativas, o trabalho falha de vez. Antes disso volta
+    # para a fila — mas quem republica é o worker, que sabe se há broker.
+    record.status = (
+        JobStatus.FALHOU
+        if record.attempts >= record.max_attempts
+        else JobStatus.ENFILEIRADO
+    )
+    db.commit()
+    logger.warning(
+        "Trabalho %s (%s) falhou na tentativa %d/%d: %s",
+        record.id,
+        record.job_type,
+        record.attempts,
+        record.max_attempts,
+        exc,
+    )
+    logger.debug(traceback.format_exc())
+    return record
+
+
 def run_job(db: Session, job_id: str) -> JobRecord:
     """Executa um trabalho e registra o desfecho, qualquer que seja ele.
 
@@ -248,14 +281,10 @@ def run_job(db: Session, job_id: str) -> JobRecord:
 
     handler = HANDLERS.get(record.job_type)
     if handler is None:
-        record.status = JobStatus.FALHOU
-        record.error = f"Nenhum executor registrado para '{record.job_type}'."
-        record.finished_at = datetime.utcnow()
-        db.commit()
-        return record
+        return _mark_job_failed(db, record, f"Nenhum executor registrado para '{record.job_type}'.")
 
     record.status = JobStatus.EXECUTANDO
-    record.started_at = datetime.utcnow()
+    record.started_at = datetime.now(UTC)
     record.attempts += 1
     record.worker_id = worker_identity()
     db.commit()
@@ -272,32 +301,11 @@ def run_job(db: Session, job_id: str) -> JobRecord:
         with organization_scope(record.organization_id):
             result = handler(db, record)
     except Exception as exc:  # noqa: BLE001 — a falha precisa virar registro
-        db.rollback()
-        record = db.query(JobRecord).filter(JobRecord.id == job_id).first()
-        record.error = f"{type(exc).__name__}: {exc}"
-        record.finished_at = datetime.utcnow()
-        # Esgotadas as tentativas, o trabalho falha de vez. Antes disso volta
-        # para a fila — mas quem republica é o worker, que sabe se há broker.
-        record.status = (
-            JobStatus.FALHOU
-            if record.attempts >= record.max_attempts
-            else JobStatus.ENFILEIRADO
-        )
-        db.commit()
-        logger.warning(
-            "Trabalho %s (%s) falhou na tentativa %d/%d: %s",
-            record.id,
-            record.job_type,
-            record.attempts,
-            record.max_attempts,
-            exc,
-        )
-        logger.debug(traceback.format_exc())
-        return record
+        return _handle_job_exception(db, job_id, exc)
 
     record.status = JobStatus.CONCLUIDO
     record.result = result if isinstance(result, dict) else {"value": result}
-    record.finished_at = datetime.utcnow()
+    record.finished_at = datetime.now(UTC)
     db.commit()
     db.refresh(record)
     return record
