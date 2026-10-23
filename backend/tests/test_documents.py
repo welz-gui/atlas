@@ -409,3 +409,79 @@ def test_extracao_arquivo_ausente_no_storage_responde_410(
 
     assert response.status_code == 410
     assert "armazenamento" in response.json()["detail"].lower()
+
+def test_extracao_sucesso_com_valores(
+    client, engineer_headers, project, upload_dir, monkeypatch
+):
+    from app.services.pdf_parser import PDFPlanParser
+
+    documento = _upload(client, engineer_headers, project["id"], "planta.pdf", b"qualquer").json()
+
+    def mock_parse_file(file_bytes, filename):
+        return {
+            "status": "extraido",
+            "fields_found": 6,
+            "fields_expected": 6,
+            "confidence_score": 100.0,
+            "lot_area": 450.0,
+            "built_area": 250.0,
+            "front_setback": 5.0,
+            "rear_setback": 4.0,
+            "permeability_rate": 20.0,
+            "floors": 2,
+            "evidence": ["Evidencia 1"],
+            "warnings": []
+        }
+
+    monkeypatch.setattr("app.api.v1.endpoints.documents.PDFPlanParser.parse_file", mock_parse_file)
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/documents/{documento['id']}/extract",
+        headers=engineer_headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "extraido"
+    assert data["fields_found"] == 6
+    assert data["extracted_parameters"]["lot_area"] == 450.0
+    assert data["extracted_parameters"]["floors"] == 2
+    assert data["evidence"] == ["Evidencia 1"]
+
+def test_extracao_parcial_com_avisos(
+    client, engineer_headers, project, upload_dir, monkeypatch
+):
+    from app.services.pdf_parser import PDFPlanParser
+
+    documento = _upload(client, engineer_headers, project["id"], "planta.pdf", b"qualquer").json()
+
+    def mock_parse_file(file_bytes, filename):
+        return {
+            "status": "extraido_parcial",
+            "fields_found": 3,
+            "fields_expected": 6,
+            "confidence_score": 50.0,
+            "lot_area": 450.0,
+            "built_area": 250.0,
+            "front_setback": 5.0,
+            "rear_setback": None,
+            "permeability_rate": None,
+            "floors": None,
+            "evidence": ["Evidencia parcial"],
+            "warnings": ["Não localizados: Recuo dos Fundos, Taxa de Permeabilidade, Nº de Pavimentos"]
+        }
+
+    monkeypatch.setattr("app.api.v1.endpoints.documents.PDFPlanParser.parse_file", mock_parse_file)
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/documents/{documento['id']}/extract",
+        headers=engineer_headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "extraido_parcial"
+    assert data["fields_found"] == 3
+    assert data["extracted_parameters"]["lot_area"] == 450.0
+    assert data["extracted_parameters"]["floors"] is None
+    assert "Não localizados" in data["warnings"][0]
