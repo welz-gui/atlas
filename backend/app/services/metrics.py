@@ -395,7 +395,10 @@ def ai_metrics(db: Session, organization_id: str) -> dict[str, Any]:
         .count()
     )
     projects_list = (
-        db.query(Project).filter(Project.organization_id == organization_id).all()
+        db.query(Project)
+        .with_entities(Project.city_ibge)
+        .filter(Project.organization_id == organization_id)
+        .all()
     )
 
     metrics = {
