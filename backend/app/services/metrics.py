@@ -282,7 +282,7 @@ def approval_metrics(db: Session, organization_id: str) -> dict[str, Any]:
 
 # --- IA (§11) ----------------------------------------------------------------
 
-def _calculate_token_metrics(interactions: list[AIInteraction], analyses: int, projects: int) -> dict[str, Any]:
+def _calculate_token_metrics(interactions: Any, analyses: int, projects: int) -> dict[str, Any]:
     # Tokens são somados só onde o provedor os informou. Chamada servida do
     # cache não gasta token, e chamada sem provedor não tem token nenhum.
     with_tokens = [
@@ -371,8 +371,16 @@ def _calculate_draft_metrics(db: Session, projects_list: list[Project]) -> dict[
 
 
 def ai_metrics(db: Session, organization_id: str) -> dict[str, Any]:
+    # Só as colunas que as contas usam: a pergunta e a resposta são o que mais
+    # pesa na tabela e nada aqui as lê.
     interactions = (
-        db.query(AIInteraction)
+        db.query(
+            AIInteraction.input_tokens,
+            AIInteraction.output_tokens,
+            AIInteraction.grounded,
+            AIInteraction.served_from_cache,
+            AIInteraction.error,
+        )
         .filter(AIInteraction.organization_id == organization_id)
         .all()
     )
