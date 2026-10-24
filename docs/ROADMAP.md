@@ -4,14 +4,14 @@ Documento vivo. Consolida o **roadmap estratégico** do plano (§9 e §10 de
 [`PLANO_DE_IMPLEMENTACAO_v2.md`](PLANO_DE_IMPLEMENTACAO_v2.md)) com o **estado
 real do código** e o **caminho de execução** de cada estágio.
 
-- Última atualização: **2026-10-17**
-- Base avaliada: `master` em `f6e9341`, espelhada em
+- Última atualização: **2026-10-23**
+- Base avaliada: `master` em `78f7236`, espelhada em
   [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
   estágios foi levantado em `7dc50d2` e continua valendo, com uma exceção
   registrada abaixo: o **Estágio 6 deixou de ser "nada construído"**.
 - **A Fase D está encerrada, exceto pelo D3** — que nunca foi de engenharia.
   Ver o registro adiante.
-- Suíte: **596 casos de backend** (eram 199 em `7dc50d2`) e **83 de
+- Suíte: **605 casos de backend** (eram 199 em `7dc50d2`) e **83 de
   frontend** (8 arquivos, incluindo componentes — `ErrorBanner`, `StatusChip`,
   `EmptyState`, `OfflineBar`, `AppShell`, `Navbar` — e a fila offline).
   Mais 13 de integração e 6 de RLS, que só rodam na CI porque exigem
@@ -223,7 +223,7 @@ delas falhar, pare e conserte antes de continuar a construir.
 
 | Worktree | Branch | PR | Situação |
 |---|---|---|---|
-| `worktrees/roadmap-update-11` | `docs/atualiza-roadmap-decima-primeira-leva` | — | 🟨 A frente que trouxe esta atualização. |
+| `worktrees/roadmap-update-12` | `docs/atualiza-roadmap-decima-segunda-leva` | — | 🟨 A frente que trouxe esta atualização. |
 
 Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
@@ -241,7 +241,7 @@ Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
 ## Estado atual em uma página
 
-**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 596 testes; RLS ativa, MFA
+**Backend** (FastAPI + SQLAlchemy 2.0 + Alembic, 605 testes; RLS ativa, MFA
 por TOTP, log em JSON com correlação e sondas de vida e prontidão):
 
 ```
@@ -1346,10 +1346,10 @@ um sem escolher nenhum. Suíte: 353 → 367.
 si. Depende de decisão e de conta, não de código — e, como o D3, não é
 engenharia que o trava.
 
-### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-10-17)
+### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-10-23)
 
-Um agente externo (Jules, do Google) abriu onze levas de PRs contra o
-repositório — 30, 42, 24, 7, 38, 23, 12, 2, 18, 1 e 30 — do tipo "code health": remoção de import morto,
+Um agente externo (Jules, do Google) abriu doze levas de PRs contra o
+repositório — 30, 42, 24, 7, 38, 23, 12, 2, 18, 1, 30 e 22 — do tipo "code health": remoção de import morto,
 refator de função complexa, teste de caminho de erro, correção de N+1, e
 algumas de segurança. Nenhuma foi mesclada às cegas por CI verde; cada uma foi
 lida contra o código real antes de decidir. O que isso revelou vale mais do
@@ -1497,6 +1497,31 @@ que qualquer regra individual corrigida:
   buscaria páginas de órgãos públicos. Os testes existentes trocam o handler por
   isso; nas PRs o HTTP 200 mascarava a tentativa (o job falhava, o endpoint
   respondia 200 e o teste só olhava `job_type`). Não entraram;
+
+- **o relatório do gate que inventava recall.** A #355 só reorganizava
+  `stage0_report.py`; ao lê-la, vi que o script calculava recall e falsos
+  negativos por conta própria. Sem exigência alguma, imprimia **"Recall
+  100,0%"** e **0 falsos negativos críticos** — o portão do Estágio 0 passaria
+  sem dado nenhum, o oposto do contrato do §11 (sem base amostral, o número é
+  ausente). E contava como falso negativo toda exigência sem `was_predicted`,
+  inclusive a que nenhuma regra poderia prever. Rodando o script sobre a
+  demonstração do próprio seed: `master` dizia **66,7% e 1 falso negativo**;
+  `/metrics` dizia **100% e 0**. Corrigido em #365: o relatório lê
+  `approval_metrics` e escreve "n/d (sem base amostral)" quando não há número.
+  O script nunca teve teste, o que explica por que ninguém tinha visto;
+- **as métricas de IA nunca tinham visto uma interação.** `ai_metrics`
+  carregava a linha inteira de toda interação da organização — com `prompt`,
+  `response_text` e `response_json`, o que mais pesa na tabela — para contar
+  cinco campos (#359). E a suíte nunca criava uma interação: tokens,
+  fundamentadas, cache e falhas só eram exercidos com a tabela vazia. Em #364,
+  seleção só das cinco colunas, conferida pelo `SELECT` emitido (vermelho antes
+  da correção) e o cálculo sobre linhas de verdade. **Não medi o ganho em
+  tamanho de resposta**; o que o teste prova é *o que sai do banco*;
+- **teste de mock que passaria com o código quebrado.** A #354 trocava
+  `PDFPlanParser.parse_file` por um dicionário pronto e conferia que o endpoint
+  o devolvia. Em #363, o PDF é gerado de verdade (reportlab) e atravessa upload,
+  armazenamento, pypdf e parser; trocar o mapeamento de campos, devolver zero em
+  vez de ausente ou omitir a evidência derruba teste;
 
 **Padrões que se repetiram e mudaram como a revisão foi feita:**
 
@@ -1734,6 +1759,52 @@ que qualquer regra individual corrigida:
   mostrou que eu tinha deixado de rodar o arquivo certo. Mutação só vale com o
   baseline à vista;
 
+- **o que decidiu entre aceitar e recusar um refator.** Quatro entraram (#342,
+  #343, #347, #348); quinze saíram. Os aceitos extraem uma **função pura com um
+  nome que carrega sentido** (`_parse_groups`/`_select_group` em `parse_robots`,
+  três `_seed_*` com o corte do próprio domínio) ou removem código que não faz
+  nada (`not parts`, que `"".split("-")` nunca torna verdadeiro; um argumento
+  `url` não usado), e foram **verificados**: a #343 pelo estado das tabelas após
+  rodar os seeds (idêntico, incluindo os logs), a #347 por três mutações em
+  `_select_group`. Os recusados movem uma chamada de 12 linhas para uma função de
+  6 a 10 parâmetros usada uma vez (#341, #353, #362), embrulham a lista de
+  argumentos num objeto (#218/#221/#290/#297 e agora #353) ou criam camada
+  nova. "Diminuiu a função" não é critério; "o pedaço tem um nome que eu
+  procuraria" é;
+- **a escada de lixo na raiz.** Seis PRs levaram arquivos do agente para o
+  repositório: `benchmark_mfa.py` (mede uma *cópia* da função com um banco
+  falso que dorme 10 ms por commit), `fix_test.py` e `fix_tests.py` (reescrevem
+  o arquivo de teste por substituição de texto, um deles com comentários de
+  rascunho — "wait, actually..."), `plan.md` (o plano do agente), um
+  `backend/.gitignore` com `venv/` quando o ambiente é `.venv` e um
+  `backend/test_stage0_report.py` que importa `backend.stage0_report` (caminho
+  que não existe a partir de `backend/`) e não testa nada;
+- **o agente não relê o que acabou de ser mesclado.** As #350, #351 e #358
+  chegaram com testes que já estavam em `master` — mesclados na #336 e em
+  `test_storage.py` —, e duas com o contexto do diff mostrando as linhas da #336.
+  O custo de uma PR duplicada é a revisão inteira para descobrir que não há o
+  que fazer;
+- **a mesma alegação, outra PR.** A #346 repete a #317 ("mover `db.commit` para
+  fora do laço" em `consume_second_factor`, que já retornava na primeira
+  correspondência); a #345 "otimiza por bulk insert" com `add_all`, que é um laço
+  sobre `add` e deixa a unit of work agrupar os INSERTs como antes. Fechadas com
+  o argumento escrito, e a #346 com a referência à #317;
+- **`utcnow()` → `now(UTC)`, pela terceira vez.** #296, #360 e #361, sempre em
+  módulos isolados e sempre sobre colunas e defaults naive-UTC; o efeito em
+  Postgres depende do fuso da sessão e **continua não verificado**. A convenção
+  não está escrita em lugar nenhum, e é por isso que a proposta volta: ficou
+  em *Dívidas técnicas*;
+- **Black em metade do arquivo.** #349, #357, #359 e #362 misturam o que mudou
+  com reformatação de linhas sem relação, que esconde no diff o que de fato
+  mexe — em `provider.py` (que fala com o exterior), em `derive_next_version`,
+  na invariante I9;
+- **o mutante equivalente, duas vezes minhas.** Na #363, "tarefas sem filtro de
+  tenant" sobreviveu porque `get_project_or_404` já barra o outro tenant antes
+  (defesa em profundidade, não buraco de teste), e "troca a ordem das chaves
+  extraídas" sobreviveu porque a ordem de um dicionário não muda a igualdade.
+  Sobreviver não é prova de teste fraco: antes de escrever teste novo, vale
+  perguntar se a mutação muda o comportamento observável;
+
 Resultado: **21 PRs mescladas na primeira leva**; na segunda, **21 mescladas**
 (16 diretas + 5 reescritas) e **25 fechadas**; na terceira, **12 mescladas
 diretamente**, mais **7 refeitas em 4 PRs novas** (mesmo padrão de cachos na
@@ -1776,7 +1847,13 @@ PRs próprias fora da revisão de conteúdo (#337, o nome do laudo, e #338, o
 expurgo). Suíte: 367 → 441 → 452 → 453 → 469 → 534 → 551 → 554 → 561 → 596
 (backend), 15 → 21 → 39 → 40 → 65 → 75 → 81 → 83 (frontend, 4 arquivos até a
 quarta leva, 8 desde a quinta; da sexta à oitava nenhuma acrescentou teste de
-frontend, a nona acrescentou 10, a décima 6 e a décima primeira 2).
+frontend, a nona acrescentou 10, a décima 6, a décima primeira 2 e a décima
+segunda, nenhum; na décima segunda, **22 PRs**: **4 mescladas diretamente**
+(#342, #343, #347, #348), **3 absorvidas** em duas consolidações próprias (#363,
+com #344 e #354, e #364, com #359) e **15 fechadas** (#341, #345, #346, #349,
+#350, #351, #352, #353, #355, #356, #357, #358, #360, #361, #362) com o motivo
+técnico em cada uma. Mais uma PR própria, a do relatório do Estágio 0 (#365).
+Suíte do backend nesta leva: 596 → 605.
 
 **Pendência sem solução de código:** branches de PRs já mescladas ou fechadas
 continuam reaparecendo em `origin` depois de apagadas — inclusive branches de
@@ -1914,6 +1991,8 @@ vazia.
 | **Login sem limite de tentativas** | `POST /auth/login` não limita tentativas, nem por IP nem por conta; o código de MFA (6 dígitos) fica exposto à mesma força bruta. A tentativa do Jules (#298) não serve: contador em memória por processo, chave por IP (atrás de proxy, todos dividem o balde). Decidir a política (atraso progressivo × bloqueio, por conta × por IP) e onde guardar o estado (banco ou Redis) antes de implementar | `backend/app/api/v1/endpoints/auth.py` |
 | N+1 fora dos três endpoints medidos | Só a lista de protocolos, `prediction-accuracy` e o portal foram medidos e corrigidos (#299). Outras telas que serializam coleções não foram auditadas; `tests/test_protocol_queries.py` é o molde (conta SELECTs entre 2 e 6 filhos, sem fixar número) | `backend/app/api/v1/endpoints/` |
 | Testes que dependem de a ordem ser a de criação | As listas ordenadas por `created_at` (portal, histórico de análises) são testadas criando os itens em sequência; se dois forem criados no mesmo instante, a ordem esperada deixa de ser determinística. Não falhou até hoje; se falhar, ordenar também por `id` no endpoint e no teste | `backend/tests/test_portal.py`, `test_regulatory_engine.py` |
+| Convenção de datas não escrita (`utcnow()`) | O código usa `datetime.utcnow()` e colunas naive-UTC, mas a convenção não está em lugar nenhum — por isso o Jules propõe `now(UTC)` a cada leva (#296, #360, #361). Além disso, `utcnow()` está **obsoleto** no Python 3.12+ (a saída da suíte já mostra milhares de avisos, entre eles o de `utcnow()`). Migrar de uma vez, não módulo a módulo, e **verificar em Postgres** antes (o fuso da sessão pesa em comparação com coluna sem fuso) | `backend/app/` (todo) |
+| Restante do relatório do Estágio 0 fora de `approval_metrics` | Só o bloco de recall passou a ler as métricas oficiais (#365). "Regras Vigentes (Conferidas)" ainda conta `state == vigente`, não `is_publishable` (estado **e** validador); não verifiquei se a diferença é alcançável com dado real. O script segue sem teste de ponta a ponta (`SessionLocal` global) | `backend/stage0_report.py` |
 | **Sem provedor de hospedagem** | A imagem e a composição existem; o ambiente, não | `docker-compose.prod.yml` |
 | **Catálogo maior, validação parada** | O coletor aumenta a fila do D3 sem que ninguém a consuma | `regulatory/discovery.py` |
 | RLS não cobre `users` | Listagem de usuários tem só o filtro de aplicação; as tabelas com trabalho de cliente estão cobertas | `alembic/.../a4d7e91c5b20` |
