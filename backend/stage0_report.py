@@ -22,6 +22,24 @@ from app.models.domain import (
 )
 from collections import defaultdict
 from app.regulatory.catalog import RuleState
+from app.services.metrics import approval_metrics
+
+SEM_BASE = "n/d (sem base amostral)"
+
+
+def _valor(numero, sufixo=""):
+    """Ausência de base é dita como ausência — nunca vira 0 nem 100%."""
+    return SEM_BASE if numero is None else f"{numero}{sufixo}"
+
+
+def requirement_lines(approval):
+    """Linhas do bloco de recall, a partir de `approval_metrics`."""
+    return [
+        f"  * Exigências Reais Registradas:   {_valor(approval['requirements_total'])}",
+        f"  * Vinculadas a uma Regra:         {_valor(approval['requirements_linked_to_rules'])}",
+        f"  * Recall de Bloqueios/Exigências:  {_valor(approval['blocking_recall_percent'], '%')}",
+        f"  * Falsos Negativos Críticos:      {_valor(approval['critical_false_negatives'])}",
+    ]
 
 
 def generate_stage0_report():
@@ -46,11 +64,9 @@ def generate_stage0_report():
         proc_ids = [pr.id for pr in processes]
         reqs = db.query(ProtocolRequirement).filter(ProtocolRequirement.process_id.in_(proc_ids)).all() if proc_ids else []
 
-        total_reqs = len(reqs)
-        predicted_reqs = sum(1 for r in reqs if r.was_predicted)
-        unpredicted_reqs = total_reqs - predicted_reqs
-
-        recall = (predicted_reqs / total_reqs * 100.0) if total_reqs > 0 else 100.0
+        # O critério é o das métricas do §11 (`/metrics`): só entra a exigência
+        # vinculada a uma regra, e sem base amostral o número é ausente.
+        approval = approval_metrics(db, org.id)
 
         # Não verificáveis nos ValidationRecords
         val_records = db.query(ValidationRecord).filter(
@@ -76,10 +92,8 @@ def generate_stage0_report():
         print(f"  * Total de Regras no Catálogo:    {len(regras)}")
         print("-" * 70)
         print("MÉTRICAS DE ACURÁCIA PREDITIVA E RECALL (§11 DO PLANO)")
-        print(f"  * Exigências Reais Registradas:   {total_reqs}")
-        print(f"  * Exigências Previstas pelo Atlas: {predicted_reqs}")
-        print(f"  * Recall de Bloqueios/Exigências:  {recall:.1f}%")
-        print(f"  * Falsos Negativos Críticos:      {unpredicted_reqs}")
+        for line in requirement_lines(approval):
+            print(line)
         print("-" * 70)
         print("DISTRIBUIÇÃO DOS VEREDICTOS DE ANÁLISE")
         print(f"  * Verificações Conformes:          {conformes}")
