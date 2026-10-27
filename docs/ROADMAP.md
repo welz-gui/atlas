@@ -4,8 +4,8 @@ Documento vivo. Consolida o **roadmap estratégico** do plano (§9 e §10 de
 [`PLANO_DE_IMPLEMENTACAO_v2.md`](PLANO_DE_IMPLEMENTACAO_v2.md)) com o **estado
 real do código** e o **caminho de execução** de cada estágio.
 
-- Última atualização: **2026-10-23**
-- Base avaliada: `master` em `78f7236`, espelhada em
+- Última atualização: **2026-10-27**
+- Base avaliada: `master` em `9449d8c`, espelhada em
   [`welz-gui/atlas`](https://github.com/welz-gui/atlas). O diagnóstico dos
   estágios foi levantado em `7dc50d2` e continua valendo, com uma exceção
   registrada abaixo: o **Estágio 6 deixou de ser "nada construído"**.
@@ -223,7 +223,7 @@ delas falhar, pare e conserte antes de continuar a construir.
 
 | Worktree | Branch | PR | Situação |
 |---|---|---|---|
-| `worktrees/roadmap-update-12` | `docs/atualiza-roadmap-decima-segunda-leva` | — | 🟨 A frente que trouxe esta atualização. |
+| `worktrees/roadmap-update-13` | `docs/atualiza-roadmap-decima-terceira-leva` | — | 🟨 A frente que trouxe esta atualização. |
 
 Manter esta tabela atualizada é parte de abrir e de fechar uma frente.
 
@@ -1346,10 +1346,10 @@ um sem escolher nenhum. Suíte: 353 → 367.
 si. Depende de decisão e de conta, não de código — e, como o D3, não é
 engenharia que o trava.
 
-### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-10-23)
+### Revisão de PRs automáticas — o Jules (2026-08-21 a 2026-10-27)
 
-Um agente externo (Jules, do Google) abriu doze levas de PRs contra o
-repositório — 30, 42, 24, 7, 38, 23, 12, 2, 18, 1, 30 e 22 — do tipo "code health": remoção de import morto,
+Um agente externo (Jules, do Google) abriu treze levas de PRs contra o
+repositório — 30, 42, 24, 7, 38, 23, 12, 2, 18, 1, 30, 22 e 2 — do tipo "code health": remoção de import morto,
 refator de função complexa, teste de caminho de erro, correção de N+1, e
 algumas de segurança. Nenhuma foi mesclada às cegas por CI verde; cada uma foi
 lida contra o código real antes de decidir. O que isso revelou vale mais do
@@ -1853,7 +1853,16 @@ segunda, nenhum; na décima segunda, **22 PRs**: **4 mescladas diretamente**
 com #344 e #354, e #364, com #359) e **15 fechadas** (#341, #345, #346, #349,
 #350, #351, #352, #353, #355, #356, #357, #358, #360, #361, #362) com o motivo
 técnico em cada uma. Mais uma PR própria, a do relatório do Estágio 0 (#365).
-Suíte do backend nesta leva: 596 → 605.
+Suíte do backend nesta leva: 596 → 605; na décima terceira, **2 PRs**: a #367
+(`_seed_scenarios` do Estágio 0 dividido em `_get_demo_scenarios` e
+`_seed_single_scenario`, a sequência da #288) foi **mesclada**, depois de rodar
+`seed.py` e `stage0_concierge_seed.py` no `master` e na PR e comparar o estado de
+todas as tabelas e os logs — idênticos, sem teste novo, portanto a suíte segue
+em 605 —; a #368 (`with_entities(Project.city_ibge)` em `ai_metrics`) foi
+**fechada**: `Project` é uma linha estreita, ao contrário da `AIInteraction`
+cujo texto motivou a #364, a lista só serve para `len` e para o conjunto de
+`city_ibge`, e `projects_list` passaria a ser `Row` enquanto a função que a
+recebe continua anotada como `list[Project]`. Não houve achado novo.
 
 **Pendência sem solução de código:** branches de PRs já mescladas ou fechadas
 continuam reaparecendo em `origin` depois de apagadas — inclusive branches de
