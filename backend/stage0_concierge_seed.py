@@ -32,15 +32,11 @@ Uso:
 import os
 import secrets
 from datetime import date, timedelta
-from sqlalchemy import inspect
 
 from app.core.database import SessionLocal, engine
 from app.core.security import hash_password
-from app.schemas.domain import ProjectParameters
 from app.models.domain import (
     Organization,
-    User,
-    UserRole,
     Project,
     ProjectVersionState,
     ProtocolProcess,
@@ -48,12 +44,16 @@ from app.models.domain import (
     RegulatoryDocument,
     RegulatoryDocumentState,
     RegulatoryRule,
+    User,
+    UserRole,
 )
 from app.regulatory.catalog import CheckOutcome, RuleState
 from app.regulatory.importer import import_seed_catalog
+from app.schemas.domain import ProjectParameters
 from app.services import project_versions
 from app.services.project_versions import VersionConfig
-from app.services.regulatory_engine import RegulatoryEngine, EvaluationConfig
+from app.services.regulatory_engine import EvaluationConfig, RegulatoryEngine
+from sqlalchemy import inspect
 
 DEMO_PASSWORD = os.getenv("DEMO_PASSWORD", secrets.token_urlsafe(16))
 
@@ -149,44 +149,43 @@ def _check_catalog_state(db, validador):
         )
 
 
-def _seed_scenarios(db, org, analista):
-    print("4. Cadastrando 5 cenários de demonstração (Concierge Lajeado)...")
 
-    scenarios = [
+def _get_demo_scenarios():
+    return [
         {
             "name": "Concierge #1: Residencial Bela Vista",
             "desc": "Residencial unifamiliar de 2 pavimentos na Zona Z2 — Projeto 100% Conforme",
             "use_type": "residencial_unifamiliar",
-            "params": dict(
-                zone="Z2",
-                building_type="residencial_unifamiliar",
-                lot_area=450.0,
-                built_area=225.0,
-                floors=2,
-                front_setback=4.50,
-                side_setback=1.80,
-                rear_setback=3.50,
-                permeability_rate=20.0,
-                parking_spaces=2,
-            ),
+            "params": {
+                "zone": "Z2",
+                "building_type": "residencial_unifamiliar",
+                "lot_area": 450.0,
+                "built_area": 225.0,
+                "floors": 2,
+                "front_setback": 4.50,
+                "side_setback": 1.80,
+                "rear_setback": 3.50,
+                "permeability_rate": 20.0,
+                "parking_spaces": 2,
+            },
             "requirements": [],
         },
         {
             "name": "Concierge #2: Residencial Jardim Florestal",
             "desc": "Residencial unifamiliar com recuo frontal insuficiente (3.5m vs 4.0m)",
             "use_type": "residencial_unifamiliar",
-            "params": dict(
-                zone="Z2",
-                building_type="residencial_unifamiliar",
-                lot_area=380.0,
-                built_area=210.0,
-                floors=2,
-                front_setback=3.50,
-                side_setback=1.50,
-                rear_setback=3.20,
-                permeability_rate=18.0,
-                parking_spaces=1,
-            ),
+            "params": {
+                "zone": "Z2",
+                "building_type": "residencial_unifamiliar",
+                "lot_area": 380.0,
+                "built_area": 210.0,
+                "floors": 2,
+                "front_setback": 3.50,
+                "side_setback": 1.50,
+                "rear_setback": 3.20,
+                "permeability_rate": 18.0,
+                "parking_spaces": 1,
+            },
             "requirements": [
                 {
                     "seq": 1,
@@ -199,18 +198,18 @@ def _seed_scenarios(db, org, analista):
             "name": "Concierge #3: Residencial San José",
             "desc": "Residencial geminado com taxa de ocupação excedida (65% vs 60% max)",
             "use_type": "residencial_geminado",
-            "params": dict(
-                zone="Z2",
-                building_type="residencial_geminado",
-                lot_area=300.0,
-                built_area=195.0,
-                floors=2,
-                front_setback=4.00,
-                side_setback=1.50,
-                rear_setback=3.00,
-                permeability_rate=16.0,
-                parking_spaces=2,
-            ),
+            "params": {
+                "zone": "Z2",
+                "building_type": "residencial_geminado",
+                "lot_area": 300.0,
+                "built_area": 195.0,
+                "floors": 2,
+                "front_setback": 4.00,
+                "side_setback": 1.50,
+                "rear_setback": 3.00,
+                "permeability_rate": 16.0,
+                "parking_spaces": 2,
+            },
             "requirements": [
                 {
                     "seq": 1,
@@ -223,18 +222,18 @@ def _seed_scenarios(db, org, analista):
             "name": "Concierge #4: Residencial Montanha",
             "desc": "Projeto conforme nos parâmetros, mas notificado por documento complementar do órgão",
             "use_type": "residencial_unifamiliar",
-            "params": dict(
-                zone="Z2",
-                building_type="residencial_unifamiliar",
-                lot_area=500.0,
-                built_area=240.0,
-                floors=2,
-                front_setback=4.20,
-                side_setback=2.00,
-                rear_setback=4.00,
-                permeability_rate=25.0,
-                parking_spaces=2,
-            ),
+            "params": {
+                "zone": "Z2",
+                "building_type": "residencial_unifamiliar",
+                "lot_area": 500.0,
+                "built_area": 240.0,
+                "floors": 2,
+                "front_setback": 4.20,
+                "side_setback": 2.00,
+                "rear_setback": 4.00,
+                "permeability_rate": 25.0,
+                "parking_spaces": 2,
+            },
             "requirements": [
                 {
                     "seq": 1,
@@ -247,93 +246,104 @@ def _seed_scenarios(db, org, analista):
             "name": "Concierge #5: Terreno Alto do Parque",
             "desc": "Cadastro preliminar com dados incompletos — demonstra o estado 'não verificável'",
             "use_type": "residencial_unifamiliar",
-            "params": dict(
-                zone="Z2", building_type="residencial_unifamiliar", lot_area=400.0
-            ),
+            "params": {
+                "zone": "Z2", "building_type": "residencial_unifamiliar", "lot_area": 400.0
+            },
             "requirements": [],
         },
     ]
 
+
+def _seed_single_scenario(db, org, analista, index, sc):
+    proj = (
+        db.query(Project)
+        .filter_by(organization_id=org.id, name=sc["name"])
+        .first()
+    )
+    if not proj:
+        proj = Project(
+            organization_id=org.id,
+            name=sc["name"],
+            description=sc["desc"],
+            city_ibge="BR-RS-4311403",
+            city_name="Lajeado",
+            state="RS",
+            use_type=sc["use_type"],
+            created_by_id=analista.id,
+        )
+        db.add(proj)
+        db.flush()
+
+        # Versão inicial
+        project_versions.create_version(
+            db,
+            proj,
+            ProjectParameters(**sc["params"]),
+            config=VersionConfig(
+                user=analista,
+                change_reason=f"Cadastro de Pré-análise Concierge #{index}",
+                commit=False,
+            ),
+        )
+        db.flush()
+
+    # Executa a pré-análise pelo motor regulatório
+    db.refresh(proj)
+    run = RegulatoryEngine.evaluate_project(
+        db, proj, config=EvaluationConfig(trigger=f"concierge_v{index}", user=analista)
+    )
+
+    # Regras que o motor de fato apontou nesta análise. É daqui que sai
+    # `was_predicted` — afirmá-lo à mão faria o recall medir a nossa
+    # expectativa em vez do desempenho do motor.
+    apontadas = {v.rule_id for v in run.validations if v.status in APONTADO}
+
+    # Cadastra protocolo e exigências se houver
+    if sc["requirements"]:
+        proj.current_version.state = ProjectVersionState.PROTOCOLADA
+        process = (
+            db.query(ProtocolProcess).filter_by(project_id=proj.id).first()
+        )
+        if not process:
+            process = ProtocolProcess(
+                organization_id=org.id,
+                project_id=proj.id,
+                project_version_id=proj.current_version.id,
+                protocol_number=f"2026/PMU-0090{index}",
+                agency="Secretaria de Planejamento e Urbanismo — Lajeado/RS",
+                status="notificado",
+                submitted_at=str(date.today() - timedelta(days=10)),
+            )
+            db.add(process)
+            db.flush()
+
+            for req in sc["requirements"]:
+                db.add(
+                    ProtocolRequirement(
+                        organization_id=org.id,
+                        process_id=process.id,
+                        sequence=req["seq"],
+                        description=req["desc"],
+                        raised_at=str(date.today() - timedelta(days=3)),
+                        due_date=str(date.today() + timedelta(days=27)),
+                        linked_rule_key=req["rule"],
+                        was_predicted=bool(req["rule"])
+                        and req["rule"] in apontadas,
+                    )
+                )
+
+    return proj, run
+
+
+def _seed_scenarios(db, org, analista):
+    print("4. Cadastrando 5 cenários de demonstração (Concierge Lajeado)...")
+
+    scenarios = _get_demo_scenarios()
+
     created_projects = []
     created_runs = []
     for index, sc in enumerate(scenarios, start=1):
-        proj = (
-            db.query(Project)
-            .filter_by(organization_id=org.id, name=sc["name"])
-            .first()
-        )
-        if not proj:
-            proj = Project(
-                organization_id=org.id,
-                name=sc["name"],
-                description=sc["desc"],
-                city_ibge="BR-RS-4311403",
-                city_name="Lajeado",
-                state="RS",
-                use_type=sc["use_type"],
-                created_by_id=analista.id,
-            )
-            db.add(proj)
-            db.flush()
-
-            # Versão inicial
-            project_versions.create_version(
-                db,
-                proj,
-                ProjectParameters(**sc["params"]),
-                config=VersionConfig(
-                    user=analista,
-                    change_reason=f"Cadastro de Pré-análise Concierge #{index}",
-                    commit=False,
-                ),
-            )
-            db.flush()
-
-        # Executa a pré-análise pelo motor regulatório
-        db.refresh(proj)
-        run = RegulatoryEngine.evaluate_project(
-            db, proj, config=EvaluationConfig(trigger=f"concierge_v{index}", user=analista)
-        )
-
-        # Regras que o motor de fato apontou nesta análise. É daqui que sai
-        # `was_predicted` — afirmá-lo à mão faria o recall medir a nossa
-        # expectativa em vez do desempenho do motor.
-        apontadas = {v.rule_id for v in run.validations if v.status in APONTADO}
-
-        # Cadastra protocolo e exigências se houver
-        if sc["requirements"]:
-            proj.current_version.state = ProjectVersionState.PROTOCOLADA
-            process = (
-                db.query(ProtocolProcess).filter_by(project_id=proj.id).first()
-            )
-            if not process:
-                process = ProtocolProcess(
-                    organization_id=org.id,
-                    project_id=proj.id,
-                    project_version_id=proj.current_version.id,
-                    protocol_number=f"2026/PMU-0090{index}",
-                    agency="Secretaria de Planejamento e Urbanismo — Lajeado/RS",
-                    status="notificado",
-                    submitted_at=str(date.today() - timedelta(days=10)),
-                )
-                db.add(process)
-                db.flush()
-
-                for req in sc["requirements"]:
-                    db.add(
-                        ProtocolRequirement(
-                            organization_id=org.id,
-                            process_id=process.id,
-                            sequence=req["seq"],
-                            description=req["desc"],
-                            raised_at=str(date.today() - timedelta(days=3)),
-                            due_date=str(date.today() + timedelta(days=27)),
-                            linked_rule_key=req["rule"],
-                            was_predicted=bool(req["rule"])
-                            and req["rule"] in apontadas,
-                        )
-                    )
-
+        proj, run = _seed_single_scenario(db, org, analista, index, sc)
         created_projects.append(proj)
         created_runs.append(run)
 
